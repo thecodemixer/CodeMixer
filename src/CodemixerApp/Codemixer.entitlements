@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- App Sandbox is INTENTIONALLY DISABLED — we spawn arbitrary CLI agents
+         under a pty and read the user's workspace. -->
+    <key>com.apple.security.app-sandbox</key>
+    <false/>
+
+    <!-- We use posix_spawn from our own C shim; no JIT, no dyld inject. -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <false/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <false/>
+
+    <!-- Required by NSSpeechRecognizer. -->
+    <key>com.apple.security.device.microphone</key>
+    <true/>
+</dict>
+</plist>

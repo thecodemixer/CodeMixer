@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  LaunchAgent template for codemixerd.
+  Install with:
+    cp scripts/com.codecave.Codemixer.daemon.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.codecave.Codemixer.daemon.plist
+
+  Uninstall:
+    launchctl bootout gui/$UID ~/Library/LaunchAgents/com.codecave.Codemixer.daemon.plist
+    rm ~/Library/LaunchAgents/com.codecave.Codemixer.daemon.plist
+
+  After installation the daemon starts automatically on login and restarts
+  on unexpected exits (KeepAlive.SuccessfulExit = false).
+  It exits cleanly when idle for 10 minutes with no connected clients.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.codecave.Codemixer.daemon</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <!-- Adjust this path to match your installation. -->
+        <string>/usr/local/bin/codemixerd</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Restart on crash, but not on clean self-exit (idle 10-min shutdown). -->
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/codemixerd.stdout</string>
+
+    <key>StandardErrorPath</key>
+    <string>/tmp/codemixerd.stderr</string>
+
+    <!-- Throttle crash-restart to avoid tight restart loops. -->
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+</dict>
+</plist>

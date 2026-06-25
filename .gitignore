@@ -1,0 +1,48 @@
+# SwiftPM
+.build/
+.swiftpm/
+
+# Xcode / Tuist (generated — run scripts/generate-xcodeproj.swift)
+src/CodemixerApp/Codemixer.xcodeproj/
+src/CodemixerApp/Codemixer.xcworkspace/
+src/CodemixerApp/Derived/
+src/CodemixerApp/.tuist/
+Derived/
+**/*.xcodeproj/xcuserdata/
+**/*.xcworkspace/xcuserdata/
+*.xcuserstate
+*.dSYM/
+*.xcarchive/
+
+# Legacy nested package layout (sources and tests live at repo root now)
+Codemixer/Packages/
+
+# macOS
+.DS_Store
+Thumbs.db
+
+# Local environment, logs, and agent transcripts
+.env
+.env.*
+*.env
+*.log
+*.jsonl
+.cursor/
+agent-transcripts/
+transcripts/
+
+# Local key material and signing assets
+*.cer
+*.crt
+*.der
+*.key
+*.p12
+*.pem
+*.pfx
+*.mobileprovision
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*~

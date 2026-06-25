@@ -1,0 +1,34 @@
+--swiftversion 6.0
+--indent 4
+--maxwidth 120
+--wraparguments before-first
+--wrapparameters before-first
+--wrapcollections before-first
+--closingparen balanced
+
+# Spacing
+--commas always
+--semicolons never
+--spaces around-operators
+--trimwhitespace always
+
+# Braces
+--allman false
+--elseposition same-line
+--guardelse same-line
+
+# Imports
+--importgrouping testable-first
+--sortedimports true
+
+# Misc
+--self remove
+--redundanttype inferred
+--voidtype void
+--stripunusedargs closure-only
+
+# Rules — keep the project's characteristic style
+--rules trailingCommas,redundantSelf,unusedArguments,blankLinesBetweenScopes,spaceAroundBraces,spaceAroundBrackets,spaceAroundComments,sortImports
+
+# Do not add //swiftformat:... comments automatically.
+--disable fileHeader

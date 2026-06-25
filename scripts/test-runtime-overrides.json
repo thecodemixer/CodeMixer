@@ -1,0 +1,13 @@
+{
+  "budgets": {
+    "Engine + ClaudeCodeTwin": 5.0,
+    "AgentEngine — command matrix": 10.0,
+    "EngineViewModel — event reduction": 3.0,
+    "ClaudeTranscriptTailer fixtures": 5.0,
+    "AgentEngine + ClaudeAdapter + fake-claude": 5.0,
+    "PTY host lifecycle": 10.0,
+    "RemoteControl server E2E": 5.0,
+    "PairingService — PIN exchange and rate-limiting": 2.0,
+    "Heartbeat activity monitor": 2.0
+  }
+}

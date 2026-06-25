@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.codecave.Codemixer</string>
+    <key>CFBundleName</key>
+    <string>Codemixer</string>
+    <key>CFBundleDisplayName</key>
+    <string>Codemixer</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.developer-tools</string>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSSupportsAutomaticGraphicsSwitching</key>
+    <true/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Codemixer uses the microphone to dictate prompts to your CLI agent.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Codemixer transcribes your voice into prompts on-device.</string>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Codemixer can be controlled from your phone over the local network.</string>
+    <key>NSDocumentsFolderUsageDescription</key>
+    <string>Codemixer opens and edits project files in your Documents folder.</string>
+    <key>NSDownloadsFolderUsageDescription</key>
+    <string>Codemixer can read files from your Downloads folder when referenced in prompts.</string>
+    <key>NSDesktopFolderUsageDescription</key>
+    <string>Codemixer can read files from your Desktop when referenced in prompts.</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Codemixer uses Reveal in Finder to show changed files in the diff panel.</string>
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_codemixer._tcp</string>
+    </array>
+</dict>
+</plist>

@@ -1,0 +1,157 @@
+// swift-tools-version: 6.0
+import PackageDescription
+
+let swiftSettings: [SwiftSetting] = [
+    .enableUpcomingFeature("StrictConcurrency"),
+    .enableUpcomingFeature("ExistentialAny"),
+]
+
+let package = Package(
+    name: "Codemixer",
+    platforms: [
+        .macOS(.v14),
+        .iOS(.v17),
+    ],
+    products: [
+        .library(name: "AgentProtocol", targets: ["AgentProtocol"]),
+        .library(name: "AgentCore", targets: ["AgentCore"]),
+        .library(name: "ClaudeCode", targets: ["ClaudeCode"]),
+        .library(name: "AgentRemoteControl", targets: ["AgentRemoteControl"]),
+        .library(name: "AgentUI", targets: ["AgentUI"]),
+        .library(name: "AgentTestSupport", targets: ["AgentTestSupport"]),
+        .executable(name: "codemixerd", targets: ["CodemixerDaemon"]),
+        .executable(name: "codemixer", targets: ["CodemixerApp"]),
+        .executable(name: "fake-claude", targets: ["FakeClaudeCLI"]),
+    ],
+    dependencies: [
+        .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.2.0"),
+    ],
+    targets: [
+        .target(
+            name: "CPosixBridge",
+            path: "src/Core/CPosixBridge",
+            publicHeadersPath: "include"
+        ),
+        .target(
+            name: "AgentProtocol",
+            path: "src/Core/AgentProtocol",
+            swiftSettings: swiftSettings
+        ),
+        .target(
+            name: "AgentCore",
+            dependencies: [
+                "CPosixBridge",
+                "AgentProtocol",
+                .product(name: "SwiftTerm", package: "SwiftTerm"),
+            ],
+            path: "src/Core/AgentCore",
+            swiftSettings: swiftSettings
+        ),
+        .target(
+            name: "ClaudeCode",
+            dependencies: ["AgentCore", "AgentProtocol"],
+            path: "src/AgenticCLIs/ClaudeCode",
+            exclude: [
+                "README.md",
+                "CONTRACT.md",
+                "digital-twin/README.md",
+                "digital-twin/fake-claude",
+            ],
+            swiftSettings: swiftSettings
+        ),
+        .target(
+            name: "AgentRemoteControl",
+            dependencies: ["AgentCore", "AgentProtocol"],
+            path: "src/Remote/AgentRemoteControl",
+            swiftSettings: swiftSettings
+        ),
+        .target(
+            name: "AgentUI",
+            dependencies: ["AgentCore"],
+            path: "src/AgentUI",
+            swiftSettings: swiftSettings
+        ),
+        .target(
+            name: "AgentTestSupport",
+            dependencies: ["AgentCore", "AgentProtocol"],
+            path: "tests/TestSupport/AgentTestSupport",
+            swiftSettings: swiftSettings
+        ),
+        .executableTarget(
+            name: "FakeClaudeCLI",
+            dependencies: ["ClaudeCode"],
+            path: "src/AgenticCLIs/ClaudeCode/digital-twin/fake-claude",
+            swiftSettings: swiftSettings
+        ),
+        .executableTarget(
+            name: "CodemixerDaemon",
+            dependencies: ["AgentCore", "ClaudeCode", "AgentRemoteControl"],
+            path: "src/Remote/CodemixerDaemon",
+            swiftSettings: swiftSettings
+        ),
+        .executableTarget(
+            name: "CodemixerApp",
+            dependencies: ["AgentCore", "AgentUI", "ClaudeCode", "AgentRemoteControl"],
+            path: "src/CodemixerApp",
+            exclude: [
+                "Info.plist",
+                "Codemixer.entitlements",
+                "Project.swift",
+                "Codemixer.xcodeproj",
+                "Codemixer.xcworkspace",
+                "Derived",
+            ],
+            swiftSettings: swiftSettings
+        ),
+        .testTarget(
+            name: "AgentProtocolTests",
+            dependencies: ["AgentProtocol"],
+            path: "tests/Core/AgentProtocolTests",
+            swiftSettings: swiftSettings
+        ),
+        .testTarget(
+            name: "AgentCoreTests",
+            dependencies: ["AgentCore", "AgentTestSupport", "ClaudeCode"],
+            path: "tests/Core/AgentCoreTests",
+            swiftSettings: swiftSettings
+        ),
+        .testTarget(
+            name: "ClaudeAdapterTests",
+            dependencies: ["ClaudeCode", "AgentTestSupport"],
+            path: "tests/AgenticCLIs/ClaudeCode/ClaudeAdapterTests",
+            exclude: ["Fixtures"],
+            swiftSettings: swiftSettings
+        ),
+        .testTarget(
+            name: "AgentRemoteControlTests",
+            dependencies: ["AgentRemoteControl", "AgentTestSupport"],
+            path: "tests/Remote/AgentRemoteControlTests",
+            swiftSettings: swiftSettings
+        ),
+        .testTarget(
+            name: "AgentUITests",
+            dependencies: ["AgentUI", "AgentTestSupport"],
+            path: "tests/AgentUITests",
+            swiftSettings: swiftSettings
+        ),
+        .testTarget(
+            name: "RemoteParityTests",
+            dependencies: ["AgentCore", "AgentProtocol", "AgentRemoteControl", "AgentUI"],
+            path: "tests/Remote/RemoteParityTests",
+            resources: [.process("Fixtures")],
+            swiftSettings: swiftSettings
+        ),
+        .testTarget(
+            name: "ClaudeCodeTwinTests",
+            dependencies: ["ClaudeCode", "AgentCore", "AgentProtocol", "AgentTestSupport"],
+            path: "tests/AgenticCLIs/ClaudeCode/ClaudeCodeTwinTests",
+            swiftSettings: swiftSettings
+        ),
+        .testTarget(
+            name: "AgentTestSupportTests",
+            dependencies: ["AgentTestSupport"],
+            path: "tests/TestSupport/AgentTestSupportTests",
+            swiftSettings: swiftSettings
+        ),
+    ]
+)

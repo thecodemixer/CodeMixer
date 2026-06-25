@@ -1,0 +1,9 @@
+{
+  "hook_event_name": "Stop",
+  "session_id": "sess-fixture-1",
+  "transcript_path": "/tmp/.claude/projects/-tmp-test/sess-fixture-1.jsonl",
+  "cwd": "/tmp/test",
+  "permission_mode": "default",
+  "stop_hook_active": false,
+  "last_assistant_message": "Fixture reply."
+}
