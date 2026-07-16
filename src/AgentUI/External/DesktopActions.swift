@@ -110,6 +110,8 @@ public enum DesktopActions {
     }
 }
 
+// MARK: - NSMenu presenter for composer dropdowns
+
 public struct DesktopMenuItem {
     public let title: String
     public let action: @MainActor () -> Void
@@ -143,11 +145,7 @@ private final class CallbackMenuItem: NSMenuItem {
         target = self
     }
 
-    required init(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
+    required init(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    @MainActor @objc private func run() {
-        handler()
-    }
+    @MainActor @objc private func run() { handler() }
 }

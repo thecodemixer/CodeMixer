@@ -32,17 +32,3 @@ enum ComposerAttachmentHandling {
         DesktopActions.persistPastedImage(image, sessionID: sessionID)
     }
 }
-
-struct ComposerMenuAnchorView: NSViewRepresentable {
-    let resolve: (NSView) -> Void
-
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView(frame: .zero)
-        DispatchQueue.main.async { resolve(view) }
-        return view
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {
-        DispatchQueue.main.async { resolve(nsView) }
-    }
-}

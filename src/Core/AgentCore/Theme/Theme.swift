@@ -53,6 +53,9 @@ public enum Theme {
             }
         }
 
+        /// Composer bar dropdowns (mode/model) — half the floating radius.
+        public var dropdownRadius: CGFloat { radius / 2 }
+
         public var displayName: String {
             switch self {
             case .sharp:    return "Sharp"
@@ -84,6 +87,8 @@ public enum Theme {
         /// Popovers, palettes, and dropdown panels — floating elevation
         /// (visual-style §10). Smaller than `large` so menus feel crisp.
         public static let floating: CGFloat = 8
+        /// Composer bar dropdowns (mode/model) — half of `floating`.
+        public static let dropdown: CGFloat = 4
     }
 
     public enum stroke {

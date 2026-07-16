@@ -618,6 +618,8 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // displayName
 // divider
 // drain
+// dropdown
+// dropdownRadius
 // durationMS
 // editAndResubmit
 // editDraft
@@ -1112,5 +1114,5 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // writeAtomically
 // MANIFEST_SYMBOLS_END
 
-// Total: 809 unique public symbols
+// Total: 887 unique public symbols
 

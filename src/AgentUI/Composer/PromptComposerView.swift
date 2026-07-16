@@ -27,8 +27,6 @@ public struct PromptComposerView: View {
     @State private var filePickerQuery: String = ""
     @State private var selectedModelID: String = ""
     @State private var fileIndex = ComposerWorkspaceFileIndex()
-    @State private var modeMenuAnchor: NSView?
-    @State private var modelMenuAnchor: NSView?
     @FocusState private var focused: Bool
 
     public init(model: EngineViewModel, voice: VoiceInputService? = nil) {
@@ -120,9 +118,7 @@ public struct PromptComposerView: View {
                     ComposerModeModelMenus(model: model,
                                            thinkOn: $thinkOn,
                                            reviewOn: $reviewOn,
-                                           selectedModelID: $selectedModelID,
-                                           modeMenuAnchor: $modeMenuAnchor,
-                                           modelMenuAnchor: $modelMenuAnchor)
+                                           selectedModelID: $selectedModelID)
 
                     Spacer()
 

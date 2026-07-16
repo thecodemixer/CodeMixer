@@ -10,6 +10,7 @@ struct ThemeAppearanceEnumTests {
         #expect(Theme.FloatingCornerStyle.sharp.radius == Theme.corner.small)
         #expect(Theme.FloatingCornerStyle.standard.radius == Theme.corner.floating)
         #expect(Theme.FloatingCornerStyle.soft.radius == Theme.corner.medium)
+        #expect(Theme.FloatingCornerStyle.standard.dropdownRadius == Theme.corner.dropdown)
     }
 
     @Test("Every appearance enum round-trips through Codable")

@@ -9,6 +9,10 @@ private struct FloatingCornerRadiusKey: EnvironmentKey {
     static let defaultValue = Theme.corner.floating
 }
 
+private struct DropdownCornerRadiusKey: EnvironmentKey {
+    static let defaultValue = Theme.corner.dropdown
+}
+
 public extension EnvironmentValues {
     var codemixerAppearance: AppearancePrefs {
         get { self[CodemixerAppearanceKey.self] }
@@ -30,6 +34,12 @@ public extension EnvironmentValues {
     var codemixerFloatingCornerRadius: CGFloat {
         get { self[FloatingCornerRadiusKey.self] }
         set { self[FloatingCornerRadiusKey.self] = newValue }
+    }
+
+    /// Composer bar dropdowns (mode/model) — half the floating radius.
+    var codemixerDropdownCornerRadius: CGFloat {
+        get { self[DropdownCornerRadiusKey.self] }
+        set { self[DropdownCornerRadiusKey.self] = newValue }
     }
 }
 
@@ -68,6 +78,10 @@ private struct CodemixerAppearanceModifier: ViewModifier {
         prefs.floatingCornerStyle.radius
     }
 
+    private var dropdownCornerRadius: CGFloat {
+        prefs.floatingCornerStyle.dropdownRadius
+    }
+
     private var dynamicTypeSize: DynamicTypeSize {
         switch prefs.fontSizeScale {
         case ..<0.9: return .small
@@ -83,6 +97,7 @@ private struct CodemixerAppearanceModifier: ViewModifier {
             .preferredColorScheme(colorScheme)
             .environment(\.codemixerAppearance, prefs)
             .environment(\.codemixerFloatingCornerRadius, floatingCornerRadius)
+            .environment(\.codemixerDropdownCornerRadius, dropdownCornerRadius)
             .dynamicTypeSize(dynamicTypeSize)
             .fontDesign(fontDesign)
     }
@@ -102,10 +117,28 @@ private struct FloatingPanelStyleModifier: ViewModifier {
     }
 }
 
+/// `.popover`'s default system chrome (background material + arrow) tracks
+/// the real macOS appearance, not this app's `preferredColorScheme`
+/// override — so a popover can render light chrome inside a dark-themed
+/// window. Reapplying `preferredColorScheme` here forces that popover's own
+/// hosting context (and any `Color(nsColor:)` tokens drawn inside it) to
+/// match, and `presentationBackground` replaces the system material outright
+/// so there's exactly one themed background layer behind the system arrow.
 private struct FloatingPopoverChromeModifier: ViewModifier {
     @Environment(\.codemixerFloatingCornerRadius) private var radius
+    @Environment(\.colorScheme) private var colorScheme
 
     func body(content: Content) -> some View {
-        content.presentationCornerRadius(radius)
+        content
+            .preferredColorScheme(colorScheme)
+            .presentationCornerRadius(radius)
+            .presentationBackground {
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .fill(Theme.surface.card)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: radius, style: .continuous)
+                            .stroke(Theme.surface.divider, lineWidth: Theme.stroke.hairline)
+                    )
+            }
     }
 }
