@@ -110,7 +110,8 @@ extension EngineViewModel {
             if substate == .idle { settleTurnIdle() }
         case .noEventGap(_, let elapsed):
             if activity != .idle {
-                if elapsed > ActivityTiming.stillWorkingThreshold {
+                if elapsed > ActivityTiming.stillWorkingThreshold,
+                   isAwaitingFirstReplyForPrompt {
                     status = .working(phrase: ActivityTiming.stillWorkingPhrase)
                 }
                 if elapsed > ActivityTiming.probablyStuckThreshold,
