@@ -16,7 +16,7 @@ public struct WorkspaceScene: View {
     @State private var navigatorFocusMode: Bool = false
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.effectiveReduceMotion) private var reduceMotion
 
     public init(model: EngineViewModel,
                 voice: VoiceInputService? = nil,
@@ -108,7 +108,7 @@ public struct WorkspaceScene: View {
 
                 StatusPill(status: model.status,
                            substate: model.activity,
-                           onCancel: { model.send(.cancelCurrentTurn) })
+                           onCancel: { model.cancelCurrentTurn() })
                     .padding(.top, Theme.spacing.s12)
                     .padding(.trailing, Theme.spacing.s16)
             }
@@ -119,7 +119,7 @@ public struct WorkspaceScene: View {
         .overlay(alignment: .top) {
             // Stalled-turn toast slides in from the top, auto-dismisses in 8s.
             if model.stalledToastVisible {
-                StalledToast(onCancel: { model.send(.cancelCurrentTurn) })
+                StalledToast(onCancel: { model.cancelCurrentTurn() })
                     .padding(.top, Theme.spacing.s8)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
@@ -206,7 +206,7 @@ private struct StalledToast: View {
         HStack(spacing: Theme.spacing.s12) {
             Image(systemName: "clock.badge.exclamationmark")
                 .foregroundStyle(Theme.signal.warning)
-            Text("Claude may be stalled.")
+            Text("Agent may be stalled.")
                 .font(Theme.typography.label)
                 .foregroundStyle(Theme.text.primary)
             Button("Cancel", action: onCancel)

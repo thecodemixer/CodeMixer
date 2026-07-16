@@ -54,13 +54,13 @@ struct CodemixerDaemon {
         Task {
             var consecutiveIdleChecks = 0
             while true {
-                try? await Task.sleep(for: .seconds(60))
+                try? await Task.sleep(for: DaemonDefaults.idleCheckInterval)
                 let clients = await runtime.server?.connectedClientCount ?? 0
                 let engineState = await engine.currentState
                 let isIdle = clients == 0 && (engineState == .stopped || engineState == .stopping)
                 consecutiveIdleChecks = isIdle ? consecutiveIdleChecks + 1 : 0
-                if consecutiveIdleChecks >= 10 {
-                    log.notice("idle 10 min with no clients; exiting")
+                if consecutiveIdleChecks >= DaemonDefaults.idleExitAfterChecks {
+                    log.notice("idle \(DaemonDefaults.idleExitAfterChecks, privacy: .public) min with no clients; exiting")
                     await runtime.stop()
                     await engine.shutdown(reason: .naturalExit)
                     exit(0)

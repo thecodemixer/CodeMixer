@@ -84,9 +84,6 @@ extension AgentEngine {
             guard let prompt = pendingPermissions.removeValue(forKey: id) else { return }
             try await deliverPermissionResponse(decision, for: prompt, id: id)
 
-        case .respondToInlinePrompt(_, let text):
-            try await writePromptBytes(adapter.encodeUserPrompt(text))
-
         case .newSession,
              .compact,
              .selectModel,

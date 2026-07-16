@@ -45,19 +45,10 @@ struct SnapshotServiceTests {
         #expect(obj["recents"] != nil)
     }
 
-    @Test(".workspaceTree snapshot contains 'root' and 'entries' keys")
-    func workspaceTreeSnapshot() async throws {
-        let svc = makeService()
-        let data = await svc.snapshot(.workspaceTree)
-        let obj = try topLevel(data)
-        #expect(obj["root"] != nil)
-        #expect(obj["entries"] != nil)
-    }
-
     @Test("Every SnapshotKind returns non-empty, valid UTF-8 JSON")
     func allKindsProduceValidJSON() async {
         let svc = makeService()
-        let allKinds: [SnapshotKind] = [.prefs, .conversation, .diff, .sessions, .workspaceTree]
+        let allKinds: [SnapshotKind] = [.prefs, .conversation, .diff, .sessions]
         for kind in allKinds {
             let data = await svc.snapshot(kind)
             #expect(!data.isEmpty, "expected non-empty data for kind \(kind)")

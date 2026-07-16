@@ -102,14 +102,16 @@ struct PrefsAndDecisionsCodableTests {
 
     @Test("SnapshotKind round-trips for every case")
     func snapshotKind() throws {
-        for kind in [SnapshotKind.conversation, .diff, .sessions, .workspaceTree, .prefs] {
+        for kind in [SnapshotKind.conversation, .diff, .sessions, .prefs] {
             try roundTrip(kind)
         }
     }
 
-    @Test("SubscribableStream round-trips for every case")
-    func subscribableStream() throws {
-        for stream in [SubscribableStream.events, .diff, .status] { try roundTrip(stream) }
+    @Test("SubscribeReplayOutcome round-trips for every case")
+    func subscribeReplayOutcome() throws {
+        for outcome in [SubscribeReplayOutcome.fresh, .resumed, .checkpointExpired] {
+            try roundTrip(outcome)
+        }
     }
 
     @Test("PairFailureReason round-trips for every case")

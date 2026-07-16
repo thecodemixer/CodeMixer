@@ -31,10 +31,10 @@ public actor PairingService {
         var lockedUntil: Date?
     }
 
-    private static let pinTTL: TimeInterval = 90
-    private static let lockoutSeconds: TimeInterval = 300
-    private static let minAttemptInterval: TimeInterval = 1
-    private static let maxAttempts = 5
+    private static let pinTTL = RemoteAuthTiming.pinTTL
+    private static let lockoutSeconds = RemoteAuthTiming.lockoutSeconds
+    private static let minAttemptInterval = RemoteAuthTiming.minAttemptInterval
+    private static let maxAttempts = RemoteAuthTiming.maxAttempts
 
     private let clock: any AgentClock
     private let random: any RandomSource

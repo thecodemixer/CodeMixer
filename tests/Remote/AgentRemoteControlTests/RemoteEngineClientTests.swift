@@ -35,6 +35,7 @@ struct RemoteEngineClientTests {
         try await client.send(.updateAppearancePref(key: .theme, value: .string("remote")))
 
         let event = await nextEvent(from: sub.stream)
+
         let sawEvent: Bool
         if case .appearancePrefChanged(let key, let value) = event {
             sawEvent = key == .theme && value == .string("remote")
@@ -81,11 +82,64 @@ struct RemoteEngineClientTests {
         await client.disconnect()
     }
 
-    private func nextEvent(from stream: AsyncStream<AgentEvent>) async -> AgentEvent? {
+    @Test("checkpointExpired subscribe republishes engineRestarted and snapshots")
+    func checkpointExpiredResync() async throws {
+        let net = InMemoryNetwork()
+        let seams = Seams.fake()
+        let engine = AgentEngine(seams: seams)
+        await engine.bootstrap()
+        let pairing = PairingService(clock: seams.clock, random: seams.random)
+        let server = RemoteControlServer(engine: engine,
+                                         bus: engine.bus,
+                                         pairing: pairing,
+                                         transport: net.transport)
+        try await server.start(configuration: .init(host: .loopback,
+                                                    port: 0,
+                                                    requireAuth: false,
+                                                    useTLS: false))
+        let port = try #require(await server.boundPort)
+
+        for _ in 0..<8 {
+            _ = await engine.bus.publish(.bell)
+        }
+        let staleID = UUID()
+
+        let client = RemoteEngineClient(
+            configuration: .init(address: .loopback(port: port),
+                                 options: .webSocket()),
+            transport: net.transport
+        )
+        await client.setLastSeenEventID(staleID)
+        let sub = await client.bus.subscribe()
+        let collector = ResyncCollector()
+
+        let collect = Task {
+            for await entry in sub.stream {
+                await collector.record(entry.event)
+                if await collector.isComplete { break }
+            }
+        }
+
+        try await client.connect()
+
+        try? await Task.sleep(for: .seconds(2))
+        collect.cancel()
+
+        #expect(await collector.sawRestart)
+        #expect(await collector.snapshotKinds.contains(.conversation))
+        #expect(await collector.snapshotKinds.contains(.diff))
+        #expect(await collector.snapshotKinds.contains(.prefs))
+
+        await client.disconnect()
+        await server.stop()
+        await engine.shutdown(reason: .naturalExit)
+    }
+
+    private func nextEvent(from stream: AsyncStream<MulticastEventBus.HistoryEntry>) async -> AgentEvent? {
         await withTaskGroup(of: AgentEvent?.self) { group in
             group.addTask {
-                for await event in stream {
-                    return event
+                for await entry in stream {
+                    return entry.event
                 }
                 return nil
             }
@@ -120,5 +174,25 @@ struct RemoteEngineClientTests {
             group.cancelAll()
             return result
         }
+    }
+}
+
+private actor ResyncCollector {
+    private(set) var sawRestart = false
+    private(set) var snapshotKinds = Set<SnapshotKind>()
+
+    func record(_ event: AgentEvent) {
+        switch event {
+        case .engineRestarted:
+            sawRestart = true
+        case .snapshotReady(let kind, _):
+            snapshotKinds.insert(kind)
+        default:
+            break
+        }
+    }
+
+    var isComplete: Bool {
+        sawRestart && snapshotKinds.isSuperset(of: [.conversation, .diff, .prefs])
     }
 }

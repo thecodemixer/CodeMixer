@@ -67,20 +67,25 @@ public protocol Adapter: Sendable {
     func encodePermissionResponse(_ decision: PermissionDecision,
                                   for prompt: PermissionPrompt) -> PermissionResponseDelivery
 
-    // 8. Slash-command / inline-action catalog
+    // 8. Slash-command catalog
     var actionCatalog: [Action] { get }
     func enumerateProjectActions(workspace: URL) async -> [Action]
 
-    // 9. Resume / session listing
+    // 9. Model catalog (composer picker; default `[]` in protocol extension)
+    func availableModels() -> [AgentModelOption]
+
+    // 10. Resume / session listing
     func listResumableSessions(workspace: URL) async -> [SessionSummary]
     func resumeArgvAddition(sessionID: String) -> [String]
 
-    // 10. Rendering hints
+    // 11. Rendering hints
     func renderHint(toolName: String, input: ToolInput) -> RenderHint
 }
 ```
 
-Ten sections. Each one is a *boundary* — a place where vendor specifics would otherwise leak into the core. Skipping a section because "vendor X doesn't need it" is fine if and only if you have a sentinel return (`nil`, `[]`, `.none`) that the core can interpret as "skip this wiring."
+Codemixer's live protocol uses `SlashCommand`, `AgentModelOption`, and `ToolRenderHint` names — see `AgentAdapter.swift`.
+
+Eleven sections. Each one is a *boundary* — a place where vendor specifics would otherwise leak into the core. Skipping a section because "vendor X doesn't need it" is fine if and only if you have a sentinel return (`nil`, `[]`, `.none`) that the core can interpret as "skip this wiring."
 
 ---
 
@@ -149,6 +154,7 @@ public extension Adapter {
 
 - Different vendors disagree about which signal is canonical for which event.
 - Deduplication policy is vendor-specific (e.g. "hook + transcript both report tool-end; trust the hook's timing").
+- Claude Code example: transcript JSONL is canonical for final `assistantText`; Stop `last_assistant_message` is fallback after drain — see `ClaudeAdapter` + `CONTRACT.md`.
 - The core would otherwise grow a giant priority table for every vendor combination.
 
 **The principle:** the engine consumes *one* `AsyncStream<Event>` per session. The adapter is responsible for ensuring that stream is consistent.

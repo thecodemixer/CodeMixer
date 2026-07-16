@@ -28,4 +28,22 @@ public struct ResolvedEnvironment: Sendable, Equatable {
         for (k, v) in overrides { merged[k] = v }
         return merged
     }
+
+    /// Environment passed to a PTY-spawned agent child.
+    ///
+    /// Merges adapter overrides onto the resolved shell env, then strips keys
+    /// that would route Claude Code onto the SDK / API billing path instead of
+    /// the interactive subscription path (architecture §3.1).
+    public func ptySpawnEnvironment(adapterOverrides: [String: String] = [:]) -> [String: String] {
+        var merged = withOverrides(adapterOverrides)
+        for key in Self.billingPoisonKeys {
+            merged.removeValue(forKey: key)
+        }
+        return merged
+    }
+
+    private static let billingPoisonKeys = [
+        "CLAUDE_CODE_ENTRYPOINT",
+        "ANTHROPIC_API_KEY",
+    ]
 }

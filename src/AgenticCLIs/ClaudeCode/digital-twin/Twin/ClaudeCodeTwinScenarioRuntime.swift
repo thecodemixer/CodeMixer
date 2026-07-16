@@ -11,6 +11,7 @@ public enum ClaudeCodeTwinScenarioRuntime: Sendable {
         public var permissionMode: String
         public var resumeSessionID: String?
         public var toolIndex: Int
+        public var runtime: TwinRuntimeSeams
 
         public init(sessionID: String,
                     workspace: URL,
@@ -18,7 +19,8 @@ public enum ClaudeCodeTwinScenarioRuntime: Sendable {
                     model: String = "fake-claude",
                     permissionMode: String = "default",
                     resumeSessionID: String? = nil,
-                    toolIndex: Int = 0) {
+                    toolIndex: Int = 0,
+                    runtime: TwinRuntimeSeams = .live) {
             self.sessionID = sessionID
             self.workspace = workspace
             self.claudeDirectory = claudeDirectory
@@ -26,12 +28,14 @@ public enum ClaudeCodeTwinScenarioRuntime: Sendable {
             self.permissionMode = permissionMode
             self.resumeSessionID = resumeSessionID
             self.toolIndex = toolIndex
+            self.runtime = runtime
         }
 
         public var store: ClaudeCodeTwinSessionStore {
             ClaudeCodeTwinSessionStore(sessionID: sessionID,
                                        workspace: workspace,
-                                       claudeDirectory: claudeDirectory)
+                                       claudeDirectory: claudeDirectory,
+                                       runtime: runtime)
         }
     }
 
@@ -61,7 +65,10 @@ public enum ClaudeCodeTwinScenarioRuntime: Sendable {
             return reply
 
         case .thinkingThenReply(let thinking, let reply):
-            try context.store.append(ClaudeCodeTwinTranscript.assistantThinkingLine(text: thinking))
+            try context.store.append(ClaudeCodeTwinTranscript.assistantThinkingLine(
+                text: thinking,
+                runtime: context.runtime
+            ))
             try appendAssistant(reply, context: &context)
             emitStop(lastMessage: reply, context: context, hookSink: hookSink)
             writePTY(ClaudeCodeTwinPTYScript.promptReady)
@@ -80,10 +87,12 @@ public enum ClaudeCodeTwinScenarioRuntime: Sendable {
                      hookSink: hookSink)
             try context.store.append(ClaudeCodeTwinTranscript.assistantToolUseLine(toolID: toolID,
                                                                                      tool: "Bash",
-                                                                                     input: ["command": command]))
+                                                                                     input: ["command": command],
+                                                                                     runtime: context.runtime))
             try context.store.append(ClaudeCodeTwinTranscript.toolResultLine(toolID: toolID,
                                                                              text: stdout,
-                                                                             isError: exitCode != 0))
+                                                                             isError: exitCode != 0,
+                                                                             runtime: context.runtime))
             emitHook("PostToolUse",
                      ClaudeCodeTwinHookEmitter.postToolUse(sessionID: context.sessionID,
                                                            toolUseID: toolID,
@@ -145,7 +154,8 @@ public enum ClaudeCodeTwinScenarioRuntime: Sendable {
         case .usageOnly(let inputTokens, let outputTokens, let cost):
             try context.store.append(ClaudeCodeTwinTranscript.assistantUsageLine(inputTokens: inputTokens,
                                                                                  outputTokens: outputTokens,
-                                                                                 costUSD: cost))
+                                                                                 costUSD: cost,
+                                                                                 runtime: context.runtime))
             emitStop(lastMessage: nil, context: context, hookSink: hookSink)
             writePTY(ClaudeCodeTwinPTYScript.promptReady)
             return nil
@@ -205,11 +215,15 @@ public enum ClaudeCodeTwinScenarioRuntime: Sendable {
         ClaudeCodeTwinHookEmitter.Context(sessionID: context.sessionID,
                                           workspace: context.workspace,
                                           claudeDirectory: context.claudeDirectory,
-                                          permissionMode: context.permissionMode)
+                                          permissionMode: context.permissionMode,
+                                          runtime: context.runtime)
     }
 
     private static func appendAssistant(_ reply: String, context: inout Context) throws {
-        try context.store.append(ClaudeCodeTwinTranscript.assistantTextLine(text: reply))
+        try context.store.append(ClaudeCodeTwinTranscript.assistantTextLine(
+            text: reply,
+            runtime: context.runtime
+        ))
     }
 
     private static func emitStop(lastMessage: String?,

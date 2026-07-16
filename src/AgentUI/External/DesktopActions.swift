@@ -18,6 +18,64 @@ public enum DesktopActions {
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
+    static func workspaceFiles(in workspace: URL, limit: Int) -> [String] {
+        let skipDirs: Set<String> = [".git", "node_modules", ".build", "DerivedData",
+                                     ".swiftpm", "__pycache__", ".DS_Store"]
+        var results: [String] = []
+        guard let enumerator = FileManager.default.enumerator(
+            at: workspace,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+        for case let url as URL in enumerator {
+            if results.count >= limit { break }
+            if skipDirs.contains(url.lastPathComponent) {
+                enumerator.skipDescendants()
+                continue
+            }
+            if (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true {
+                let relativePath = url.path.replacingOccurrences(of: workspace.path + "/", with: "")
+                results.append(relativePath)
+            }
+        }
+        return results.sorted()
+    }
+
+    static func memoryFileBadge(atProjectPath path: String) -> String? {
+        let project = URL(fileURLWithPath: path)
+        if FileManager.default.fileExists(atPath: project.appendingPathComponent("CLAUDE.md").path) {
+            return "CLAUDE.md"
+        }
+        if FileManager.default.fileExists(atPath: project.appendingPathComponent("AGENTS.md").path) {
+            return "AGENTS.md"
+        }
+        return nil
+    }
+
+    static func persistPastedImage(_ image: NSImage, sessionID: String?) -> String? {
+        let sessionID = sessionID ?? "unknown"
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codemixer/\(sessionID)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let dest = dir.appendingPathComponent(UUID().uuidString + ".png")
+        guard let tiff = image.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff),
+              let png = rep.representation(using: .png, properties: [:]) else {
+            return nil
+        }
+        try? png.write(to: dest)
+        return dest.path
+    }
+
+    static func openCodeSnippet(_ code: String, fileExtension: String) {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codemixer-snippets", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let file = dir.appendingPathComponent("snippet-\(UUID().uuidString).\(fileExtension)")
+        try? code.write(to: file, atomically: true, encoding: .utf8)
+        openURL(file)
+    }
+
     @MainActor
     public static func openFilePanel(allowedTypes: [UTType] = [.item],
                                      allowsMultipleSelection: Bool = true) -> [URL] {

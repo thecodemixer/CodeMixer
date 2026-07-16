@@ -118,62 +118,39 @@ struct CodemixerDaemon {
             useTLS: false                        // plain ws on loopback; enable for LAN
         ))
 
-        await IdleExitMonitor.run(engine: engine, server: server, idle: .minutes(10))
-        log.notice("daemon exiting")
+        Task {
+            var consecutiveIdleChecks = 0
+            while true {
+                try? await Task.sleep(for: DaemonDefaults.idleCheckInterval)
+                let clients = await runtime.server?.connectedClientCount ?? 0
+                let engineState = await engine.currentState
+                let isIdle = clients == 0 && (engineState == .stopped || engineState == .stopping)
+                consecutiveIdleChecks = isIdle ? consecutiveIdleChecks + 1 : 0
+                if consecutiveIdleChecks >= DaemonDefaults.idleExitAfterChecks {
+                    await runtime.stop()
+                    await engine.shutdown(reason: .naturalExit)
+                    exit(0)
+                }
+            }
+        }
+        // … await signal handling …
     }
 }
 ```
 
-**CI guards the no-UI invariant:**
-
-```bash
-# scripts/check-daemon-no-ui.sh
-set -e
-binary="build/codemixerd"
-if nm "$binary" | grep -E " (SwiftUI|UIKit|AppKit)\." ; then
-  echo "❌ codemixerd imports a UI framework"
-  exit 1
-fi
-```
-
-This runs on every CI build. If a contributor accidentally pulls in a SwiftUI-only utility, the daemon build fails before merge.
+**Enforcing no SwiftUI:** `codemixerd` target dependencies exclude `AgentUI`; `scripts/check-no-swiftui-imports.swift` catches accidental imports.
 
 ---
 
 ## Idle exit
 
-A daemon that never quits is a resource leak. The daemon self-exits when:
+A daemon that never quits is a resource leak. `CodemixerDaemon` self-exits when:
 
 - 0 connected remote clients **and**
-- engine state is `.idle` (no active turn) **and**
-- this has been true for ≥ N minutes (default 10).
+- `engine.currentState` is `.stopped` or `.stopping` **and**
+- this has been true for `DaemonDefaults.idleExitAfterChecks` consecutive checks at `DaemonDefaults.idleCheckInterval` apart (10 × 60s = **10 minutes**).
 
-```swift
-public enum IdleExitMonitor {
-    public static func run(engine: Engine, server: RemoteControlServer, idle: Duration) async {
-        let clock = ContinuousClock()
-        var idleSince: ContinuousClock.Instant?
-
-        while true {
-            try? await Task.sleep(for: .seconds(15))
-            let clients = await server.connectedClients()
-            let state = await engine.currentState()
-            let isIdle = clients == 0 && state == .idle
-
-            if isIdle {
-                if let since = idleSince, clock.now - since >= idle {
-                    await engine.shutdown(reason: .idleTimeout)
-                    await server.stop()
-                    exit(0)
-                }
-                if idleSince == nil { idleSince = clock.now }
-            } else {
-                idleSince = nil
-            }
-        }
-    }
-}
-```
+There is no separate `IdleExitMonitor` type — the loop lives inline in `src/Remote/CodemixerDaemon/main.swift`.
 
 The LaunchAgent / systemd unit sets `KeepAlive` to restart only on **unsuccessful** exit, so the idle exit is not auto-restarted. Next GUI launch spawns the daemon again.
 
@@ -181,52 +158,17 @@ The LaunchAgent / systemd unit sets `KeepAlive` to restart only on **unsuccessfu
 
 ## The GUI's mode probe
 
-The GUI starts by probing for a running daemon:
+`Bootstrap.start()` in `CodemixerApp` probes Mode B when `CODEMIXER_UI_BACKEND=daemon` or the LaunchAgent is installed:
 
 ```swift
-public actor EngineConnection {
-
-    public enum Mode { case inProcess(Engine), remote(EngineRemoteProxy) }
-
-    public static func resolve(preferDaemon: Bool) async -> EngineConnection {
-        if preferDaemon, let proxy = await EngineRemoteProxy.tryLoopback(port: RemoteDefaults.webSocketPort) {
-            return EngineConnection(mode: .remote(proxy))
-        }
-        let engine = Engine()
-        return EngineConnection(mode: .inProcess(engine))
-    }
-}
+if await connectDaemonBackedUI(adapter:) { return }
+await SilentDiagnostics.shared.record(kind: .modeBFallback, ...)
+// fall back to in-process AgentEngine
 ```
 
-`EngineRemoteProxy` conforms to the same `CommandPort` as `Engine`:
+`connectDaemonBackedUI` uses `RemoteEngineClient` on loopback — same wire as any remote peer. Failure is silent to the user (journal entry only).
 
-```swift
-public actor EngineRemoteProxy: CommandPort {
-    private let ws: WebSocketClient
-    private var subscription: Task<Void, Never>?
-
-    public func send(_ command: Command) async throws {
-        let frame = CommandFrame(v: 1, correlationID: UUID(), command: command)
-        try await ws.send(.text(JSONEncoder().encodeString(frame)))
-    }
-
-    public func events() -> AsyncStream<Event> {
-        AsyncStream { continuation in
-            subscription = Task {
-                for await message in ws.messages {
-                    if case .text(let json) = message,
-                       let frame = try? JSONDecoder().decode(ServerFrame.self, from: Data(json.utf8)),
-                       case .event(let wire) = frame {
-                        continuation.yield(WireCodec.decode(wire))
-                    }
-                }
-            }
-        }
-    }
-}
-```
-
-The UI layer's view models see the same interface for both modes. Switching modes (e.g. the user enables the daemon) tears down the in-process engine and reconnects to the daemon — the view models don't know.
+The UI layer's view models see the same `AgentEngineCommandPort` whether in-process or remote. Switching modes tears down the in-process engine and reconnects to the daemon — view models bind to the same command port abstraction.
 
 ---
 

@@ -27,7 +27,7 @@ Read this once, fully, before opening any SwiftUI file that touches the surface.
 15. [Conversation surface](#15-conversation-surface)
 16. [Composer](#16-composer)
 17. [Diff panel](#17-diff-panel)
-18. [Slash palette, autocomplete, and inline prompts](#18-slash-palette-autocomplete-and-inline-prompts)
+18. [Slash palette and autocomplete](#18-slash-palette-and-autocomplete)
 19. [Context menus](#19-context-menus)
 20. [Search](#20-search)
 21. [Status, toasts, banners, and errors](#21-status-toasts-banners-and-errors)
@@ -54,15 +54,11 @@ Read this once, fully, before opening any SwiftUI file that touches the surface.
 
 ## Platform applicability
 
-Codemixer ships first on macOS 14+ and is built so that a future iOS / iPadOS / visionOS client can render the same `AgentEvent` stream over the remote-control API. Almost all the visual decisions below are platform-agnostic SwiftUI — type, color, spacing, motion, accessibility — and read identically on every Apple platform.
+Codemixer **ships on macOS 14+ only** today. Visual rules below are written for the shipped Mac app. Tags marked **[Roadmap: iOS / iPadOS / visionOS]** describe how a future remote client *might* reflow the same vocabulary — they are not implemented surfaces.
 
-A small number of decisions reference platform-specific chrome (window toolbars, traffic lights, menu bars). Those are tagged inline:
-
-- **[macOS]** — applies only on macOS.
-- **[iOS / iPadOS / visionOS]** — applies only on the noted mobile platforms.
-- **[Apple cross-platform]** — applies wherever the SwiftUI framework or symbol ships.
-
-Where a rule shows a macOS example, the *principle* is universal; only the concrete API or chrome differs.
+- **[macOS]** — shipped.
+- **[Roadmap: iOS / iPadOS / visionOS]** — not built; remote-control client only.
+- **[Apple cross-platform]** — SwiftUI patterns that would transfer if we add other Apple platforms.
 
 ---
 
@@ -1098,7 +1094,7 @@ Animation: `.considered` width transition.
 
 ---
 
-## 18. Slash palette, autocomplete, and inline prompts
+## 18. Slash palette and autocomplete
 
 ### Slash palette
 
@@ -1129,24 +1125,7 @@ Triggered by `/` at the start of an empty composer field, or by clicking the sla
 
 `@` opens a similar palette for files in the workspace, matching `git ls-files`. Same visual language, same shortcuts.
 
-### Inline prompts
-
-When the agent asks the user for input mid-turn (e.g., a confirmation phrased as a question), the response appears as an inline composer below the assistant's bubble:
-
-```
-┌── AssistantBubble ──────────────────────────┐
-│  "Should I run `swift test` first?"         │
-└─────────────────────────────────────────────┘
-
-  ┌── InlinePrompt ─────────────────────────┐
-  │  Yes / No / something else…             │
-  │  [@ mic ]   [@ skip ]    [@ submit ]   │
-  └─────────────────────────────────────────┘
-```
-
-- Same `Theme.color.surface.raised`, same composer toolbar (with mic).
-- The bubble is `IntentReveal`-style: visible only when the conversation is awaiting input.
-- Submit closes the inline prompt and adds the user's reply as a `UserBubble` in the conversation.
+> **Not shipped:** mid-turn inline prompt composers (separate from the main composer) were removed. Permission prompts and the main `PromptComposerView` cover user input today.
 
 ### Autocomplete
 
@@ -1826,9 +1805,9 @@ An optional menu bar item (`MenuBarExtra` in SwiftUI) shows a Codemixer glyph th
 - Lets the user open the main window or pause the daemon.
 - Right-click reveals the settings.
 
-### [iOS / iPadOS] Navigation
+### [Roadmap: iOS / iPadOS] Navigation
 
-When the iOS / iPadOS client ships (post-v1):
+Not shipped. When a mobile remote client exists, it would reflow the same regions into a single column (navigator slide-over, diff in a sheet).
 
 - **Single window**, navigation via `NavigationStack` for settings and sessions.
 - **Conversation occupies the main view.**
@@ -1902,9 +1881,9 @@ Haptic rules:
 - **Haptics never replace visual feedback.** Every haptic event is paired with a visible state change.
 - **System haptic preferences are honoured** — when haptics are disabled in System Settings, all `performFeedback` calls are no-ops by design.
 
-### iOS / iPadOS / visionOS [post-v1]
+### [Roadmap: iOS / iPadOS / visionOS] Haptics
 
-When the iOS / iPadOS / visionOS client ships, the same vocabulary applies, mapped to the system's `UIImpactFeedbackGenerator` (light / medium / heavy) and `UINotificationFeedbackGenerator` (success / warning / error). The Codemixer rules above remain: haptics never replace visual feedback; system preferences are honoured.
+Not shipped. A future mobile client could map the same feedback vocabulary to `UIImpactFeedbackGenerator` / `UINotificationFeedbackGenerator`.
 
 visionOS adds spatial-audio rules (volume per-window, depth-attenuated bell sounds). Out of scope for v1 / v1.1.
 

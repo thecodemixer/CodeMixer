@@ -3,6 +3,7 @@ import Testing
 @testable import AgentCore
 @testable import AgentProtocol
 @testable import AgentRemoteControl
+import AgentTestSupport
 
 /// Parity guard for the typed input alphabet.
 ///
@@ -33,7 +34,7 @@ struct CommandDispatchParityTests {
         )
         let encoder = JSONEncoder()
         let decoder = JSONDecoder()
-        let expected = allCommands()
+        let expected = AgentCommandFixtures.dispatchParitySamples()
 
         for command in expected {
             let id = UUID()
@@ -51,38 +52,6 @@ struct CommandDispatchParityTests {
         await server.stop()
     }
 
-    private func allCommands() -> [AgentCommand] {
-        let bubbleID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
-        let promptID = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
-        let hunkID = UUID(uuidString: "00000000-0000-0000-0000-000000000003")!
-        let attachment = AttachmentRef(id: "upload-1",
-                                       filename: "spec.md",
-                                       byteCount: 10,
-                                       mimeType: "text/markdown")
-        return [
-            .sendPrompt(text: "hello", attachments: [attachment]),
-            .cancelCurrentTurn,
-            .editAndResubmitLast(targetBubbleID: bubbleID, text: "edited", attachments: []),
-            .newSession,
-            .compact,
-            .selectModel(id: "claude-sonnet-4-5"),
-            .setPermissionMode(.default),
-            .toggleThinkMode(enabled: true),
-            .toggleReviewMode(enabled: false),
-            .runSlashCommand(name: "/review", args: ["quick"]),
-            .runCustomCommand(path: ".claude/commands/release.md", args: ["v1"]),
-            .respondToPermission(id: promptID, decision: .allow),
-            .respondToInlinePrompt(id: promptID, text: "answer"),
-            .openProject(path: "/tmp/project", resumeSessionID: "session-1"),
-            .closeSession,
-            .speakAssistantBubble(eventID: bubbleID, action: .play),
-            .revertFile(path: "Sources/App.swift"),
-            .revertHunk(path: "Sources/App.swift", hunkID: hunkID),
-            .updateAutoApprovalRules([AutoApprovalRule(match: "Bash ls *", decision: .allow)]),
-            .updateAppearancePref(key: .theme, value: .string("dark")),
-            .requestSnapshot(.conversation),
-        ]
-    }
 }
 
 private actor RecordingCommandPort: AgentEngineCommandPort {

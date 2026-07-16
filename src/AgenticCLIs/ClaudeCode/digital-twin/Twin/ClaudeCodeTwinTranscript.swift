@@ -17,11 +17,14 @@ public enum ClaudeCodeTwinTranscript {
         public let timestamp: Date
         public let body: [String: Any]
 
-        public init(type: String, uuid: String = UUID().uuidString,
-                    timestamp: Date = Date(), body: [String: Any]) {
+        public init(type: String,
+                    uuid: String? = nil,
+                    timestamp: Date? = nil,
+                    body: [String: Any],
+                    runtime: TwinRuntimeSeams = .live) {
             self.type = type
-            self.uuid = uuid
-            self.timestamp = timestamp
+            self.uuid = uuid ?? runtime.uuidString()
+            self.timestamp = timestamp ?? runtime.now()
             self.body = body
         }
 
@@ -37,27 +40,29 @@ public enum ClaudeCodeTwinTranscript {
         }
     }
 
-    public static func userLine(text: String) -> TranscriptLine {
+    public static func userLine(text: String, runtime: TwinRuntimeSeams = .live) -> TranscriptLine {
         TranscriptLine(type: "user", body: [
             "message": [
                 "role": "user",
                 "content": [["type": "text", "text": text]],
             ],
-        ])
+        ], runtime: runtime)
     }
 
-    public static func assistantTextLine(text: String) -> TranscriptLine {
+    public static func assistantTextLine(text: String,
+                                         runtime: TwinRuntimeSeams = .live) -> TranscriptLine {
         TranscriptLine(type: "assistant", body: [
             "message": [
                 "role": "assistant",
                 "content": [["type": "text", "text": text]],
             ],
-        ])
+        ], runtime: runtime)
     }
 
     public static func assistantToolUseLine(toolID: String,
                                             tool: String,
-                                            input: [String: Any]) -> TranscriptLine {
+                                            input: [String: Any],
+                                            runtime: TwinRuntimeSeams = .live) -> TranscriptLine {
         TranscriptLine(type: "assistant", body: [
             "message": [
                 "role": "assistant",
@@ -68,17 +73,18 @@ public enum ClaudeCodeTwinTranscript {
                     "input": input,
                 ]],
             ],
-        ])
+        ], runtime: runtime)
     }
 
     public static func toolResultLine(toolID: String,
                                       text: String,
-                                      isError: Bool = false) -> TranscriptLine {
+                                      isError: Bool = false,
+                                      runtime: TwinRuntimeSeams = .live) -> TranscriptLine {
         TranscriptLine(type: "tool_result", body: [
             "tool_use_id": toolID,
             "content": [["type": "text", "text": text]],
             "is_error": isError,
-        ])
+        ], runtime: runtime)
     }
 
     /// Synthesise a subagent assistant turn.
@@ -101,18 +107,20 @@ public enum ClaudeCodeTwinTranscript {
     ///   "message": { "role": "assistant", "content": [...] }
     /// }
     /// ```
-    public static func assistantThinkingLine(text: String) -> TranscriptLine {
+    public static func assistantThinkingLine(text: String,
+                                             runtime: TwinRuntimeSeams = .live) -> TranscriptLine {
         TranscriptLine(type: "assistant", body: [
             "message": [
                 "role": "assistant",
                 "content": [["type": "thinking", "thinking": text]],
             ],
-        ])
+        ], runtime: runtime)
     }
 
     public static func assistantUsageLine(inputTokens: Int,
                                           outputTokens: Int,
-                                          costUSD: Double?) -> TranscriptLine {
+                                          costUSD: Double?,
+                                          runtime: TwinRuntimeSeams = .live) -> TranscriptLine {
         var usage: [String: Any] = [
             "input_tokens": inputTokens,
             "output_tokens": outputTokens,
@@ -124,12 +132,13 @@ public enum ClaudeCodeTwinTranscript {
                 "content": [["type": "text", "text": ""]],
                 "usage": usage,
             ],
-        ])
+        ], runtime: runtime)
     }
 
     public static func subagentAssistantLine(text: String,
                                               parentToolUseID: String,
-                                              subagentType: String = "TaskAgent") -> TranscriptLine {
+                                              subagentType: String = "TaskAgent",
+                                              runtime: TwinRuntimeSeams = .live) -> TranscriptLine {
         TranscriptLine(type: "assistant", body: [
             "parentMessageId": parentToolUseID,
             "subagentType": subagentType,
@@ -137,6 +146,6 @@ public enum ClaudeCodeTwinTranscript {
                 "role": "assistant",
                 "content": [["type": "text", "text": text]],
             ],
-        ])
+        ], runtime: runtime)
     }
 }

@@ -91,8 +91,9 @@ struct AttachmentResolverTests {
             environment = FakeEnvironment(home: URL(fileURLWithPath: "/tmp/attachment-resolver-home", isDirectory: true))
             fileSystem = InMemoryFileSystem()
             resolver = AttachmentResolver(environment: environment, fileSystem: fileSystem)
-            attachmentsDirectory = environment.appSupportDirectory
-                .appendingPathComponent("attachments", isDirectory: true)
+            attachmentsDirectory = AppSupportPaths.attachmentsDirectory(
+                in: environment.appSupportDirectory
+            )
         }
     }
 }

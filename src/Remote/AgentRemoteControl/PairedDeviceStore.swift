@@ -20,9 +20,25 @@ public actor PairedDeviceStore {
 
     public func loadAll() async -> [PairingService.PairedDevice] {
         let entries = await keychain.enumerate(service: serviceID)
-        return entries.compactMap { entry in
-            try? JSONDecoder().decode(PairingService.PairedDevice.self, from: entry.data)
+        var devices: [PairingService.PairedDevice] = []
+        var decodeFailures = 0
+        for entry in entries {
+            do {
+                devices.append(try JSONDecoder().decode(PairingService.PairedDevice.self, from: entry.data))
+            } catch {
+                decodeFailures += 1
+                log.warning("paired device decode failed account=\(entry.account, privacy: .public) error=\(String(describing: error), privacy: .public)")
+            }
         }
+        if decodeFailures > 0 {
+            await SilentDiagnostics.shared.record(
+                kind: .pairedDevicesQuietReset,
+                owner: "PairedDeviceStore",
+                summary: "dropped \(decodeFailures) unreadable paired-device record(s)",
+                details: "service=\(serviceID)"
+            )
+        }
+        return devices
     }
 
     public func save(_ device: PairingService.PairedDevice) async {

@@ -65,7 +65,7 @@ Codemixer/
 | Wire codec (domain ↔ wire) | `Core/AgentCore/Events/WireCodec.swift` |
 | The event bus / ring buffer | `Core/AgentCore/Bus/MulticastEventBus.swift` |
 | The orchestrator | `Core/AgentCore/Engine/AgentEngine.swift`, `AgentEngine+Commands.swift` |
-| Engine state reduction | `Core/AgentCore/Engine/AgentState.swift` |
+| Engine state reduction | `Core/AgentCore/Engine/AgentEngine.swift` (`EngineState`), `AgentUI/ViewModel/EngineViewModel.swift` |
 | Conversation/diff snapshots for late clients | `Core/AgentCore/Engine/SnapshotService.swift` |
 | Git file/hunk revert | `Core/AgentCore/Engine/GitReverter.swift` |
 | Hook UDS server | `Core/AgentCore/Hooks/HookServer.swift` |
@@ -78,7 +78,7 @@ Codemixer/
 | Prefs / sessions / appearance persistence | `Core/AgentCore/Persistence/{PrefsStore,SessionStore,AppearancePrefs}.swift` |
 | Agent-agnostic Workspace→Projects model + persistence | `Core/AgentCore/Persistence/WorkspaceProjectsStore.swift` |
 | Core framework wrappers (Process, Keychain, FSEvents) | `Core/AgentCore/External/{ProcessRunner,KeychainStore,FSEventsStream}.swift` |
-| Product constants (ports, identity, timing, buffers, paths) | `Core/AgentCore/{RemoteDefaults,AppIdentity,ActivityTiming,StreamBufferDefaults}.swift`, `Core/AgentCore/Paths/{AppSupportPaths,SystemPaths}.swift` |
+| Product constants (ports, identity, timing, buffers, paths) | `Core/AgentCore/{RemoteDefaults,RemoteAuthTiming,DaemonDefaults,AppIdentity,ActivityTiming,StreamBufferDefaults}.swift`, `Core/AgentCore/Paths/{AppSupportPaths,SystemPaths}.swift` |
 | DI seams | `Core/AgentCore/Seams/{Clock,RandomSource,Environment,FileSystem,Seams}.swift` |
 | Claude binary lookup | `AgenticCLIs/ClaudeCode/Adapter/ClaudeBinaryLocator.swift` |
 | Shared Claude path/input/catalog helpers | `AgenticCLIs/ClaudeCode/Common/*.swift` |
@@ -90,6 +90,7 @@ Codemixer/
 | Claude TUI scrape fallback | `AgenticCLIs/ClaudeCode/Adapter/ClaudeTUIFallback.swift` |
 | Claude adapter top-level | `AgenticCLIs/ClaudeCode/Adapter/ClaudeAdapter.swift` |
 | Claude digital twin | `AgenticCLIs/ClaudeCode/digital-twin/Twin/` |
+| Live Claude harness (opt-in tests) | `tests/AgenticCLIs/ClaudeCode/ClaudeCodeTwinTests/LiveClaudeHarness.swift` — docs in `tests/AgenticCLIs/README.md` |
 | Agentic CLI layout convention | `AgenticCLIs/README.md` |
 | The wire DTOs (Foundation-only) | `Core/AgentProtocol/{AgentCommand,AgentEventWire,WireFrames,Decisions,Prefs,AttachmentRef,WireVersion}.swift` |
 | WebSocket server | `Remote/AgentRemoteControl/RemoteControlServer.swift`, `ClientConnection.swift` |
@@ -112,7 +113,11 @@ Codemixer/
 | Conversation scroller | `AgentUI/Conversation/ConversationView.swift` |
 | Session navigator (projects → sessions, icon-rail focus mode) | `AgentUI/Sidebar/SessionSidebarView.swift` |
 | Cmd+K command palette | `AgentUI/Palette/CommandPaletteView.swift` |
-| Composer (prompt input, modes, mic, send/cancel) | `AgentUI/Composer/{PromptComposerView,PromptComposerSupportViews,ComposerModelCatalog}.swift` |
+| Composer (prompt input, modes, mic, send/cancel) | `AgentUI/Composer/{PromptComposerView,PromptComposerSupportViews,PromptComposerDraftLogic,ComposerAttachmentHandling}.swift` |
+| Silent diagnostics (opt-in) | `AgentUI/Debug/SilentDiagnosticsView.swift`, `Core/AgentCore/Diagnostics/SilentDiagnostics.swift` |
+| Changed-files reconcile | `Core/AgentCore/Engine/ChangedFilesReconciler.swift` |
+| Appearance at root | `AgentUI/Theme/AppearanceModifiers.swift`, applied from `CodemixerApp/RootView.swift` |
+| Bootstrap (Mode B probe, auth, notifications) | `CodemixerApp/Bootstrap.swift`, `Bootstrap+Remote.swift` |
 | Diff panel | `AgentUI/Diff/DiffPanelView.swift` |
 | Settings pane | `AgentUI/Settings/SettingsView.swift` |
 | Project picker | `AgentUI/Pickers/ProjectPickerView.swift` |
@@ -173,7 +178,8 @@ tests/
 | Shell env NUL parsing | `Core/AgentCoreTests/ShellEnvResolverTests.swift` |
 | ResolvedEnvironment PATH/helpers | `Core/AgentCoreTests/ResolvedEnvironmentTests.swift` |
 | AgentError Codable + equality | `Core/AgentCoreTests/AgentErrorTests.swift` |
-| Git changed-files porcelain parsing | `Core/AgentCoreTests/ChangedFilesParsingTests.swift` |
+| Git changed-files porcelain parsing | `Core/AgentCoreTests/{ChangedFilesParsingTests,ChangedFilesReconcilerTests}.swift` |
+| Silent diagnostics ring | `Core/AgentCoreTests/SilentDiagnosticsTests.swift` |
 | Status phrase priority | `Core/AgentCoreTests/StatusPhraseResolverTests.swift` |
 | Activity heartbeat escalation | `Core/AgentCoreTests/HeartbeatActivityMonitorTests.swift` |
 | Prefs / sessions persistence | `Core/AgentCoreTests/{PrefsStoreTests,SessionStoreTests,AppearancePrefsTests}.swift` |
@@ -186,13 +192,16 @@ tests/
 | Slash commands + session lister | `AgenticCLIs/ClaudeCode/ClaudeAdapterTests/{ClaudeSlashCommandsTests,ClaudeSessionListerTests}.swift` |
 | TUI fallback gating | `AgenticCLIs/ClaudeCode/ClaudeAdapterTests/{TUIFallbackTests,TUIFallbackGateTests}.swift` |
 | Twin decoder parity (adapter + twin) | `AgenticCLIs/ClaudeCode/{ClaudeAdapterTests,ClaudeCodeTwinTests}/TwinDecoderParityTests.swift` |
+| Fake-claude spawned integration | `AgenticCLIs/ClaudeCode/ClaudeAdapterTests/FakeClaudeIntegrationTests.swift` |
+| Claude digital twin + engine E2E | `AgenticCLIs/ClaudeCode/ClaudeCodeTwinTests/{EngineDigitalTwinTests,TwinDecoderParityTests}.swift` |
+| Live Claude harness (opt-in) | `AgenticCLIs/ClaudeCode/ClaudeCodeTwinTests/{LiveClaudeHarness,LiveClaudeIntegrationTests}.swift` — see [`tests/AgenticCLIs/README.md`](tests/AgenticCLIs/README.md) |
 | FakeClock virtual sleep | `TestSupport/AgentTestSupportTests/FakeClockTests.swift` |
 | Pairing PIN + lockout | `Remote/AgentRemoteControlTests/PairingServiceTests.swift` |
 | Paired-device store | `Remote/AgentRemoteControlTests/PairedDeviceStoreTests.swift` |
 | Remote-control E2E, replay, command errors, PTY write failures | `Remote/AgentRemoteControlTests/RemoteControlE2ETests.swift` |
 | Live TLS transport handshake | `Remote/AgentRemoteControlTests/LiveTLSTransportTests.swift` |
 | Certificate manager | `Remote/AgentRemoteControlTests/CertificateManagerTests.swift` |
-| HTTP sidecar parsing + server | `Remote/AgentRemoteControlTests/{HTTPSidecarParsingTests,HTTPSidecarServerTests}.swift` |
+| HTTP sidecar parsing + server | `Remote/AgentRemoteControlTests/{HTTPSidecarParsingTests,HTTPSidecarServerTests}.swift` (includes `/v1/diagnostics/silent`) |
 | Remote engine client + Bonjour | `Remote/AgentRemoteControlTests/{RemoteEngineClientTests,BonjourAdvertiserTests,BonjourBroadcasterTests}.swift` |
 | Wire-codec parity | `Remote/RemoteParityTests/WireCodecParityTests.swift` |
 | Command dispatch parity | `Remote/RemoteParityTests/CommandDispatchParityTests.swift` |
@@ -202,7 +211,6 @@ tests/
 | Session export | `AgentUITests/SessionExporterTests.swift` |
 | Voice + TTS + speech wrappers | `AgentUITests/{VoiceInputServiceTests,TTSStripMarkdownTests,SpeechCaptureTests,SpeechSynthesisTests}.swift` |
 | QR + system notifications | `AgentUITests/{QRCodeRendererTests,SystemNotificationsTests}.swift` |
-| Claude digital twin + engine E2E | `AgenticCLIs/ClaudeCode/ClaudeCodeTwinTests/{EngineDigitalTwinTests,TwinDecoderParityTests}.swift` |
 
 ---
 
@@ -265,7 +273,7 @@ Full recipe in `docs/reference/patterns/plugin-adapter-protocol.md`.
 
 ## Build, test, run
 
-Package and test commands run from the repository root:
+Package and test commands run from the repository root (SPM targets are **macOS 14+ only**):
 
 ```bash
 swift build                              # everything
@@ -309,7 +317,7 @@ For manual live-account spike validation prerequisites (`claude`, `socat`, `jq`)
 see the README section
 [`Spike-script prerequisites`](README.md#spike-script-prerequisites).
 
-`swift test --no-parallel` must be green before any commit. The `--no-parallel` flag is mandatory: a handful of tests own kernel-level resources (PTYs, signal sources, `NWListener`s) that race when scheduled across parallel workers. Serial execution finishes the full suite in under two seconds. Lint and format will land in the toolchain shortly (`SwiftFormat` + `SwiftLint` are listed in `code-style.md` §25); for now treat the style guide as the linter.
+`swift test --no-parallel` must be green before any commit. The `--no-parallel` flag is mandatory: a handful of tests own kernel-level resources (PTYs, signal sources, `NWListener`s) that race when scheduled across parallel workers. Serial execution finishes the full suite in under two seconds. SwiftFormat (`.swiftformat`) and SwiftLint (`.swiftlint.yml`) configs are checked locally via `scripts/pre-commit.swift`; treat `docs/style/code-style.md` as the canonical style reference.
 
 ---
 
@@ -319,12 +327,14 @@ When extending the codebase after the 2026 maintainability pass:
 
 | Constant owner | Owns |
 | --- | --- |
-| `RemoteDefaults` | WebSocket port (8421), sidecar port (8422), `/v1/ws` path, loopback/LAN hosts |
-| `AppIdentity` | Bundle id, log subsystem, LaunchAgent label/plist, Keychain service names, queue labels, app-support/caches relative paths |
-| `ActivityTiming` | Activity escalation thresholds + status phrases + optimistic-send/undo windows |
+| `RemoteDefaults` | WebSocket port (8421), sidecar port (8422), `/v1/ws` path, loopback/LAN hosts, Bonjour service type/name/TXT version |
+| `RemoteAuthTiming` | Pairing PIN TTL, lockout duration, attempt interval, max attempts |
+| `DaemonDefaults` | Headless idle-check interval and exit threshold |
+| `AppIdentity` | Bundle id, log subsystem, LaunchAgent label/plist/log paths/throttle, Keychain service names, queue labels, app-support/caches relative paths |
+| `ActivityTiming` | Activity escalation thresholds, status phrases (`idle`/`thinking`/optimistic send), TUI poll interval |
 | `StreamBufferDefaults` | Named `AsyncStream` buffer sizes per layer (event history 500, etc.) |
 | `SystemPaths` | `/usr/bin/env`, `/usr/bin/git`, `/usr/bin/openssl`, Terminal.app |
-| `AppSupportPaths` | `prefs.json`, `sessions.json`, `workspaces.json`, attachments dir |
+| `AppSupportPaths` | `prefs.json`, `sessions.json`, `workspaces.json`, attachments dir, `remote-server.p12` |
 | `ClaudeProjectPaths` | Claude transcript/project slug conventions |
 | `AgentUI/External/DesktopActions` | Pasteboard, Finder reveal, save panels |
 | `Remote/AgentRemoteControl/External/CertificateIdentityImporter` | PKCS#12 import + cert fingerprint extraction |
@@ -343,7 +353,7 @@ swift scripts/regen-coverage-manifest.swift --check
 swift test --no-parallel 2>&1 | scripts/check-test-runtime.swift   # per-suite runtime budgets
 ```
 
-`scripts/pre-commit.swift` chains the build + test + lint gate; install it with
+`scripts/pre-commit.swift` is a **narrow** local hook (build + serial tests + SwiftFormat/SwiftLint). It does **not** replace the full merge gate below. Install with
 `ln -sf ../../scripts/pre-commit.swift .git/hooks/pre-commit`. See
 [`scripts/README.md`](scripts/README.md) for the full catalog.
 
@@ -357,9 +367,9 @@ These will break the build, the tests, or a future-you's review.
 
 ### Build-breaking
 
-- **Importing SwiftUI from `AgentCore`, `ClaudeCode`, `AgentRemoteControl`, or `AgentProtocol`.** Those targets must stay headless-capable. The headless CI matrix would catch it once wired; for now, just don't.
+- **Importing SwiftUI from `AgentCore`, `ClaudeCode`, `AgentRemoteControl`, or `AgentProtocol`.** Those targets must stay headless-capable. Enforced by `scripts/check-no-swiftui-imports.swift`.
 - **Importing `ClaudeCode` (or any specific adapter) from `AgentCore` or `AgentUI`.** Adapters are leaves; the core stays agent-agnostic.
-- **Direct calls to any wrapped framework outside `*/External/*.swift`.** `Foundation.Process`, `SecItem*`, `FSEventStream*`, `NWListener`, `NWConnection`, `AVSpeechSynthesizer`, `AVAudioEngine`, `SFSpeechRecognizer`, `UNUserNotificationCenter`, `NetService`, `URLSession`. Use the wrapper from the appropriate `External/` directory (`ProcessRunner`, `KeychainStore`, `FSEventsStream`, `NetworkTransport`, `SpeechSynthesis`, `SpeechCapture`, `SystemNotifications`, `BonjourBroadcaster`); if a wrapper doesn't exist, add one in the same PR. See `docs/style/code-style.md §18.5` and `docs/reference/wrappers.md`. Enforced by `scripts/check-direct-framework-calls.swift` in CI.
+- **Direct calls to any wrapped framework outside `*/External/*.swift`.** `Foundation.Process`, `SecItem*`, `FSEventStream*`, `NWListener`, `NWConnection`, `AVSpeechSynthesizer`, `AVAudioEngine`, `SFSpeechRecognizer`, `UNUserNotificationCenter`, `NetService`, `URLSession`. Use the wrapper from the appropriate `External/` directory (`ProcessRunner`, `KeychainStore`, `FSEventsStream`, `NetworkTransport`, `SpeechSynthesis`, `SpeechCapture`, `SystemNotifications`, `BonjourBroadcaster`); if a wrapper doesn't exist, add one in the same PR. See `docs/style/code-style.md §18.5` and `docs/reference/wrappers.md`. Enforced by `scripts/check-direct-framework-calls.swift` locally (see merge gate in this file). Not wired to GitHub Actions today.
 - **Reaching for `forK + execve`, `Process` for the agent, or any blocking IO on the main thread.** Use `PTYHost` and the spawn shim.
 - **Adding a `Sendable` warning suppression.** If a type isn't `Sendable`, fix it; if you need `@unchecked Sendable`, write a one-line comment explaining why it's safe (see `TerminalEngine.DelegateBridge` and `HookServer.DataBox` for examples).
 - **Using `posix_spawn` flags casually.** `POSIX_SPAWN_CLOEXEC_DEFAULT` is *not* used here — it caused EPERM under unentitled processes. If you add a flag, test on a clean macOS user account.

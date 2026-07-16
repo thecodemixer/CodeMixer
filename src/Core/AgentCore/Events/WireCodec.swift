@@ -54,7 +54,7 @@ public enum WireCodec {
         case .stopped(let reason):
             return .stopped(reason: reason)
         case .error(let err):
-            return .error(WireAgentError(code: err.code, message: err.userMessage))
+            return .error(WireAgentErrorCoding.encode(err))
         case .speakBubbleRequested(let id):
             return .speakBubbleRequested(id: id)
         case .fileReverted(let path):
@@ -101,7 +101,10 @@ public enum WireCodec {
         case .noEventGap(let turn, let ms):
             return .noEventGap(turnID: turn, elapsed: .milliseconds(ms))
         case .authURL(let s):
-            return .authURL(URL(string: s) ?? URL(fileURLWithPath: "/"))
+            guard let url = URL(string: s) else {
+                return .error(.internalInvariant(detail: "invalid authURL"))
+            }
+            return .authURL(url)
         case .bell:
             return .bell
         case .fileTouched(let path, let kind):
@@ -113,7 +116,7 @@ public enum WireCodec {
         case .stopped(let reason):
             return .stopped(reason: reason)
         case .error(let wireErr):
-            return .error(.internalInvariant(detail: "\(wireErr.code): \(wireErr.message)"))
+            return .error(WireAgentErrorCoding.decode(wireErr))
         case .speakBubbleRequested(let id):
             return .speakBubbleRequested(id: id)
         case .fileReverted(let path):
@@ -177,4 +180,5 @@ public enum WireCodec {
         let comp = duration.components
         return Int(comp.seconds * 1_000) + Int(comp.attoseconds / 1_000_000_000_000_000)
     }
+
 }

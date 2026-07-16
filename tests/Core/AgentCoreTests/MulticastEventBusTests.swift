@@ -15,7 +15,7 @@ struct MulticastEventBusTests {
         var iterator = sub.stream.makeAsyncIterator()
         var seen: [String] = []
         for _ in 0..<3 {
-            guard case let .userTurn(_, text)? = await iterator.next() else { break }
+            guard case let .userTurn(_, text)? = await iterator.next()?.event else { break }
             seen.append(text)
         }
         #expect(seen == ["msg0", "msg1", "msg2"])
@@ -28,7 +28,7 @@ struct MulticastEventBusTests {
         let sub = await bus.subscribe()
         await bus.publish(.bell)
         var iterator = sub.stream.makeAsyncIterator()
-        let next = await iterator.next()
+        let next = await iterator.next()?.event
         if case .bell = next {
             #expect(Bool(true))
         } else {
@@ -52,7 +52,7 @@ struct MulticastEventBusTests {
         var collected: [String] = []
         var iter = sub.stream.makeAsyncIterator()
         for _ in 0..<limit {
-            guard case let .userTurn(_, text)? = await iter.next() else { break }
+            guard case let .userTurn(_, text)? = await iter.next()?.event else { break }
             collected.append(text)
         }
 
@@ -80,6 +80,25 @@ struct MulticastEventBusTests {
 
         let count = await collectTask.value
         #expect(count == 1)
+    }
+
+    @Test("Stream cancellation drops subscriber count via onTermination")
+    func cancellationCleanup() async {
+        let bus = MulticastEventBus(historyLimit: 8)
+        let sub = await bus.subscribe()
+        #expect(await bus.subscriberCount == 1)
+
+        let collectTask = Task<Int, Never> {
+            var count = 0
+            for await _ in sub.stream { count += 1 }
+            return count
+        }
+
+        collectTask.cancel()
+        try? await Task.sleep(for: .milliseconds(50))
+
+        #expect(await bus.subscriberCount == 0)
+        await bus.shutdown()
     }
 
     @Test("3-subscriber concurrent stress: no event lost in a 100-event burst")
@@ -154,7 +173,7 @@ struct MulticastEventBusTests {
         var collected: [String] = []
         var it = sub.stream.makeAsyncIterator()
         for _ in 0..<2 {
-            guard case .userTurn(_, let text)? = await it.next() else { break }
+            guard case .userTurn(_, let text)? = await it.next()?.event else { break }
             collected.append(text)
         }
         #expect(collected == ["second", "third"])
@@ -169,7 +188,7 @@ struct MulticastEventBusTests {
         let sub = await bus.subscribe(after: nil)
         var count = 0
         var it = sub.stream.makeAsyncIterator()
-        while let _ = await it.next() {
+        while await it.next() != nil {
             count += 1
             if count == 2 { break }
         }
@@ -186,7 +205,7 @@ struct MulticastEventBusTests {
         let sub = await bus.subscribe(after: unknownID)
         var count = 0
         var it = sub.stream.makeAsyncIterator()
-        while let _ = await it.next() {
+        while await it.next() != nil {
             count += 1
             if count == 2 { break }
         }
@@ -210,8 +229,27 @@ struct MulticastEventBusTests {
         // Subscribe after id1 — only id2's event should replay.
         let sub = await bus.subscribe(after: id1)
         var it = sub.stream.makeAsyncIterator()
-        let replayed = await it.next()
+        let replayed = await it.next()?.event
         #expect(replayed != nil)           // exactly one event replayed
+        await bus.shutdown()
+    }
+
+    @Test("subscribeWithOutcome reports fresh, resumed, and checkpointExpired")
+    func subscribeWithOutcome() async {
+        let bus = MulticastEventBus(historyLimit: 4)
+        let (_, freshNil) = await bus.subscribeWithOutcome(after: nil)
+        #expect(freshNil == .fresh)
+
+        let id1 = await bus.publish(.bell)
+        let id2 = await bus.publish(.bell)
+        let (_, resumed) = await bus.subscribeWithOutcome(after: id1)
+        #expect(resumed == .resumed)
+
+        for _ in 0..<10 {
+            _ = await bus.publish(.bell)
+        }
+        let (_, expired) = await bus.subscribeWithOutcome(after: id2)
+        #expect(expired == .checkpointExpired)
         await bus.shutdown()
     }
 }

@@ -15,4 +15,6 @@ public enum StreamBufferDefaults {
     public static let networkConnections = 64
     public static let speechEvents = 64
     public static let fileSystemEvents = 1024
+    /// Bounded SilentDiagnostics ring — enough for a session of quiet recoveries.
+    public static let silentDiagnostics = 200
 }

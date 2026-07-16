@@ -13,6 +13,36 @@ struct AgentEngineCommandTests {
 
     // MARK: Conversation
 
+    @Test("start strips billing-poison env before PTY spawn")
+    func startStripsBillingPoisonEnv() async throws {
+        let workspace = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("codemixer-billing-env-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+
+        let env = FakeEnvironment(
+            processEnv: [
+                "SHELL": "/codemixer-test/missing-shell",
+                "PATH": "/usr/bin:/bin",
+                "CLAUDE_CODE_ENTRYPOINT": "sdk",
+                "ANTHROPIC_API_KEY": "sk-test",
+            ],
+            home: workspace
+        )
+        let capture = CapturingPTYFactory()
+        let h = try await EngineHarness.make(workspace: workspace,
+                                             environment: env,
+                                             ptyFactory: capture.makePTY(_:))
+        guard let spec = capture.lastSpec else {
+            Issue.record("expected PTY spawn spec")
+            await h.shutdown()
+            return
+        }
+        #expect(spec.environment["CLAUDE_CODE_ENTRYPOINT"] == nil)
+        #expect(spec.environment["ANTHROPIC_API_KEY"] == nil)
+        #expect(spec.environment["PATH"] == "/usr/bin:/bin")
+        await h.shutdown()
+    }
+
     @Test("sendPrompt encodes via adapter and publishes userTurn")
     func sendPrompt() async throws {
         let h = try await EngineHarness.make()
@@ -122,8 +152,7 @@ struct AgentEngineCommandTests {
                                 filename: "spec.md",
                                 byteCount: 4,
                                 mimeType: "text/markdown")
-        let uploaded = h.environment.appSupportDirectory
-            .appendingPathComponent("attachments", isDirectory: true)
+        let uploaded = AppSupportPaths.attachmentsDirectory(in: h.environment.appSupportDirectory)
             .appendingPathComponent("upload-1-spec.md")
         try h.fileSystem.writeAtomically(Data("body".utf8), to: uploaded)
 
@@ -425,29 +454,6 @@ struct AgentEngineCommandTests {
         await h.shutdown()
     }
 
-    @Test("respondToInlinePrompt forwards as user prompt")
-    func respondToInline() async throws {
-        let h = try await EngineHarness.make()
-        try await h.engine.send(.respondToInlinePrompt(id: UUID(), text: "answer"))
-        try await Task.sleep(for: .milliseconds(20))
-        #expect(h.adapter.recorded.contains(.userPrompt("answer")))
-        await h.shutdown()
-    }
-
-    @Test("respondToInlinePrompt writes encoded answer bytes to the PTY")
-    func respondToInlineWritesAnswerBytesToPTY() async throws {
-        try await assertPTYWrite(.init("respondToInlinePrompt",
-                                       .respondToInlinePrompt(id: UUID(), text: "inline answer"),
-                                       "inline answer"))
-    }
-
-    @Test("respondToInlinePrompt write failure propagates")
-    func respondToInlineWriteFailurePropagates() async throws {
-        try await assertPTYWriteFailure(.init("respondToInlinePrompt",
-                                              .respondToInlinePrompt(id: UUID(), text: "inline fail"),
-                                              "inline fail"))
-    }
-
     // MARK: Lifecycle
 
     @Test("closeSession transitions engine to stopped")
@@ -701,6 +707,15 @@ struct AgentEngineCommandTests {
                                       requestedAt: clock.now())
         #expect(h.adapter.emit(.permissionRequest(prompt: prompt)))
 
+        // Wait until the engine has ingested the permission into pending state
+        // before advancing the resume-startup watchdog — otherwise the stall
+        // handler can race ahead of the adapter event fan-out.
+        try await waitUntil(timeout: .seconds(2)) {
+            await h.collectedSoFar().contains {
+                if case .permissionRequest(let p) = $0 { return p.id == prompt.id }
+                return false
+            }
+        }
         try await spinUntil(clock: clock, target: 1, timeout: .seconds(2))
         clock.advance(by: ActivityTiming.resumeStartupStallTimeout + .milliseconds(1))
         try await Task.sleep(for: .milliseconds(40))
@@ -1057,8 +1072,8 @@ struct AgentEngineCommandTests {
 
 actor EventCollector {
     private(set) var events: [AgentEvent] = []
-    func ingest(_ stream: AsyncStream<AgentEvent>) async {
-        for await event in stream { events.append(event) }
+    func ingest(_ stream: AsyncStream<MulticastEventBus.HistoryEntry>) async {
+        for await entry in stream { events.append(entry.event) }
     }
     func snapshot() -> [AgentEvent] { events }
 }
@@ -1075,6 +1090,7 @@ struct EngineHarness {
 
     static func make(clock: any AgentClock = SystemClock(),
                      workspace: URL? = nil,
+                     environment: FakeEnvironment? = nil,
                      permissionTimeout: Duration = .seconds(300),
                      adapter: RecordingMockAdapter? = nil,
                      resumeSessionID: String? = nil,
@@ -1085,7 +1101,7 @@ struct EngineHarness {
             .appendingPathComponent("codemixer-engine-tests-\(UUID().uuidString)",
                                     isDirectory: true)
         try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
-        let env = FakeEnvironment(home: workspace)
+        let env = environment ?? FakeEnvironment(home: workspace)
         let seams = Seams.fake(environment: env, fileSystem: fs).with(clock: clock)
         let engine: AgentEngine
         if let ptyFactory {
@@ -1122,6 +1138,19 @@ struct EngineHarness {
     func shutdown() async {
         await engine.bus.unsubscribe(subID)
         await engine.shutdown(reason: .naturalExit)
+    }
+}
+
+final class CapturingPTYFactory: @unchecked Sendable {
+    private let lock = NSLock()
+    private(set) var lastSpec: PTYHost.ChildSpec?
+    private let inner = ScriptedPTY()
+
+    func makePTY(_ spec: PTYHost.ChildSpec) throws -> any AgentPTY {
+        lock.lock()
+        lastSpec = spec
+        lock.unlock()
+        return inner
     }
 }
 

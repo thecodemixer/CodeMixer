@@ -16,6 +16,11 @@ struct AgentIDTests {
         }
     }
 
+    @Test("Only claudeCode is marked shipping in v1")
+    func shippingSet() {
+        #expect(AgentID.shipping == [.claudeCode])
+    }
+
     @Test("AgentID round-trips through Codable")
     func codableRoundTrip() throws {
         let original = AgentID.claudeCode
@@ -38,13 +43,13 @@ struct AgentCapabilitiesTests {
         let set: AgentCapabilities = [.hooksOverUDS, .transcriptJSONL]
         #expect(set.contains(.hooksOverUDS))
         #expect(set.contains(.transcriptJSONL))
-        #expect(!set.contains(.streamJSONStdio))
+        #expect(!set.contains(.ptyTUIFallback))
     }
 
-    @Test("All six capabilities are distinct")
+    @Test("All five capabilities are distinct")
     func distinctBits() {
         let all: [AgentCapabilities] = [
-            .hooksOverUDS, .transcriptJSONL, .streamJSONStdio,
+            .hooksOverUDS, .transcriptJSONL,
             .ptyTUIFallback, .permissionPrompts,
             .resumableSessions,
         ]

@@ -214,3 +214,21 @@ public struct CommandPaletteView: View {
         command.run()
     }
 }
+
+#if DEBUG
+#Preview("Command palette – Light") {
+    CommandPaletteView(model: .preview,
+                       sceneCommands: PreviewFixtures.paletteCommands(for: .preview),
+                       onDismiss: {})
+        .frame(width: 520, height: 360)
+        .preferredColorScheme(.light)
+}
+
+#Preview("Command palette – Dark") {
+    CommandPaletteView(model: .preview,
+                       sceneCommands: PreviewFixtures.paletteCommands(for: .preview),
+                       onDismiss: {})
+        .frame(width: 520, height: 360)
+        .preferredColorScheme(.dark)
+}
+#endif

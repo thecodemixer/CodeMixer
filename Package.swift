@@ -10,7 +10,6 @@ let package = Package(
     name: "Codemixer",
     platforms: [
         .macOS(.v14),
-        .iOS(.v17),
     ],
     products: [
         .library(name: "AgentProtocol", targets: ["AgentProtocol"]),
@@ -101,11 +100,12 @@ let package = Package(
                 "Codemixer.xcworkspace",
                 "Derived",
             ],
+            resources: [.process("Resources")],
             swiftSettings: swiftSettings
         ),
         .testTarget(
             name: "AgentProtocolTests",
-            dependencies: ["AgentProtocol"],
+            dependencies: ["AgentProtocol", "AgentTestSupport"],
             path: "tests/Core/AgentProtocolTests",
             swiftSettings: swiftSettings
         ),
@@ -136,9 +136,8 @@ let package = Package(
         ),
         .testTarget(
             name: "RemoteParityTests",
-            dependencies: ["AgentCore", "AgentProtocol", "AgentRemoteControl", "AgentUI"],
+            dependencies: ["AgentCore", "AgentProtocol", "AgentRemoteControl", "AgentTestSupport"],
             path: "tests/Remote/RemoteParityTests",
-            resources: [.process("Fixtures")],
             swiftSettings: swiftSettings
         ),
         .testTarget(

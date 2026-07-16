@@ -28,6 +28,24 @@ Installed events: `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse
 
 `Stop` may include `last_assistant_message`. The adapter binds `transcript_path` from hooks.
 
+### Assistant-text authority (no double replies)
+
+| Channel | Role |
+| --- | --- |
+| Transcript JSONL | **Canonical** final `assistantText` |
+| Stop `last_assistant_message` | **Fallback** only if the tailer has not yet emitted for the session |
+
+On Stop/SubagentStop, `ClaudeAdapter` drains the transcript first, then drops hook
+`assistantText` when `ClaudeTranscriptTailer.hasEmittedAssistantText()` is true.
+Without this, every turn would paint two assistant bubbles (transcript + Stop).
+
+### Interactive billing path (no `-p`)
+
+`buildLaunchArgv` launches bare `claude` under a PTY — never `--print` / `-p` /
+stream-json. Live transcript markers should show `entrypoint: "cli"` and
+`promptSource: "typed"` (not `sdk-cli` / `sdk`). Opt-in validation:
+[`tests/AgenticCLIs/README.md`](../../../tests/AgenticCLIs/README.md#live-claude-harness-claudecodetwintests).
+
 ## Settings
 
 Project-local `.claude/settings.local.json` (see `ClaudeHookSettings.swift`). Not global
@@ -42,11 +60,13 @@ keep leading dash from absolute paths.
 
 PTY: `1\r` allow, `2\r` allow-always, `3\r` deny. Workspace trust: `1\r` trust, `2\r` exit.
 
-## Digital twin
+## Digital twin and live harness
 
 - In-process: `ClaudeCodeTwin` (`digital-twin/Twin/`) — fast projection tests.
 - Executable: `fake-claude` — integration authority (`CODEMIXER_FAKE_CLAUDE=1`).
+- Live account: `LiveClaudeHarness` in `ClaudeCodeTwinTests` (`CODEMIXER_LIVE_CLAUDE=1`).
 - Coverage statement: [`digital-twin/README.md`](digital-twin/README.md).
+- Test catalog: [`tests/AgenticCLIs/README.md`](../../../tests/AgenticCLIs/README.md).
 
 ## Change policy
 

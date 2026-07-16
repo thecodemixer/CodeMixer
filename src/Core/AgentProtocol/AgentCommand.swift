@@ -28,7 +28,6 @@ public enum AgentCommand: Sendable, Codable, Hashable {
     // MARK: Permission prompts
 
     case respondToPermission(id: UUID, decision: PermissionDecision)
-    case respondToInlinePrompt(id: UUID, text: String)
 
     // MARK: Session lifecycle
 

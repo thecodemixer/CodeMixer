@@ -18,7 +18,7 @@ public struct AuthGateView: View {
     public var body: some View {
         VStack(spacing: Theme.spacing.s16) {
             Image(systemName: "person.badge.key.fill")
-                .accessibilityLabel("Sign in required")
+                .accessibilityHidden(true)
                 .font(Theme.typography.heroIcon)
                 .foregroundStyle(Theme.signal.info)
 
@@ -54,3 +54,10 @@ public struct AuthGateView: View {
         .background(Theme.surface.canvas)
     }
 }
+
+#if DEBUG
+#Preview("Auth gate") {
+    AuthGateView(url: PreviewFixtures.sampleAuthURL, onDismiss: {})
+        .preferredColorScheme(.light)
+}
+#endif

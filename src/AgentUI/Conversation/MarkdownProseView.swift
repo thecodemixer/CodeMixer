@@ -1,5 +1,4 @@
 import SwiftUI
-import AppKit
 
 /// Block-level markdown renderer for assistant answers (visual-style §15).
 ///
@@ -188,13 +187,8 @@ struct CodeBlockView: View {
     }
 
     private func openInEditor() {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("codemixer-snippets", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let ext = Self.fileExtension(for: language)
-        let file = dir.appendingPathComponent("snippet-\(UUID().uuidString).\(ext)")
-        try? code.write(to: file, atomically: true, encoding: .utf8)
-        DesktopActions.openURL(file)
+        DesktopActions.openCodeSnippet(code, fileExtension: ext)
     }
 
     private static func fileExtension(for language: String?) -> String {

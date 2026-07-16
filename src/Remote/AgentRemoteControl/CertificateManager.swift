@@ -6,7 +6,7 @@ import AgentCore
 ///
 /// First-launch flow:
 ///   1. Use `ProcessRunner` to shell out to `SystemPaths.openssl` and generate a
-///      P12 archive containing a fresh EC key + self-signed cert.
+///      P12 archive containing a fresh RSA-2048 key + self-signed cert.
 ///   2. Import the P12 into a `SecIdentity` for use with `NWParameters.tls`.
 ///   3. Persist the P12 password via `KeychainStore` so subsequent runs can
 ///      re-import without prompting.
@@ -60,7 +60,7 @@ public actor CertificateManager {
         self.keychain = keychain
         self.fileSystem = fileSystem
         self.random = random
-        self.p12URL = environment.appSupportDirectory.appendingPathComponent("remote-server.p12")
+        self.p12URL = AppSupportPaths.remoteServerP12URL(in: environment.appSupportDirectory)
         self.passwordService = passwordService
         self.passwordAccount = passwordAccount
     }
@@ -71,6 +71,12 @@ public actor CertificateManager {
 
         if !fileSystem.fileExists(at: p12URL) {
             try await generateP12(at: p12URL, password: password)
+            await SilentDiagnostics.shared.record(
+                kind: .certificateRotated,
+                owner: "CertificateManager",
+                summary: "generated fresh TLS identity",
+                details: p12URL.lastPathComponent
+            )
         }
 
         do {
@@ -88,6 +94,12 @@ public actor CertificateManager {
         try? fileSystem.remove(at: p12URL)
         await keychain.delete(service: passwordService, account: passwordAccount)
         _ = try await loadOrCreate()
+        await SilentDiagnostics.shared.record(
+            kind: .certificateRotated,
+            owner: "CertificateManager",
+            summary: "TLS identity rotated",
+            details: p12URL.lastPathComponent
+        )
     }
 
     // MARK: - Private

@@ -69,6 +69,22 @@ actor LaunchAgentInstaller {
     }
 
     private var plistText: String {
+        let template = loadLaunchAgentTemplate()
+        return template.replacingOccurrences(of: "__CODEMIXERD_PATH__", with: daemonPath)
+    }
+
+    private func loadLaunchAgentTemplate() -> String {
+        let resourceName = AppIdentity.launchAgentPlistName.replacingOccurrences(of: ".plist", with: "")
+        if let url = Bundle.main.url(forResource: resourceName, withExtension: "plist"),
+           let data = try? fileSystem.readData(at: url),
+           let text = String(data: data, encoding: .utf8),
+           !text.isEmpty {
+            return text
+        }
+        return fallbackLaunchAgentTemplate()
+    }
+
+    private func fallbackLaunchAgentTemplate() -> String {
         """
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -78,7 +94,7 @@ actor LaunchAgentInstaller {
             <string>\(AppIdentity.launchAgentLabel)</string>
             <key>ProgramArguments</key>
             <array>
-                <string>\(daemonPath)</string>
+                <string>__CODEMIXERD_PATH__</string>
             </array>
             <key>RunAtLoad</key>
             <true/>
@@ -88,11 +104,11 @@ actor LaunchAgentInstaller {
                 <false/>
             </dict>
             <key>StandardOutPath</key>
-            <string>/tmp/codemixerd.stdout</string>
+            <string>\(AppIdentity.launchAgentStdoutPath)</string>
             <key>StandardErrorPath</key>
-            <string>/tmp/codemixerd.stderr</string>
+            <string>\(AppIdentity.launchAgentStderrPath)</string>
             <key>ThrottleInterval</key>
-            <integer>30</integer>
+            <integer>\(AppIdentity.launchAgentThrottleIntervalSeconds)</integer>
         </dict>
         </plist>
         """

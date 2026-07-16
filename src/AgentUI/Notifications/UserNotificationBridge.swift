@@ -29,8 +29,8 @@ public final class UserNotificationBridge {
     /// Convenience: tail a bus and route notifications/bells.
     public func tail(bus: MulticastEventBus) async {
         let sub = await bus.subscribe()
-        for await event in sub.stream {
-            switch event {
+        for await entry in sub.stream {
+            switch entry.event {
             case .bell:
                 bell()
             case .statusPhraseChanged(let source, let phrase) where source == .hookHint:

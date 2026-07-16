@@ -49,7 +49,7 @@ public enum AgentError: Error, Codable, Sendable {
 - `Sendable` always; `Codable` only if the type crosses the wire.
 - Associated values carry *every* fact a fix-it message would need: errno values, paths, IDs, sizes, line numbers.
 - No `case other`. The closed-set property of enums is what we paid for.
-- No `case unknown(String)` unless this enum is itself a wire type (then it's a catch-all for forward-compat).
+- Wire enums decode exhaustively; breaking changes bump `WireVersion` (no `unknown` catch-all).
 
 ---
 

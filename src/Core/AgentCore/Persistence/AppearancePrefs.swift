@@ -10,11 +10,15 @@ public struct AppearancePrefs: Sendable, Codable, Hashable {
     public var codeTheme: String
     public var fontSizeScale: Double
     public var showUsageChip: Bool
+    /// UI-only: disables SwiftUI motion. Does not change engine heartbeat or
+    /// `noEventGap` escalation timing (see `ActivityTiming`).
     public var reduceMotion: Bool
     public var densityMode: String
     /// Whether the session navigator rail is shown. GUI chrome, persisted here
     /// so it survives relaunch (never `UserDefaults`).
     public var sidebarVisible: Bool
+    /// Opt-in debug pane for `SilentDiagnostics` records (default off).
+    public var showSilentRecoveryLog: Bool
 
     public init(theme: String = "system",
                 codeTheme: String = "default",
@@ -22,7 +26,8 @@ public struct AppearancePrefs: Sendable, Codable, Hashable {
                 showUsageChip: Bool = false,
                 reduceMotion: Bool = false,
                 densityMode: String = "comfortable",
-                sidebarVisible: Bool = true) {
+                sidebarVisible: Bool = true,
+                showSilentRecoveryLog: Bool = false) {
         self.theme = theme
         self.codeTheme = codeTheme
         self.fontSizeScale = fontSizeScale
@@ -30,6 +35,7 @@ public struct AppearancePrefs: Sendable, Codable, Hashable {
         self.reduceMotion = reduceMotion
         self.densityMode = densityMode
         self.sidebarVisible = sidebarVisible
+        self.showSilentRecoveryLog = showSilentRecoveryLog
     }
 
     /// Tolerant decode so a `prefs.json` written by an older build (without a
@@ -45,6 +51,7 @@ public struct AppearancePrefs: Sendable, Codable, Hashable {
         reduceMotion = try c.decodeIfPresent(Bool.self, forKey: .reduceMotion) ?? defaults.reduceMotion
         densityMode = try c.decodeIfPresent(String.self, forKey: .densityMode) ?? defaults.densityMode
         sidebarVisible = try c.decodeIfPresent(Bool.self, forKey: .sidebarVisible) ?? defaults.sidebarVisible
+        showSilentRecoveryLog = try c.decodeIfPresent(Bool.self, forKey: .showSilentRecoveryLog) ?? defaults.showSilentRecoveryLog
     }
 
     public mutating func update(_ key: AppearancePrefKey, _ value: AppearancePrefValue) {
@@ -56,6 +63,7 @@ public struct AppearancePrefs: Sendable, Codable, Hashable {
         case (.reduceMotion, .bool(let v)):      reduceMotion = v
         case (.densityMode, .string(let v)):     densityMode = v
         case (.sidebarVisible, .bool(let v)):    sidebarVisible = v
+        case (.showSilentRecoveryLog, .bool(let v)): showSilentRecoveryLog = v
         default:
             break
         }

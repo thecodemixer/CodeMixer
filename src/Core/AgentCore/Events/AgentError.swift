@@ -19,26 +19,31 @@ public enum AgentError: Error, Sendable, Equatable {
     case hunkRevertFailed(path: String, hunkID: UUID, detail: String)
     case attachmentNotFound(id: String)
     case engineRestartLimitReached
+    case permissionTimeout(promptID: UUID, action: PermissionDecision)
     case internalInvariant(detail: String)
     case unsupportedOperation(detail: String)
 
     /// Stable string code for wire transport and log filtering.
-    public var code: String {
+    public var code: String { wireCode.rawValue }
+
+    /// Typed wire code paired with `WireAgentError.context` keys.
+    public var wireCode: WireAgentErrorCode {
         switch self {
-        case .binaryNotFound:           return "binary_not_found"
-        case .spawnFailed:              return "spawn_failed"
-        case .hookSocketFailed:         return "hook_socket_failed"
-        case .transcriptDecodeFailed:   return "transcript_decode_failed"
-        case .workspaceInvalid:         return "workspace_invalid"
-        case .authenticationRequired:   return "auth_required"
-        case .staleEditTarget:          return "stale_edit_target"
-        case .unsupportedCommand:       return "unsupported_command"
-        case .gitCheckoutFailed:        return "git_checkout_failed"
-        case .hunkRevertFailed:         return "hunk_revert_failed"
-        case .attachmentNotFound:       return "attachment_not_found"
-        case .engineRestartLimitReached: return "engine_restart_limit"
-        case .internalInvariant:        return "internal_invariant"
-        case .unsupportedOperation:     return "unsupported_operation"
+        case .binaryNotFound:            return .binaryNotFound
+        case .spawnFailed:               return .spawnFailed
+        case .hookSocketFailed:          return .hookSocketFailed
+        case .transcriptDecodeFailed:    return .transcriptDecodeFailed
+        case .workspaceInvalid:          return .workspaceInvalid
+        case .authenticationRequired:    return .authenticationRequired
+        case .staleEditTarget:           return .staleEditTarget
+        case .unsupportedCommand:        return .unsupportedCommand
+        case .gitCheckoutFailed:         return .gitCheckoutFailed
+        case .hunkRevertFailed:          return .hunkRevertFailed
+        case .attachmentNotFound:        return .attachmentNotFound
+        case .engineRestartLimitReached: return .engineRestartLimitReached
+        case .permissionTimeout:         return .permissionTimeout
+        case .internalInvariant:         return .internalInvariant
+        case .unsupportedOperation:      return .unsupportedOperation
         }
     }
 
@@ -68,6 +73,8 @@ public enum AgentError: Error, Sendable, Equatable {
             return "Attachment \(id) is no longer available."
         case .engineRestartLimitReached:
             return "The agent crashed too many times in a short window."
+        case .permissionTimeout(_, let action):
+            return "Permission request timed out — auto-\(action.rawValue)."
         case .internalInvariant(let detail):
             return "Internal error: \(detail)"
         case .unsupportedOperation(let detail):

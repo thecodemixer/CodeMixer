@@ -39,15 +39,18 @@ public final class ClaudeCodeTwin: AgentAdapter, @unchecked Sendable {
         public var scenario: ClaudeCodeTwinScenario
         /// Wall-clock per simulated turn step. Tests usually set this to 0.
         public var stepDelay: Duration
+        public var runtime: TwinRuntimeSeams
 
-        public init(sessionID: String = UUID().uuidString,
+        public init(sessionID: String? = nil,
                     model: String = "claude-sonnet-4-twin",
                     scenario: ClaudeCodeTwinScenario = .textOnly(reply: "Hello from the twin."),
-                    stepDelay: Duration = .milliseconds(0)) {
-            self.sessionID = sessionID
+                    stepDelay: Duration = .milliseconds(0),
+                    runtime: TwinRuntimeSeams = .live) {
+            self.sessionID = sessionID ?? runtime.uuidString()
             self.model = model
             self.scenario = scenario
             self.stepDelay = stepDelay
+            self.runtime = runtime
         }
     }
 
@@ -85,12 +88,6 @@ public final class ClaudeCodeTwin: AgentAdapter, @unchecked Sendable {
         return .authenticated(account: "twin@codemixer.local")
     }
 
-    public func authURLPattern() -> NSRegularExpression? {
-        try? NSRegularExpression(pattern: #"https://claude\.ai/oauth/[^\s]+"#)
-    }
-
-    public func loginCommandArgv() -> [String]? { ["/login"] }
-
     // MARK: - Event stream
     //
     // The heart of the twin: deterministically emit the same alphabet of
@@ -109,6 +106,7 @@ public final class ClaudeCodeTwin: AgentAdapter, @unchecked Sendable {
                 await Self.run(scenario: cfg.scenario,
                                sessionID: twinSession,
                                stepDelay: cfg.stepDelay,
+                               runtime: cfg.runtime,
                                continuation: continuation)
                 continuation.yield(.stopped(reason: .naturalExit))
                 continuation.finish()
@@ -121,37 +119,44 @@ public final class ClaudeCodeTwin: AgentAdapter, @unchecked Sendable {
     private static func run(scenario: ClaudeCodeTwinScenario,
                             sessionID: String,
                             stepDelay: Duration,
+                            runtime: TwinRuntimeSeams,
                             continuation: AsyncStream<AgentEvent>.Continuation) async {
         if stepDelay > .zero {
-            try? await Task.sleep(for: stepDelay)
+            await runtime.sleep(for: stepDelay)
         }
 
         switch scenario {
         case .textOnly(let reply):
-            await emitAssistantText(reply, continuation: continuation, stepDelay: stepDelay)
+            await emitAssistantText(reply,
+                                    continuation: continuation,
+                                    stepDelay: stepDelay,
+                                    runtime: runtime)
 
         case .thinkingThenReply(let thinking, let reply):
-            let blockID = UUID()
-            let start = Date()
+            let blockID = runtime.uuid()
+            let start = runtime.now()
             for chunk in chunked(thinking) {
                 continuation.yield(.thinkingChunk(blockID: blockID, delta: chunk))
-                if stepDelay > .zero { try? await Task.sleep(for: stepDelay) }
+                if stepDelay > .zero { await runtime.sleep(for: stepDelay) }
             }
             continuation.yield(.thinkingComplete(blockID: blockID,
-                                                 duration: .seconds(Date().timeIntervalSince(start))))
-            await emitAssistantText(reply, continuation: continuation, stepDelay: stepDelay)
+                                                 duration: .seconds(runtime.now().timeIntervalSince(start))))
+            await emitAssistantText(reply,
+                                    continuation: continuation,
+                                    stepDelay: stepDelay,
+                                    runtime: runtime)
 
         case .withBash(let command, let stdout, let exitCode, let reply):
-            let toolID = UUID()
+            let toolID = runtime.uuid()
             let input = ToolInput(summary: "Run: \(command)",
                                   jsonPayload: #"{"command":"\#(command)"}"#)
             continuation.yield(.toolStart(id: toolID.uuidString,
                                           name: "Bash",
                                           input: input,
-                                          startedAt: Date()))
+                                          startedAt: runtime.now()))
             for line in stdout.split(separator: "\n") {
                 continuation.yield(.toolProgress(callID: toolID, progress: .bashLine(String(line))))
-                if stepDelay > .zero { try? await Task.sleep(for: stepDelay) }
+                if stepDelay > .zero { await runtime.sleep(for: stepDelay) }
             }
             let output = ToolOutput(summary: stdout, jsonPayload: nil,
                                     errorMessage: exitCode == 0 ? nil : "exit \(exitCode)")
@@ -159,36 +164,45 @@ public final class ClaudeCodeTwin: AgentAdapter, @unchecked Sendable {
                                         success: exitCode == 0,
                                         output: output,
                                         durationMS: 42))
-            await emitAssistantText(reply, continuation: continuation, stepDelay: stepDelay)
+            await emitAssistantText(reply,
+                                    continuation: continuation,
+                                    stepDelay: stepDelay,
+                                    runtime: runtime)
 
         case .withEdit(let path, let diff, let reply):
-            let toolID = UUID()
+            let toolID = runtime.uuid()
             continuation.yield(.toolStart(id: toolID.uuidString,
                                           name: "Edit",
                                           input: ToolInput(summary: "Modify \(path)",
                                                            jsonPayload: #"{"file_path":"\#(path)"}"#),
-                                          startedAt: Date()))
+                                          startedAt: runtime.now()))
             continuation.yield(.toolEnd(id: toolID.uuidString,
                                         success: true,
                                         output: ToolOutput(summary: diff),
                                         durationMS: 12))
             continuation.yield(.fileTouched(URL(fileURLWithPath: path), kind: .hookReported))
-            await emitAssistantText(reply, continuation: continuation, stepDelay: stepDelay)
+            await emitAssistantText(reply,
+                                    continuation: continuation,
+                                    stepDelay: stepDelay,
+                                    runtime: runtime)
 
         case .permissionPrompt(let tool, let summary, let reply):
-            let id = UUID()
+            let id = runtime.uuid()
             continuation.yield(.permissionRequest(prompt: PermissionPrompt(
                 id: id,
                 toolName: tool,
                 summary: summary,
                 argumentsSummary: #"{}"#,
-                requestedAt: Date()
+                requestedAt: runtime.now()
             )))
             // Twin doesn't auto-respond; the test (or UI) calls the
             // engine's `respondToPermission`. After a brief delay, finish
             // with text so a fully-scripted run still terminates.
-            try? await Task.sleep(for: .milliseconds(50))
-            await emitAssistantText(reply, continuation: continuation, stepDelay: stepDelay)
+            await runtime.sleep(for: .milliseconds(50))
+            await emitAssistantText(reply,
+                                    continuation: continuation,
+                                    stepDelay: stepDelay,
+                                    runtime: runtime)
 
         case .needsAuth(let url):
             continuation.yield(.authURL(url))
@@ -197,28 +211,32 @@ public final class ClaudeCodeTwin: AgentAdapter, @unchecked Sendable {
             continuation.yield(.usage(tokens: inputTokens + outputTokens, costUSD: cost))
 
         case .crash(let partial):
-            let messageID = UUID()
+            let messageID = runtime.uuid()
             continuation.yield(.textDelta(messageID: messageID, delta: partial))
             continuation.yield(.error(.spawnFailed(errno: 137,
                                                    detail: "twin: simulated crash")))
 
         case .workspaceTrust:
             continuation.yield(.permissionRequest(prompt: PermissionPrompt(
-                id: UUID(),
+                id: runtime.uuid(),
                 toolName: "WorkspaceTrust",
                 summary: "Trust this workspace?",
                 argumentsSummary: "{}",
-                requestedAt: Date()
+                requestedAt: runtime.now()
             )))
 
         case .resumeLatePrompt, .resumeStalled, .swallowedEnter:
-            await emitAssistantText("Resumed.", continuation: continuation, stepDelay: stepDelay)
+            await emitAssistantText("Resumed.",
+                                    continuation: continuation,
+                                    stepDelay: stepDelay,
+                                    runtime: runtime)
 
         case .sequence(let scenarios):
             for sub in scenarios {
                 await run(scenario: sub,
                           sessionID: sessionID,
                           stepDelay: stepDelay,
+                          runtime: runtime,
                           continuation: continuation)
             }
         }
@@ -226,12 +244,13 @@ public final class ClaudeCodeTwin: AgentAdapter, @unchecked Sendable {
 
     private static func emitAssistantText(_ text: String,
                                           continuation: AsyncStream<AgentEvent>.Continuation,
-                                          stepDelay: Duration) async {
-        let messageID = UUID()
-        let blockID = UUID().uuidString
+                                          stepDelay: Duration,
+                                          runtime: TwinRuntimeSeams) async {
+        let messageID = runtime.uuid()
+        let blockID = runtime.uuidString()
         for chunk in chunked(text) {
             continuation.yield(.textDelta(messageID: messageID, delta: chunk))
-            if stepDelay > .zero { try? await Task.sleep(for: stepDelay) }
+            if stepDelay > .zero { await runtime.sleep(for: stepDelay) }
         }
         continuation.yield(.assistantText(id: messageID.uuidString,
                                           blockID: blockID,
@@ -275,35 +294,12 @@ public final class ClaudeCodeTwin: AgentAdapter, @unchecked Sendable {
             SessionSummary(id: configuration.sessionID,
                            workspace: workspace,
                            title: "Twin session",
-                           lastActivity: Date(),
+                           lastActivity: configuration.runtime.now(),
                            messageCount: 0),
         ]
     }
 
     public func resumeArgvAddition(sessionID: String) -> [String] {
         ["--resume", sessionID]
-    }
-
-    // MARK: - Tool rendering — mirrors `ClaudeAdapter.toolRenderHint`.
-
-    public func toolRenderHint(toolName: String, input: ToolInput) -> ToolRenderHint {
-        switch toolName {
-        case "Bash":                return .bashStreaming(initialCommand: input.summary)
-        case "Edit", "Write":       return .fileEdit(path: extractedURL(input), language: nil)
-        case "Read":                return .fileRead(path: extractedURL(input), language: nil)
-        case "Grep", "Glob":        return .fileSearch(pattern: input.summary)
-        case "WebFetch":            return URL(string: input.summary).map(ToolRenderHint.webFetch) ?? .raw(json: "")
-        default:                    return .raw(json: input.jsonPayload ?? "")
-        }
-    }
-
-    private func extractedURL(_ input: ToolInput) -> URL {
-        if input.summary.hasPrefix("Modify ") {
-            return URL(fileURLWithPath: String(input.summary.dropFirst("Modify ".count)))
-        }
-        if input.summary.hasPrefix("Read ") {
-            return URL(fileURLWithPath: String(input.summary.dropFirst("Read ".count)))
-        }
-        return URL(fileURLWithPath: input.summary)
     }
 }

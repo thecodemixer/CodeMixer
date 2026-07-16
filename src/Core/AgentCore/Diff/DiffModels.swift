@@ -10,7 +10,7 @@ public struct DiffLine: Sendable, Hashable, Identifiable {
     public let oldLineNumber: Int?
     public let newLineNumber: Int?
 
-    public init(id: UUID = UUID(),
+    public init(id: UUID,
                 text: String,
                 kind: Kind,
                 oldLineNumber: Int? = nil,
@@ -20,6 +20,36 @@ public struct DiffLine: Sendable, Hashable, Identifiable {
         self.kind = kind
         self.oldLineNumber = oldLineNumber
         self.newLineNumber = newLineNumber
+    }
+
+    public init(text: String,
+                kind: Kind,
+                oldLineNumber: Int? = nil,
+                newLineNumber: Int? = nil) {
+        self.init(id: DiffLine.stableID(
+            text: text,
+            kind: kind,
+            oldLineNumber: oldLineNumber,
+            newLineNumber: newLineNumber
+        ),
+        text: text,
+        kind: kind,
+        oldLineNumber: oldLineNumber,
+        newLineNumber: newLineNumber)
+    }
+
+    private static func stableID(text: String,
+                                 kind: Kind,
+                                 oldLineNumber: Int?,
+                                 newLineNumber: Int?) -> UUID {
+        let material = "\(kind)|\(oldLineNumber.map(String.init) ?? "-")|\(newLineNumber.map(String.init) ?? "-")|\(text)"
+        let digest = Array(SHA256.hash(data: Data(material.utf8)))
+        return UUID(uuid: (
+            digest[0], digest[1], digest[2], digest[3],
+            digest[4], digest[5], digest[6], digest[7],
+            digest[8], digest[9], digest[10], digest[11],
+            digest[12], digest[13], digest[14], digest[15]
+        ))
     }
 }
 

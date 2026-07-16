@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import AgentProtocol
+import AgentTestSupport
 
 @Suite("Wire frames — JSON round-trip")
 struct WireFrameRoundTripTests {
@@ -10,48 +11,10 @@ struct WireFrameRoundTripTests {
         let bubbleID = UUID()
         let permID = UUID()
         let snapshotID = UUID()
-        let attachment = AttachmentRef(id: "a1",
-                                       filename: "spec.md",
-                                       byteCount: 12,
-                                       mimeType: "text/markdown")
-        let commands: [AgentCommand] = [
-            .sendPrompt(text: "hello", attachments: [attachment]),
-            .cancelCurrentTurn,
-            .editAndResubmitLast(targetBubbleID: bubbleID, text: "fix", attachments: []),
-            .newSession,
-            .compact,
-            .selectModel(id: "claude-sonnet-4-5"),
-            .setPermissionMode(.acceptEdits),
-            .toggleThinkMode(enabled: true),
-            .toggleThinkMode(enabled: false),
-            .toggleReviewMode(enabled: true),
-            .runSlashCommand(name: "/review", args: []),
-            .runCustomCommand(path: "/proj/review.md", args: ["arg1", "arg2"]),
-            .respondToPermission(id: permID, decision: .allow),
-            .respondToPermission(id: permID, decision: .allowAlways),
-            .respondToPermission(id: permID, decision: .deny),
-            .respondToInlinePrompt(id: permID, text: "answer"),
-            .openProject(path: "/repo", resumeSessionID: nil),
-            .openProject(path: "/repo", resumeSessionID: "sess1"),
-            .closeSession,
-            .speakAssistantBubble(eventID: bubbleID, action: .play),
-            .speakAssistantBubble(eventID: bubbleID, action: .pause),
-            .speakAssistantBubble(eventID: bubbleID, action: .stop),
-            .revertFile(path: "src/foo.swift"),
-            .revertHunk(path: "src/foo.swift", hunkID: bubbleID),
-            .updateAutoApprovalRules([
-                AutoApprovalRule(match: "Bash ls *", decision: .allow),
-                AutoApprovalRule(match: "Bash rm *", decision: .deny),
-            ]),
-            .updateAppearancePref(key: .theme, value: .string("dark")),
-            .updateAppearancePref(key: .reduceMotion, value: .bool(true)),
-            .updateAppearancePref(key: .fontSizeScale, value: .double(1.25)),
-            .requestSnapshot(.conversation),
-            .requestSnapshot(.diff),
-            .requestSnapshot(.sessions),
-            .requestSnapshot(.workspaceTree),
-            .requestSnapshot(.prefs),
-        ]
+        var commands = AgentCommandFixtures.dispatchParitySamples()
+        commands.append(contentsOf: AgentCommandFixtures.wireRoundTripExtras(bubbleID: bubbleID,
+                                                                             permissionID: permID))
+        commands.append(.openProject(path: "/repo", resumeSessionID: "sess1"))
         let frames = commands.map { ClientFrame.command(id: snapshotID, command: $0) }
         try assertRoundTrip(frames)
     }
@@ -60,7 +23,7 @@ struct WireFrameRoundTripTests {
     func clientFrameRoundTrip() throws {
         let cases: [ClientFrame] = [
             .command(id: UUID(), command: .cancelCurrentTurn),
-            .subscribe(streams: [.events, .diff, .status]),
+            .subscribe(),
             .snapshot(kind: .conversation),
             .ping(id: UUID()),
             .pair(pin: "123456", clientName: "iPhone"),
@@ -86,12 +49,13 @@ struct WireFrameRoundTripTests {
                                           argumentsSummary: "{}",
                                           requestedAt: Date(timeIntervalSince1970: 1_700_000_000))
         let cases: [ServerFrame] = [
-            .event(.userTurn(id: "u1", text: "hi")),
-            .event(.permissionRequest(prompt: prompt)),
-            .event(.bell),
+            .event(id: UUID(), event: .userTurn(id: "u1", text: "hi")),
+            .event(id: UUID(), event: .permissionRequest(prompt: prompt)),
+            .event(id: UUID(), event: .bell),
             .result(for: UUID(), ok: true, error: nil),
             .result(for: UUID(), ok: false,
-                    error: WireAgentError(code: "spawn_failed", message: "no binary")),
+                    error: WireAgentError(code: WireAgentErrorCode.spawnFailed.rawValue,
+                                          message: "no binary")),
             .snapshot(kind: .diff, payload: Data([1, 2, 3])),
             .pong(for: UUID()),
             .paired(token: "abc"),
@@ -100,8 +64,9 @@ struct WireFrameRoundTripTests {
             .pairFailed(reason: .rateLimited),
             .pairFailed(reason: .lockedOut),
             .versionMismatch(supported: [.v1]),
-            .subscribed(latestEventID: nil),
-            .subscribed(latestEventID: UUID()),
+            .subscribed(latestEventID: nil, outcome: .fresh),
+            .subscribed(latestEventID: UUID(), outcome: .resumed),
+            .subscribed(latestEventID: UUID(), outcome: .checkpointExpired),
         ]
         try assertRoundTrip(cases)
     }
@@ -110,16 +75,16 @@ struct WireFrameRoundTripTests {
     func subscribeWithCheckpointRoundTrips() throws {
         let checkpoint = UUID()
         let frames: [ClientFrame] = [
-            .subscribe(streams: [.events], lastSeenEventID: nil),
-            .subscribe(streams: [.events], lastSeenEventID: checkpoint),
-            .subscribe(streams: [.events, .diff], lastSeenEventID: checkpoint),
+            .subscribe(lastSeenEventID: nil),
+            .subscribe(lastSeenEventID: checkpoint),
+            .subscribe(lastSeenEventID: checkpoint),
         ]
         try assertRoundTrip(frames)
     }
 
     @Test("subscribed frame with nil latestEventID round-trips")
     func subscribedNilRoundTrips() throws {
-        try assertRoundTrip([ServerFrame.subscribed(latestEventID: nil)])
+        try assertRoundTrip([ServerFrame.subscribed(latestEventID: nil, outcome: .fresh)])
     }
 
     @Test("Malformed JSON throws DecodingError")

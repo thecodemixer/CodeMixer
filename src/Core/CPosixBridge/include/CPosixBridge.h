@@ -30,12 +30,16 @@ int cpx_openpty(int *master_fd, int *slave_fd);
 /// Returns 0 on success, -1 on failure (sets `errno`).
 int cpx_set_winsize(int fd, unsigned short rows, unsigned short cols);
 
-/// Spawn a child process under a controlling terminal.
+/// Send a signal to the process group `pgid` (typically the child pid after SETSID).
+int cpx_killpg(pid_t pgid, int sig);
+
+/// Spawn a child process with stdin/stdout/stderr wired to a pty slave fd.
 ///
-/// The slave fd is duped to stdin/stdout/stderr, `setsid()` is called, the
-/// slave is made the controlling terminal, and the child's process group is
-/// made the foreground group of the pty. All performed with an
-/// async-signal-safe sequence inside `posix_spawn_file_actions`.
+/// The slave fd is duped to stdin/stdout/stderr, `POSIX_SPAWN_SETSID` creates a
+/// new session (making the child its own process-group leader), and the parent
+/// calls `tcsetpgrp(slave_fd, pid)` after a successful spawn so the child's
+/// group becomes the foreground group on the tty. There is no `waitpid` here —
+/// reaping is handled by `ChildReaper` in Swift.
 ///
 /// On success writes the child pid to `out_pid` and returns 0. On failure
 /// returns the `errno` value (positive) — does NOT set `errno`.
@@ -49,9 +53,6 @@ int cpx_spawn_under_pty(const char *executable,
                         const char *cwd,
                         int slave_fd,
                         pid_t *out_pid);
-
-/// Send a signal to a process group (negates `pid` and forwards to `kill(2)`).
-int cpx_killpg(pid_t pid, int sig);
 
 /// Set FD_CLOEXEC on a file descriptor. Returns 0 on success, -1 on failure.
 int cpx_set_cloexec(int fd);

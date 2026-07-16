@@ -116,7 +116,7 @@ The exemplar references are project-specific — adapt the file names.
 - [ ] `WireCodec` updated; round-trip parity test passes.
 - [ ] Golden JSON files regenerated (and reviewed by an explicit reviewer).
 - [ ] `v: Int` field bumped if breaking; ADR cites the bump.
-- [ ] `unknown` catch-all updated in any wire enum.
+- [ ] Wire version bumped if breaking frame/event shape changed (no dual-speak).
 
 ### Architecture (if touched)
 

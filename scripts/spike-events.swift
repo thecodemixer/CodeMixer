@@ -1,13 +1,125 @@
 #!/usr/bin/env swift
 // spike-events.swift — hook-event validation tool
 //
-// PURPOSE
-// -------
 // Captures Claude Code hook events for a fixed window and summarizes event
 // coverage for the required lifecycle hooks.
 
 import Foundation
 import Dispatch
+
+// MARK: - Shared hook helpers (keep in sync with spike-billing.swift)
+
+enum SpikeHookSupport {
+
+    static func quotedShell(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    static func extractJSONObjects(from stream: String) -> [String] {
+        var objects: [String] = []
+        var start: String.Index?
+        var depth = 0
+        var inString = false
+        var escaped = false
+
+        for index in stream.indices {
+            let ch = stream[index]
+            if start == nil {
+                if ch == "{" {
+                    start = index
+                    depth = 1
+                    inString = false
+                    escaped = false
+                }
+                continue
+            }
+
+            if inString {
+                if escaped {
+                    escaped = false
+                } else if ch == "\\" {
+                    escaped = true
+                } else if ch == "\"" {
+                    inString = false
+                }
+                continue
+            }
+
+            if ch == "\"" {
+                inString = true
+            } else if ch == "{" {
+                depth += 1
+            } else if ch == "}" {
+                depth -= 1
+                if depth == 0, let objectStart = start {
+                    objects.append(String(stream[objectStart...index]))
+                    start = nil
+                }
+            }
+        }
+
+        return objects
+    }
+
+    static func canonicalHookName(_ raw: String) -> String {
+        switch raw.lowercased() {
+        case "pretooluse": return "PreToolUse"
+        case "posttooluse": return "PostToolUse"
+        case "notification": return "Notification"
+        case "stop": return "Stop"
+        default: return raw
+        }
+    }
+
+    static func writeSocatHookSettings(file: URL, socketPath: String) throws {
+        let hookCommand = "socat - UNIX-CONNECT:\(socketPath)"
+        let json = """
+        {
+          "hooks": {
+            "PreToolUse":    [{"matcher": "*", "hooks": [{"type": "command", "command": "\(hookCommand)"}]}],
+            "PostToolUse":   [{"matcher": "*", "hooks": [{"type": "command", "command": "\(hookCommand)"}]}],
+            "Notification":  [{"matcher": "*", "hooks": [{"type": "command", "command": "\(hookCommand)"}]}],
+            "Stop":          [{"matcher": "*", "hooks": [{"type": "command", "command": "\(hookCommand)"}]}]
+          }
+        }
+        """
+        try json.data(using: .utf8)?.write(to: file)
+    }
+
+    static func hookClientCommand(socketPath: String) -> String {
+        let script = """
+        import socket, sys
+        path = sys.argv[1]
+        payload = sys.stdin.buffer.read()
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.connect(path)
+        sock.sendall(payload)
+        sock.shutdown(socket.SHUT_WR)
+        sys.stdout.buffer.write(sock.recv(65536))
+        """
+        return "/usr/bin/python3 -c \(quotedShell(script)) \(quotedShell(socketPath))"
+    }
+
+    static func writePythonHookSettings(file: URL, socketPath: String, hookNames: [String]) throws {
+        let command = hookClientCommand(socketPath: socketPath)
+        let hookEntry: [String: Any] = [
+            "matcher": "*",
+            "hooks": [
+                [
+                    "type": "command",
+                    "command": command,
+                ],
+            ],
+        ]
+        var hooks: [String: Any] = [:]
+        for name in hookNames {
+            hooks[name] = [hookEntry]
+        }
+        let root: [String: Any] = ["hooks": hooks]
+        let data = try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])
+        try data.write(to: file)
+    }
+}
 
 enum ScriptPaths {
     static let env = "/usr/bin/env"
@@ -84,76 +196,15 @@ func commandExists(_ name: String) -> Bool {
 }
 
 func writeHookSettings(file: URL, socketPath: String) throws {
-    let hookCommand = "socat - UNIX-CONNECT:\(socketPath)"
-    let json = """
-    {
-      "hooks": {
-        "PreToolUse":    [{"matcher": "*", "hooks": [{"type": "command", "command": "\(hookCommand)"}]}],
-        "PostToolUse":   [{"matcher": "*", "hooks": [{"type": "command", "command": "\(hookCommand)"}]}],
-        "Notification":  [{"matcher": "*", "hooks": [{"type": "command", "command": "\(hookCommand)"}]}],
-        "Stop":          [{"matcher": "*", "hooks": [{"type": "command", "command": "\(hookCommand)"}]}]
-      }
-    }
-    """
-    try json.data(using: .utf8)?.write(to: file)
+    try SpikeHookSupport.writeSocatHookSettings(file: file, socketPath: socketPath)
 }
 
 func canonicalHookName(_ raw: String) -> String {
-    switch raw.lowercased() {
-    case "pretooluse": return "PreToolUse"
-    case "posttooluse": return "PostToolUse"
-    case "notification": return "Notification"
-    case "stop": return "Stop"
-    default: return raw
-    }
+    SpikeHookSupport.canonicalHookName(raw)
 }
 
-// Hook payloads may arrive concatenated without newlines; extract each JSON
-// object from the stream by balancing braces while respecting string escapes.
 func extractJSONObjects(from stream: String) -> [String] {
-    var objects: [String] = []
-    var start: String.Index?
-    var depth = 0
-    var inString = false
-    var escaped = false
-
-    for index in stream.indices {
-        let ch = stream[index]
-        if start == nil {
-            if ch == "{" {
-                start = index
-                depth = 1
-                inString = false
-                escaped = false
-            }
-            continue
-        }
-
-        if inString {
-            if escaped {
-                escaped = false
-            } else if ch == "\\" {
-                escaped = true
-            } else if ch == "\"" {
-                inString = false
-            }
-            continue
-        }
-
-        if ch == "\"" {
-            inString = true
-        } else if ch == "{" {
-            depth += 1
-        } else if ch == "}" {
-            depth -= 1
-            if depth == 0, let objectStart = start {
-                objects.append(String(stream[objectStart...index]))
-                start = nil
-            }
-        }
-    }
-
-    return objects
+    SpikeHookSupport.extractJSONObjects(from: stream)
 }
 
 func parseEventCounts(from stream: String) -> [String: Int] {

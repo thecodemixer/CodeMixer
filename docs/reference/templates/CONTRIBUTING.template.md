@@ -113,7 +113,7 @@ Full guide in [`docs/code-style.md`](docs/code-style.md). Key rules:
 - One test file per source file under test.
 - Test names use natural language: `@Test("rejects writes after close")`, not `testRejectsWritesAfterClose`.
 - Avoid mocks-of-mocks; use the [dependency-injection seams](docs/reference/patterns/dependency-injection-seams.md). A `FakeClock` or `InMemoryFileSystem` is better than a mock framework.
-- Golden wire-frame fixtures live under `tests/Remote/RemoteParityTests/Fixtures/`; parser/hook/transcript payloads are usually inline in the matching suite. Add new on-disk fixtures via a `make refresh-fixtures` target so they're reviewable.
+- Golden wire-frame fixtures: inline in `RemoteParityTests` sources (no `Fixtures/` directory).
 
 `swift test` must pass on a clean checkout. Flaky tests are bugs; fix or quarantine within one cycle.
 

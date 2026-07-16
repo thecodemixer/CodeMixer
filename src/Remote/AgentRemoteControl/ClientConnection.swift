@@ -19,7 +19,7 @@ import AgentProtocol
 /// **Reconnect-with-replay**: when a `subscribe` frame includes
 /// `lastSeenEventID`, the bus replays only the events the client missed —
 /// O(missed) rather than O(full-history). After the replay slice, the server
-/// sends `ServerFrame.subscribed(latestEventID:)` so the client knows the
+/// sends `ServerFrame.subscribed(latestEventID:outcome:)` so the client knows the
 /// delta is complete and can update its own checkpoint.
 final class ClientConnection: @unchecked Sendable {
 
@@ -96,10 +96,10 @@ final class ClientConnection: @unchecked Sendable {
 
     private func runSender() async {
         guard let sub = subscription else { return }
-        for await event in sub.stream {
+        for await entry in sub.stream {
             guard !Task.isCancelled else { return }
-            let wire = WireCodec.encode(event)
-            await send(.event(wire))
+            let wire = WireCodec.encode(entry.event)
+            await send(.event(id: entry.id, event: wire))
         }
     }
 
@@ -115,6 +115,12 @@ final class ClientConnection: @unchecked Sendable {
 
             if let mismatch = versionProblem(in: payload) {
                 await send(.versionMismatch(supported: [WireVersion.current]))
+                await SilentDiagnostics.shared.record(
+                    kind: .wireVersionRejected,
+                    owner: "ClientConnection",
+                    summary: "rejected client frame with unsupported wire version",
+                    details: String(describing: mismatch)
+                )
                 log.warning("rejecting frame with v=\(String(describing: mismatch), privacy: .public)")
                 continue
             }
@@ -184,7 +190,7 @@ final class ClientConnection: @unchecked Sendable {
                 await send(.pairFailed(reason: .invalidPIN))
             }
 
-        case .subscribe(_, let lastSeenEventID):
+        case .subscribe(let lastSeenEventID):
             // Tear down any existing sender so we don't deliver stale events
             // alongside the fresh replay.
             senderTask?.cancel()
@@ -192,16 +198,16 @@ final class ClientConnection: @unchecked Sendable {
                 await bus.unsubscribe(existing.id)
             }
 
-            let newSub = await bus.subscribe(after: lastSeenEventID)
+            let (newSub, outcome) = await bus.subscribeWithOutcome(after: lastSeenEventID)
             let latestID = await bus.lastPublishedID
             subscription = newSub
 
             // Send the ack before starting the sender. The client uses
             // `latestEventID` as its checkpoint for the *next* reconnect.
-            await send(.subscribed(latestEventID: latestID))
+            await send(.subscribed(latestEventID: latestID, outcome: wireOutcome(outcome)))
 
             senderTask = Task { [weak self] in await self?.runSender() }
-            log.notice("client \(self.id, privacy: .public) subscribed after=\(String(describing: lastSeenEventID), privacy: .public)")
+            log.notice("client \(self.id, privacy: .public) subscribed after=\(String(describing: lastSeenEventID), privacy: .public) outcome=\(String(describing: outcome), privacy: .public)")
 
         case .snapshot(let kind):
             guard authed else {
@@ -243,12 +249,12 @@ final class ClientConnection: @unchecked Sendable {
             return
         }
 
-        for await event in sub.stream {
+        for await entry in sub.stream {
             guard !Task.isCancelled else {
                 await bus.unsubscribe(sub.id)
                 return
             }
-            if case .snapshotReady(let snapshotKind, let payload) = event,
+            if case .snapshotReady(let snapshotKind, let payload) = entry.event,
                snapshotKind == kind {
                 await send(.snapshot(kind: kind, payload: payload))
                 await bus.unsubscribe(sub.id)
@@ -256,5 +262,13 @@ final class ClientConnection: @unchecked Sendable {
             }
         }
         await bus.unsubscribe(sub.id)
+    }
+
+    private func wireOutcome(_ outcome: MulticastEventBus.SubscribeOutcome) -> SubscribeReplayOutcome {
+        switch outcome {
+        case .fresh: return .fresh
+        case .resumed: return .resumed
+        case .checkpointExpired: return .checkpointExpired
+        }
     }
 }

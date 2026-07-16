@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import AgentCore
 
 /// Advertise the Codemixer service on the local network.
 ///
@@ -40,15 +41,15 @@ public actor BonjourAdvertiser {
                       pairingState: PairingState,
                       certificateFingerprint: String? = nil) async throws {
         var txt: [String: String] = [
-            "v": "1",
+            "v": RemoteDefaults.bonjourTXTVersion,
             "device": deviceName,
             "pairingState": pairingState.rawValue,
         ]
         if let fp = certificateFingerprint { txt["fp"] = fp }
 
         try await broadcaster.start(
-            BonjourBroadcaster.Configuration(serviceType: "_codemixer._tcp",
-                                             name: "Codemixer",
+            BonjourBroadcaster.Configuration(serviceType: RemoteDefaults.bonjourServiceType,
+                                             name: RemoteDefaults.bonjourServiceName,
                                              port: port.rawValue,
                                              txt: txt))
     }

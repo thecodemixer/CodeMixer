@@ -1,0 +1,140 @@
+import Foundation
+import AgentCore
+import AgentProtocol
+
+extension EngineViewModel {
+
+    // MARK: - Optimistic send
+
+    /// Send a prompt with instant local feedback: append the user bubble and
+    /// flip to a working state on the main actor *before* the engine round-trip,
+    /// then reconcile when the engine (and the Claude hook) echo `.userTurn`.
+    /// Rolls the optimistic bubble back if the send throws.
+    ///
+    /// Prefer this over `send(.sendPrompt(...))` from the UI so sending never
+    /// waits on the PTY write + bus fan-out (visual-style §1.6).
+    public func sendPrompt(_ text: String, attachments: [AttachmentRef] = []) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        let bubbleID = random.uuid()
+        messages.append(.user(bubbleID: bubbleID, text: trimmed))
+        lastUserBubbleID = bubbleID
+        pendingOptimisticBubbleID = bubbleID
+        armEchoDedup(for: trimmed)
+        enterWorkingState()
+
+        Task { [engine, weak self] in
+            do {
+                try await engine.send(.sendPrompt(text: text, attachments: attachments))
+            } catch {
+                await MainActor.run { self?.rollBackOptimisticSend(bubbleID: bubbleID, error: error) }
+            }
+        }
+    }
+
+    /// Edit-and-resubmit restarts the session (which clears `messages` and
+    /// replays the truncated transcript), so we don't pre-insert a bubble —
+    /// the genuine `.userTurn` carries the revised text. We only flip to a
+    /// working state immediately for instant feedback, and let the echo dedup
+    /// collapse the engine + hook duplicates.
+    public func editAndResubmit(targetBubbleID: UUID,
+                                text: String,
+                                attachments: [AttachmentRef] = []) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        enterWorkingState()
+        send(.editAndResubmitLast(targetBubbleID: targetBubbleID,
+                                  text: text,
+                                  attachments: attachments))
+    }
+
+    /// Cancel the active turn and clear local waiting affordances immediately.
+    /// A truly stalled PTY may not emit a clean idle event after Ctrl-C, so the
+    /// UI treats the user's cancel action as authoritative.
+    public func cancelCurrentTurn() {
+        settleTurnIdle()
+        send(.cancelCurrentTurn)
+    }
+
+    func enterWorkingState() {
+        status = .working(phrase: ActivityTiming.workingPhrase)
+        activity = .awaitingFirstChunk
+        isAwaitingFirstReplyForPrompt = true
+        stalledToastFiredThisTurn = false
+        stalledToastVisible = false
+    }
+
+    /// Arm duplicate detection for a just-sent/materialised user turn. We expect
+    /// exactly one further echo (the Claude hook) beyond the one that creates
+    /// the bubble, so `dedupDropsRemaining` is 1.
+    func armEchoDedup(for trimmed: String) {
+        dedupUserText = trimmed
+        dedupArmedAt = clock.now()
+        dedupDropsRemaining = 1
+    }
+
+    func rollBackOptimisticSend(bubbleID: UUID, error: any Error) {
+        if pendingOptimisticBubbleID == bubbleID {
+            messages.removeAll {
+                if case .user(let b, _) = $0 { return b == bubbleID }
+                return false
+            }
+            pendingOptimisticBubbleID = nil
+            dedupUserText = nil
+            dedupArmedAt = nil
+            dedupDropsRemaining = 0
+            lastUserBubbleID = lastUserBubbleIDInMessages()
+            status = .idle
+            activity = .idle
+            isAwaitingFirstReplyForPrompt = false
+        }
+        let message = (error as? AgentError)?.userMessage ?? error.localizedDescription
+        diagnostics.append(diagnostic(level: .error, message: message))
+    }
+
+    func lastUserBubbleIDInMessages() -> UUID? {
+        for message in messages.reversed() {
+            if case .user(let id, _) = message { return id }
+        }
+        return nil
+    }
+
+    /// Reconcile a `.userTurn` echo against any optimistic bubble + duplicate
+    /// hook echo. See `pendingOptimisticBubbleID` for the full rationale.
+    func applyUserTurn(id: String, text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let now = clock.now()
+        let withinWindow = (dedupArmedAt.map { now.timeIntervalSince($0) <= echoWindowSeconds }) ?? false
+
+        if dedupUserText == trimmed, withinWindow {
+            if let optimisticID = pendingOptimisticBubbleID {
+                // First real echo for an optimistic bubble: adopt the engine id
+                // so edit-and-resubmit targets the right turn.
+                let adoptedID = UUID(uuidString: id) ?? optimisticID
+                if let idx = messages.lastIndex(where: {
+                    if case .user(let b, _) = $0 { return b == optimisticID }
+                    return false
+                }) {
+                    messages[idx] = .user(bubbleID: adoptedID, text: text)
+                }
+                lastUserBubbleID = adoptedID
+                pendingOptimisticBubbleID = nil
+                // Re-arm the window so the later hook echo still drops.
+                dedupArmedAt = now
+                return
+            }
+            if dedupDropsRemaining > 0 {
+                dedupDropsRemaining -= 1
+                return  // duplicate (engine + hook double-publish) — drop.
+            }
+        }
+
+        // Genuine new user turn.
+        let uid = UUID(uuidString: id) ?? random.uuid()
+        messages.append(.user(bubbleID: uid, text: text))
+        lastUserBubbleID = uid
+        pendingOptimisticBubbleID = nil
+        armEchoDedup(for: trimmed)
+    }
+}

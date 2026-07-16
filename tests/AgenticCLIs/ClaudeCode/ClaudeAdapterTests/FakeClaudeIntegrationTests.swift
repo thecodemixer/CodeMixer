@@ -195,9 +195,9 @@ struct FakeClaudeIntegrationTests {
 private actor EventSink {
     private var events: [AgentEvent] = []
 
-    func ingest(_ stream: AsyncStream<AgentEvent>) async {
-        for await event in stream {
-            events.append(event)
+    func ingest(_ stream: AsyncStream<MulticastEventBus.HistoryEntry>) async {
+        for await entry in stream {
+            events.append(entry.event)
             if events.count > 256 { break }
         }
     }

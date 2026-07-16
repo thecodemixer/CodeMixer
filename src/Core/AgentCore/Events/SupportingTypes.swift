@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import AgentProtocol
 
 /// Permission prompt the agent surfaced before executing a tool.
@@ -9,7 +10,7 @@ public struct PermissionPrompt: Sendable, Hashable, Identifiable {
     public let argumentsSummary: String
     public let requestedAt: Date
 
-    public init(id: UUID = UUID(),
+    public init(id: UUID,
                 toolName: String,
                 summary: String,
                 argumentsSummary: String,
@@ -19,6 +20,36 @@ public struct PermissionPrompt: Sendable, Hashable, Identifiable {
         self.summary = summary
         self.argumentsSummary = argumentsSummary
         self.requestedAt = requestedAt
+    }
+
+    public init(toolName: String,
+                summary: String,
+                argumentsSummary: String,
+                requestedAt: Date) {
+        self.init(id: PermissionPrompt.stableID(
+            toolName: toolName,
+            summary: summary,
+            argumentsSummary: argumentsSummary,
+            requestedAt: requestedAt
+        ),
+        toolName: toolName,
+        summary: summary,
+        argumentsSummary: argumentsSummary,
+        requestedAt: requestedAt)
+    }
+
+    private static func stableID(toolName: String,
+                                 summary: String,
+                                 argumentsSummary: String,
+                                 requestedAt: Date) -> UUID {
+        let material = "\(toolName)|\(summary)|\(argumentsSummary)|\(requestedAt.timeIntervalSince1970)"
+        let digest = Array(SHA256.hash(data: Data(material.utf8)))
+        return UUID(uuid: (
+            digest[0], digest[1], digest[2], digest[3],
+            digest[4], digest[5], digest[6], digest[7],
+            digest[8], digest[9], digest[10], digest[11],
+            digest[12], digest[13], digest[14], digest[15]
+        ))
     }
 }
 
@@ -52,17 +83,6 @@ public enum ToolProgress: Sendable, Hashable {
     case bashLine(String)
     case fileBytes(written: Int, total: Int?)
     case generic(message: String)
-}
-
-/// Hint passed to the SwiftUI tool-call renderer dispatch table.
-public enum ToolRenderHint: Sendable, Hashable {
-    case bashStreaming(initialCommand: String)
-    case fileEdit(path: URL, language: String?)
-    case fileRead(path: URL, language: String?)
-    case fileSearch(pattern: String)
-    case webFetch(url: URL)
-    case mcpTool(serverName: String, toolName: String)
-    case raw(json: String)
 }
 
 /// Authentication state for an adapter.

@@ -11,6 +11,9 @@ public enum AppIdentity {
 
     public static let launchAgentLabel = "\(bundleIdentifier).daemon"
     public static let launchAgentPlistName = "\(launchAgentLabel).plist"
+    public static let launchAgentThrottleIntervalSeconds = 30
+    public static let launchAgentStdoutPath = "/tmp/codemixerd.stdout"
+    public static let launchAgentStderrPath = "/tmp/codemixerd.stderr"
     public static let pairedDevicesService = "\(bundleIdentifier).pairedDevices"
     public static let remoteCertificatePasswordService = "\(bundleIdentifier).remoteCertPassword"
     public static let tlsPinQueueLabel = "\(bundleIdentifier).tls.pin"

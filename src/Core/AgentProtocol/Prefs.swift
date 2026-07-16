@@ -12,6 +12,7 @@ public enum AppearancePrefKey: String, Sendable, Codable, Hashable {
     case reduceMotion
     case densityMode
     case sidebarVisible
+    case showSilentRecoveryLog
 }
 
 /// Tagged-union of permissible appearance values.
@@ -56,7 +57,7 @@ public struct AutoApprovalRule: Sendable, Codable, Hashable, Identifiable {
     public var decision: PermissionDecision
     public var note: String
 
-    public init(id: UUID = UUID(),
+    public init(id: UUID,
                 enabled: Bool = true,
                 match: String,
                 decision: PermissionDecision,
@@ -67,6 +68,22 @@ public struct AutoApprovalRule: Sendable, Codable, Hashable, Identifiable {
         self.decision = decision
         self.note = note
     }
+
+    public init(enabled: Bool = true,
+                match: String,
+                decision: PermissionDecision,
+                note: String = "") {
+        self.init(id: AutoApprovalRuleID.stable(
+            enabled: enabled,
+            match: match,
+            decision: decision,
+            note: note
+        ),
+        enabled: enabled,
+        match: match,
+        decision: decision,
+        note: note)
+    }
 }
 
 /// What a remote client is asking for via `requestSnapshot`.
@@ -74,6 +91,42 @@ public enum SnapshotKind: String, Sendable, Codable, Hashable {
     case conversation
     case diff
     case sessions
-    case workspaceTree
     case prefs
+}
+
+private enum AutoApprovalRuleID {
+    private static let offset: UInt64 = 0xcbf29ce484222325
+    private static let alternateOffset: UInt64 = 0x84222325cbf29ce4
+    private static let prime: UInt64 = 0x100000001b3
+
+    static func stable(enabled: Bool,
+                       match: String,
+                       decision: PermissionDecision,
+                       note: String) -> UUID {
+        uuid(for: "\(enabled)|\(match)|\(decision.rawValue)|\(note)")
+    }
+
+    private static func uuid(for material: String) -> UUID {
+        var first = offset
+        var second = alternateOffset
+        for byte in material.utf8 {
+            mix(&first, byte: byte)
+            mix(&second, byte: byte &+ 31)
+        }
+        return UUID(uuid: (
+            byte(first, 56), byte(first, 48), byte(first, 40), byte(first, 32),
+            byte(first, 24), byte(first, 16), byte(first, 8), byte(first, 0),
+            byte(second, 56), byte(second, 48), byte(second, 40), byte(second, 32),
+            byte(second, 24), byte(second, 16), byte(second, 8), byte(second, 0)
+        ))
+    }
+
+    private static func mix(_ hash: inout UInt64, byte: UInt8) {
+        hash ^= UInt64(byte)
+        hash &*= prime
+    }
+
+    private static func byte(_ value: UInt64, _ shift: UInt64) -> UInt8 {
+        UInt8((value >> shift) & 0xff)
+    }
 }

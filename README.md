@@ -48,7 +48,10 @@ Engine + protocol spine:
 - ✅ Typed `AgentCommand` ↔ `AgentEvent` alphabets with a `WireCodec` boundary and parity/dispatch tests that refuse drift.
 - ✅ `AgentAdapter` protocol with the Claude adapter as its reference implementation (binary lookup, hook installer + decoder, transcript tailer, slash-command catalog, permission encoder, TUI fallback).
 - ✅ Server-side `HeartbeatActivityMonitor` + `StatusPhraseResolver` so every connected client sees identical "still working" escalation.
-- ✅ `SnapshotService`, `AgentState` reduction, and a `GitReverter` for file/hunk-level revert.
+- ✅ `SnapshotService`, `EngineViewModel` event reduction, and a `GitReverter` for file/hunk-level revert.
+- ✅ `SilentDiagnostics` ring buffer with opt-in UI and `GET /v1/diagnostics/silent` sidecar.
+- ✅ FSEvents diff monitor in `AgentEngine` with `ChangedFilesReconciler`.
+- ✅ Model picker via `AgentAdapter.availableModels()` (Claude: Sonnet / Opus / Haiku).
 
 Workspace + UX surface:
 
@@ -64,10 +67,10 @@ Remote + distribution:
 - ✅ LaunchAgent installer + daemon plist for running `codemixerd` at login.
 - ✅ Headless daemon (`codemixerd`), GUI app (`codemixer`), and digital twin (`fake-claude`) build via SPM.
 
-Quality gates:
+Quality gates (local — no checked-in CI workflow):
 
-- ✅ Swift Testing coverage spans protocol round-trips, pty spawn + reap, scripted PTY write-failure injection, terminal scrape, diff/revert, env resolution, hooks, pairing, TLS transport, sidecar parsing, bus replay, wire-codec + command-dispatch parity, view-model reduction, attachments, voice, export, notifications, and appearance prefs.
 - ✅ Policy scripts enforce package layout, no-SwiftUI-in-core, no-direct-framework-calls, a11y labels, public-API coverage, and per-suite runtime budgets.
+- ✅ `scripts/pre-commit.swift` runs build + serial tests + SwiftFormat/SwiftLint (narrow gate; full checklist in `AGENTS.md`).
 
 **Coming up** (tracked in the architecture doc):
 
@@ -79,16 +82,16 @@ Quality gates:
 
 ## Quick start
 
-Requirements: macOS 14+, Xcode 16+, Swift 6.0+ from SPM, or Swift 6.2 through the Tuist/Xcode project workflow.
+Requirements: **macOS 14+**, Xcode 16+ for the GUI app, Swift 6.0+ from SPM.
 
-Everything compiles and runs with stock SPM — no Xcode project required:
+The SPM package declares **macOS only** (`Package.swift`). There is no iOS target today.
 
 ```bash
 swift build                   # build all libraries + executables
 swift test --no-parallel      # run the entire test suite
 
 swift run codemixerd          # start the headless daemon on 127.0.0.1:8421
-swift run codemixer           # start the GUI app
+# GUI: use the Xcode project — see Build and run below (not `swift run codemixer`)
 ```
 
 > **`--no-parallel` is required for the test suite.** Several tests own
@@ -109,6 +112,15 @@ twin `fake-claude` binary instead. The twin is documented in
 and serves as both a test harness and an executable specification of the
 contract Codemixer expects from Claude Code.
 
+To validate the **real** interactive PTY path (subscription billing — no
+`claude -p`), opt in with:
+
+```bash
+CODEMIXER_LIVE_CLAUDE=1 swift test --no-parallel --filter LiveClaudeIntegrationTests
+```
+
+Full harness docs: [`tests/AgenticCLIs/README.md`](tests/AgenticCLIs/README.md).
+
 ### Spike-script prerequisites
 
 The live validation spikes in `scripts/` have extra runtime dependencies:
@@ -123,7 +135,7 @@ npm install -g @anthropic-ai/claude-code
   transcript.
 - `scripts/spike-events.swift` requires `claude`, `socat`, and `jq`.
 
-Both spikes are manual validation tools and are intentionally not run in CI.
+Both spikes are manual validation tools and are intentionally not run in automated CI (no workflow checked in).
 
 ### Scripts guide
 
@@ -190,7 +202,7 @@ Package.swift
 src/
 ├── Core/            # agent-agnostic engine + portable wire protocol + POSIX shim
 │   ├── CPosixBridge/    # C shim: openpty, posix_spawn, FD_CLOEXEC
-│   ├── AgentProtocol/   # pure Foundation Codable DTOs — portable to iOS/Linux
+│   ├── AgentProtocol/   # pure Foundation Codable DTOs — portable wire alphabet
 │   └── AgentCore/       # PTY + reaper, terminal engine, AgentPTY seam, event bus,
 │                        # engine actor + commands, snapshot, git diff/revert,
 │                        # hooks, FSEvents, attachments, status, activity,
@@ -285,33 +297,36 @@ For notarization and entitlement debugging, use the Xcode project above. The dae
 swift run codemixerd
 # → WebSocket    ws://127.0.0.1:8421/v1/ws   (RemoteDefaults.webSocketPort)
 # → HTTP sidecar       127.0.0.1:8422         (RemoteDefaults.sidecarPort)
-#     GET  /v1/health        → { ok, version, uptime, clients }
-#     POST /v1/attachments   → stages an upload, returns { id, path }
+#     GET  /v1/health              → { ok, version, uptime, clients }
+#     GET  /v1/diagnostics/silent  → JSON array of SilentDiagnostics records
+#     POST /v1/attachments         → stages an upload, returns { id, path }
 ```
 
-LAN exposure adds TLS through `CertificateManager` (self-signed identity + fingerprint pinning) and authenticated pairing via `PairingService` + `PairedDeviceStore`. A remote peer can drive the same engine through `RemoteEngineClient`. Install the daemon as a login `LaunchAgent` with the bundled `scripts/com.codecave.Codemixer.daemon.plist` template.
+LAN exposure adds TLS through `CertificateManager` (self-signed EC identity + fingerprint pinning) and authenticated pairing via `PairingService` + `PairedDeviceStore`. A remote peer can drive the same engine through `RemoteEngineClient`. Install the daemon as a login `LaunchAgent` using the template at `src/CodemixerApp/Resources/com.codecave.Codemixer.daemon.plist`.
 
 ### The wire protocol in one screen
 
 ```jsonc
 // client → server (ClientFrame)
 { "v": 1, "type": "command",   "id": "<uuid>", "command": { "type": "sendPrompt", "text": "...", "attachments": [] } }
-{ "v": 1, "type": "subscribe", "streams": ["events", "diff", "status"], "lastSeenEventID": "<uuid?>" }
+{ "v": 1, "type": "subscribe", "lastSeenEventID": "<uuid?>" }
 { "v": 1, "type": "snapshot",  "kind": "conversation" }   // also: diff, sessions, workspaceTree, prefs
 { "v": 1, "type": "ping",      "id": "<uuid>" }
 { "v": 1, "type": "pair",      "pin": "123456", "clientName": "Codemixer Mobile" }
 { "v": 1, "type": "auth",      "token": "<bearer token>" }
 
 // server → client (ServerFrame)
-{ "v": 1, "type": "event",            "event": { ... AgentEventWire ... } }
+{ "v": 1, "type": "event",            "id": "<bus-uuid>", "event": { ... AgentEventWire ... } }
 { "v": 1, "type": "result",           "for": "<uuid>", "ok": true, "error": null }
 { "v": 1, "type": "snapshot",         "kind": "conversation", "payload": "<base64 JSON>" }
 { "v": 1, "type": "pong",             "for": "<uuid>" }
-{ "v": 1, "type": "subscribed",       "latestEventID": "<uuid?>" }   // reconnect checkpoint
+{ "v": 1, "type": "subscribed",       "latestEventID": "<uuid?>", "outcome": "fresh|resumed|checkpointExpired" }
 { "v": 1, "type": "paired",           "token": "<bearer token>" }
 { "v": 1, "type": "pairFailed",       "reason": "invalidPIN" }       // also: expiredPIN, rateLimited, lockedOut
 { "v": 1, "type": "versionMismatch",  "supported": [1] }
 ```
+
+Sidecar (port 8422): `GET /v1/health`, `POST /v1/attachments`, `GET /v1/diagnostics/silent`.
 
 Reconnecting clients store the `subscribed.latestEventID` (and each event's id) and pass it back as `subscribe.lastSeenEventID` so the server replays only what was missed instead of the whole ring buffer.
 
@@ -387,12 +402,13 @@ Full per-suite index: [`AGENTS.md`](AGENTS.md) (Inside `tests/` → suites).
 | `AgentProtocolTests / WireFrameRoundTripTests` | Every `ClientFrame` / `ServerFrame` case encodes → decodes → re-encodes identically. |
 | `AgentProtocolTests / PrefsAndDecisionsCodableTests` | Prefs and permission-decision DTOs round-trip through `Codable`. |
 | `AgentCoreTests / PTYHostTests` | Spawning `/bin/echo` under a real pty emits the printed text and exits cleanly; writes after `close()` throw `.alreadyClosed`. |
-| `AgentCoreTests / AgentEngineCommandTests` | Every PTY-writing command emits exact bytes at the `AgentPTY.write` boundary; write failures propagate, including `sendPrompt`, cancel, inline prompt, slash commands, edit/resubmit, and permission delivery modes. |
+| `AgentCoreTests / AgentEngineCommandTests` | Every PTY-writing command emits exact bytes at the `AgentPTY.write` boundary; write failures propagate, including `sendPrompt`, cancel, slash commands, edit/resubmit, and permission delivery modes. |
 | `AgentCoreTests / EngineIntegrationTests` | End-to-end engine lifecycle with a mock adapter and injected seams. |
 | `AgentCoreTests / TerminalEngineTests` | Fed bytes appear in the headless snapshot; BEL is latched and consumed once. |
 | `AgentCoreTests / MulticastEventBusTests` | Late subscribers receive the replay history first, then live events. |
 | `AgentCoreTests / GitDiffEngineTests` | Unified diffs parse with correct line-kind sequencing and hunk splitting. |
-| `AgentCoreTests / ChangedFilesParsingTests` | Git porcelain status output maps to changed-file paths. |
+| `AgentCoreTests / ChangedFilesReconcilerTests` | FSEvents/git path delta reconciles added and removed changed files. |
+| `AgentCoreTests / SilentDiagnosticsTests` | Ring buffer capacity, recording, and clear. |
 | `AgentCoreTests / ShellEnvResolverTests` | `env -0` NUL-separated output parses into key→value pairs, including values containing `=`. |
 | `AgentCoreTests / ResolvedEnvironmentTests` | `ResolvedEnvironment` PATH lookup, variable helpers, and equality. |
 | `AgentCoreTests / AgentErrorTests` | Every `AgentError` case is `Codable` and compares equal across copies. |
@@ -412,12 +428,14 @@ Full per-suite index: [`AGENTS.md`](AGENTS.md) (Inside `tests/` → suites).
 | `AgentTestSupportTests / FakeClockTests` | `FakeClock` virtual sleep advances time without wall-clock delays. |
 | `ClaudeAdapterTests / HookInstallerTests` | Hook settings are written idempotently; managed entries exist for every Claude lifecycle event. |
 | `ClaudeAdapterTests / ClaudeHookDecoderTests` / `TranscriptTailerTests` / `TranscriptTruncationTests` | Hook JSON decode, transcript tailing, and JSONL truncation at turn boundaries. |
-| `ClaudeAdapterTests / ClaudeAdapterEventStreamTests` / `ClaudeBinaryLocatorTests` | Adapter event stream wiring and `claude` binary discovery. |
+| `ClaudeAdapterTests / ClaudeAdapterEventStreamTests` / `ClaudeBinaryLocatorTests` | Adapter event stream wiring, `claude` binary discovery, and Stop/`last_assistant_message` dedup when the transcript already emitted. |
 | `ClaudeAdapterTests / ClaudeSlashCommandsTests` / `ClaudeSessionListerTests` | Slash-command catalog and resumable-session listing. |
 | `ClaudeAdapterTests / TUIFallbackTests` / `TUIFallbackGateTests` | TUI scrape parsing and gating for terminal fallback. |
 | `ClaudeAdapterTests / TwinDecoderParityTests` | Hook decoder output matches the digital-twin emitter contract. |
+| `ClaudeAdapterTests / FakeClaudeIntegrationTests` | Production adapter + spawned `fake-claude` emits `assistantText` end-to-end. |
 | `ClaudeCodeTwinTests / EngineDigitalTwinTests` | `ClaudeCodeTwin` drives the real engine end-to-end without a live Claude login. |
 | `ClaudeCodeTwinTests / TwinDecoderParityTests` | Twin hook payloads stay decodable by the production hook decoder. |
+| `ClaudeCodeTwinTests / LiveClaudeIntegrationTests` | Opt-in live PTY path (`CODEMIXER_LIVE_CLAUDE=1`): one `assistantText`, billing markers `entrypoint: cli`. See [`tests/AgenticCLIs/README.md`](tests/AgenticCLIs/README.md). |
 | `AgentRemoteControlTests / PairingServiceTests` | Correct PIN yields a token; five wrong PINs trigger lockout. |
 | `AgentRemoteControlTests / PairedDeviceStoreTests` | Paired-device persistence survives reload. |
 | `AgentRemoteControlTests / RemoteControlE2ETests` | In-memory WebSocket clients receive replay, command results, and PTY write failures consistently; `sendPrompt` publishes `.userTurn` before a failing command result. |

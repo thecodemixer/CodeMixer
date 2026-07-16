@@ -1,0 +1,64 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:Codemixer}",
+            "name": "Debug codemixerd",
+            "target": "codemixerd",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug codemixerd"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:Codemixer}",
+            "name": "Release codemixerd",
+            "target": "codemixerd",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release codemixerd"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:Codemixer}",
+            "name": "Debug codemixer",
+            "target": "codemixer",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug codemixer"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:Codemixer}",
+            "name": "Release codemixer",
+            "target": "codemixer",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release codemixer"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:Codemixer}",
+            "name": "Debug fake-claude",
+            "target": "fake-claude",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug fake-claude"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:Codemixer}",
+            "name": "Release fake-claude",
+            "target": "fake-claude",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release fake-claude"
+        }
+    ]
+}

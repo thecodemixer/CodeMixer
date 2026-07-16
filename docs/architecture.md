@@ -47,14 +47,14 @@ When documents disagree, this file wins on structural decisions, `code-style.md`
 
 ## Platform applicability
 
-Codemixer ships first on **macOS 14+** and is structured so a future iOS / iPadOS / visionOS client can render the same `AgentEvent` stream over the remote-control API. Most architecture below is platform-agnostic Swift; concrete decisions that lean on a specific OS (`posix_spawn`, FSEvents, `NWListener`, Keychain, `launchctl`, `NSWorkspace`) are tagged inline:
+Codemixer **ships on macOS 14+ only** (`Package.swift` declares `.macOS(.v14)`; there is no iOS target today). The architecture is structured so a **future** iOS / iPadOS / visionOS client could render the same `AgentEvent` stream over the remote-control API without forking the engine. Concrete decisions that lean on macOS (`posix_spawn`, FSEvents, `NWListener`, Keychain, `launchctl`, `NSWorkspace`) are tagged inline:
 
-- **[macOS]** — applies only on macOS.
-- **[iOS / iPadOS / visionOS]** — applies on the noted mobile platforms.
-- **[Apple cross-platform]** — applies anywhere the SwiftUI / Foundation / Network frameworks ship.
-- **[Portable Swift]** — pure-Foundation / Swift; compiles on macOS, iOS, and Linux.
+- **[macOS]** — shipped today.
+- **[Roadmap: iOS / iPadOS / visionOS]** — not built yet; remote-control client only.
+- **[Apple cross-platform]** — SwiftUI / Foundation patterns that would apply on other Apple platforms if we add them.
+- **[Portable Swift]** — pure-Foundation wire DTOs in `AgentProtocol` (no platform imports).
 
-The wire-protocol module `AgentProtocol` is [Portable Swift] by design — that boundary is the reason the future iOS client doesn't have to fork.
+The wire-protocol module `AgentProtocol` is [Portable Swift] by design — that boundary is what keeps a future mobile client from re-implementing the alphabet.
 
 ---
 
@@ -115,7 +115,7 @@ The engine must run identically inside the GUI app and inside a no-SwiftUI daemo
 - `AgentEngine` is a plain `actor`, never `@MainActor`.
 - `AgentCore` and `ClaudeCode` import zero SwiftUI / AppKit / UIKit.
 - Every UI interaction routes through `AgentEngineCommandPort.send(_:)` — there is no UI-only fast path.
-- A CI job greps the daemon binary's symbol table for SwiftUI symbols; if any appear, the build fails.
+- `codemixerd` must not link `AgentUI` (enforced by SPM target dependencies and `scripts/check-no-swiftui-imports.swift`).
 
 ### 3.5 Adapter-pluggable
 
@@ -135,7 +135,7 @@ A future iOS client must speak the same protocol as the Mac UI. This forces:
 
 ### 3.7 Sandbox disabled, hardened runtime enabled
 
-We spawn child processes, open PTYs, traverse the user's home directory, and watch arbitrary paths via FSEvents. App Sandbox is therefore off; Hardened Runtime stays on (we don't load third-party dylibs, so no `com.apple.security.cs.*` exemptions are needed). The CI checks `Codemixer.app/Contents/Info.plist` to assert the sandbox key is absent.
+We spawn child processes, open PTYs, traverse the user's home directory, and watch arbitrary paths via FSEvents. App Sandbox is therefore off; Hardened Runtime stays on (we don't load third-party dylibs, so no `com.apple.security.cs.*` exemptions are needed). The Xcode app target keeps the sandbox entitlement absent (`src/CodemixerApp/Project.swift`).
 
 ---
 
@@ -230,7 +230,7 @@ tests/
 | `AgentProtocolTests` | `tests/Core/AgentProtocolTests/` | Wire frames, prefs/decisions `Codable`. |
 | `AgentCoreTests` | `tests/Core/AgentCoreTests/` | Engine, PTY, bus, git, hooks, persistence, seams. |
 | `ClaudeAdapterTests` | `tests/AgenticCLIs/ClaudeCode/ClaudeAdapterTests/` | Hook decode, transcript, TUI fallback, slash commands. |
-| `ClaudeCodeTwinTests` | `tests/AgenticCLIs/ClaudeCode/ClaudeCodeTwinTests/` | Digital-twin contract + engine E2E. |
+| `ClaudeCodeTwinTests` | `tests/AgenticCLIs/ClaudeCode/ClaudeCodeTwinTests/` | Digital-twin contract, engine E2E, opt-in live harness (`CODEMIXER_LIVE_CLAUDE=1`). |
 | `AgentRemoteControlTests` | `tests/Remote/AgentRemoteControlTests/` | Pairing, TLS, sidecar, Bonjour, remote client, E2E. |
 | `RemoteParityTests` | `tests/Remote/RemoteParityTests/` | Wire codec + command-dispatch parity canary. |
 | `AgentUITests` | `tests/AgentUITests/` | View-model reduction, interaction coverage, voice/export. |
@@ -241,7 +241,7 @@ tests/
 | Target | Imports | Concern |
 | --- | --- | --- |
 | `Codemixer.app` | `AgentUI`, `AgentRemoteControl`, `ClaudeCode` | The GUI. Registers `ClaudeAdapter()` at startup. |
-| `codemixerd` | `AgentCore`, `AgentRemoteControl`, `ClaudeCode` | The daemon. **Does not** link `AgentUI`. CI greps the binary symbols to enforce this. |
+| `codemixerd` | `AgentCore`, `AgentRemoteControl`, `ClaudeCode` | The daemon. **Does not** link `AgentUI`. |
 | `fake-claude` | `AgenticCLIs/ClaudeCode/digital-twin/fake-claude` | Minimal CLI twin for CI and local development without a real Claude login. |
 
 ### Hard import rules (lint-enforced)
@@ -251,9 +251,9 @@ tests/
 - `ClaudeCode` may not import SwiftUI, AppKit, or UIKit.
 - `AgentRemoteControl` may not import SwiftUI, AppKit, or UIKit.
 - `AgentUI` may not import `ClaudeCode` or `AgentRemoteControl` — it imports `AgentCore` only.
-- `codemixerd` may not link `AgentUI`. CI fails the build if it does.
+- `codemixerd` may not link `AgentUI`.
 
-These rules are checked by a SwiftLint custom rule plus a grep over each target's source set, run on every PR.
+These rules are checked locally by `scripts/check-no-swiftui-imports.swift` and `scripts/check-direct-framework-calls.swift` (see §27).
 
 ---
 
@@ -306,13 +306,13 @@ Codemixer is built on Swift 6.2 strict concurrency. The four isolation domains:
 | Domain | Examples | Notes |
 | --- | --- | --- |
 | **Plain actor** | `AgentEngine`, `MulticastEventBus`, `PTYHost`, `TerminalEngine`, `HookServer`, `GitDiffEngine`, `HeartbeatActivityMonitor`, `StatusPhraseResolver`, `SessionStore` | All engine-side state. Run identically in GUI and daemon. Never `@MainActor`. |
-| **`@MainActor`** | `EngineViewModel`, every SwiftUI `View`, `ConversationViewModel`, `DiffPanelViewModel`, `ComposerModel`, `Speech` recognizers | UI thread only. Bridges the bus by `Task { for await ev in bus.subscribe() { applyOnMain(ev) } }`. |
+- **`@MainActor`** | `EngineViewModel`, every SwiftUI `View`, speech recognizers | UI thread only. Subscribes to `bus.subscribe()` and folds `HistoryEntry` events on the main actor. |
 | **Global concurrent (cooperative)** | `Task` for one-shot work (env resolution, login URL opening) | No long-lived loops; loops belong inside actors. |
 | **`@unchecked Sendable` bridges** | `TerminalDelegate` shim around `SwiftTerm.Terminal`'s callback API; FSEvents callback shim; DispatchIO callback shim | Quarantined to specific files; documented invariants. Reviewed line-by-line. |
 
 ### Crossing isolation
 
-- **Engine → UI**: the engine publishes onto `MulticastEventBus`; the UI subscribes via an `AsyncStream<AgentEvent>` and applies on `@MainActor`. There is no direct method call into UI code.
+- **Engine → UI**: the engine publishes onto `MulticastEventBus`; the UI subscribes via `AsyncStream<HistoryEntry>` and folds `entry.event` on `@MainActor`. There is no direct method call into UI code.
 - **UI → Engine**: every user action constructs an `AgentCommand` and calls `await engine.send(_:)` through `AgentEngineCommandPort`. There is no direct method call into engine internals.
 - **Engine → Adapter**: the engine awaits the adapter's `makeEventStream(inputs:)` — an `AsyncStream<AgentEvent>`. The adapter is `Sendable`; its closure may run on any executor.
 - **Adapter → Engine**: adapters do not call back into the engine. They emit events; the engine ingests them.
@@ -552,14 +552,19 @@ public protocol AgentAdapter: Sendable {
     var slashCommandCatalog: [SlashCommand] { get }
     func enumerateProjectCommands(workspace: URL) async -> [SlashCommand]
 
-    // 9. Resume / session listing
+    // 9. Model catalog (composer picker)
+    func availableModels() -> [AgentModelOption]
+
+    // 10. Resume / session listing
     func listResumableSessions(workspace: URL) async -> [SessionSummary]
     func resumeArgvAddition(sessionId: String) -> [String]
 
-    // 10. Tool rendering hints
+    // 11. Tool rendering hints
     func toolRenderHint(toolName: String, input: AgentEvent.ToolInput) -> ToolRenderHint
 }
 ```
+
+`Bootstrap` copies `adapter.availableModels()` into `EngineViewModel` at startup. Claude returns Sonnet, Opus, and Haiku (`ClaudeAdapter.availableModels()`).
 
 ### `AgentCapabilities`
 
@@ -619,7 +624,6 @@ public enum AgentCommand: Codable, Sendable {
     case cancelCurrentTurn
     case editAndResubmitLast(target: UUID, text: String, attachments: [AttachmentRef])
     case respondToPermission(id: UUID, decision: PermissionDecision)
-    case respondToInlinePrompt(promptID: UUID, text: String)
     case newSession
     case compact
     case selectModel(id: String)
@@ -726,40 +730,47 @@ The engine is small on purpose. Most logic lives in adapters and clients.
 
 ## 14. `MulticastEventBus` — fan-out and replay
 
-The bus is the engine's outbound port.
+The bus is the engine's outbound port. Each published event is wrapped in a bus-assigned `HistoryEntry` (opaque `UUID` + `AgentEvent`). Subscribers receive `AsyncStream<HistoryEntry>`, not bare events.
 
 ```swift
 public actor MulticastEventBus {
-    public func publish(_ event: AgentEvent) async
-    public func subscribe() -> Subscription
-    public func unsubscribe(_ subscription: Subscription)
-    public func replay(since lastSeenEventID: UUID?) -> [AgentEvent]
-}
+    public struct HistoryEntry: Sendable {
+        public let id: UUID          // opaque checkpoint token
+        public let event: AgentEvent
+    }
 
-public struct Subscription: Sendable {
-    public let id: UUID
-    public let stream: AsyncStream<AgentEvent>
+    public struct Subscription: Sendable {
+        public let id: UUID
+        public let stream: AsyncStream<HistoryEntry>
+    }
+
+    public enum SubscribeOutcome: Sendable, Equatable {
+        case fresh, resumed, checkpointExpired
+    }
+
+    public func subscribe() -> Subscription
+    public func subscribe(after: UUID?) -> Subscription
+    public func subscribeWithOutcome(after: UUID?) -> (Subscription, SubscribeOutcome)
+    @discardableResult public func publish(_ event: AgentEvent) -> UUID
+    public func unsubscribe(_ id: UUID)
 }
 ```
 
 ### Properties
 
 - **N subscribers.** In Mode B, the GUI is one subscriber, each remote client is another. No special-casing.
-- **Per-subscriber bounded queue.** Default 1024 events. Drop-oldest on overflow with an `eventDropped` signal so the consumer knows to ask for a snapshot.
-- **Ring buffer of last 500 events** for reconnect-with-replay. Keyed by event UUID. Replay returns events strictly after `lastSeenEventID`; `nil` means "from the start of the buffer."
+- **Per-subscriber bounded queue.** Default `StreamBufferDefaults.eventHistory` (500). Drop-oldest on overflow; there is no separate overflow signal — consumers that need a full rebuild request a snapshot.
+- **Ring buffer of last 500 `HistoryEntry` values** for reconnect replay. `subscribe(after:)` replays only entries after the checkpoint; unknown or expired checkpoints replay the full buffer and report `.checkpointExpired` via `subscribeWithOutcome`.
+- **Self-cleaning subscriptions.** Each stream registers `onTermination` to call `unsubscribe`, so cancelled UI tasks and debug tails do not leak continuations.
 - **No reordering.** Events are delivered in publish order to each subscriber.
 
 ### Backpressure model
 
-Subscribers consume on their own schedule. If a remote phone over flaky Wi-Fi falls behind, its queue overflows independently — other subscribers are unaffected. When the phone reconnects with a stored `lastSeenEventID`, it gets the replay. If it fell behind by more than 500 events, the engine sends a `engineRestarted` synthetic event so the client knows to request a full snapshot via `requestSnapshot(.conversation)`.
+Subscribers consume on their own schedule. If a remote client falls behind, its queue overflows independently — other subscribers are unaffected. On reconnect, the client sends `ClientFrame.subscribe(lastSeenEventID:)`; the server replays the delta and responds with `ServerFrame.subscribed(latestEventID:outcome:)`. When `outcome == .checkpointExpired`, `RemoteEngineClient` publishes `.engineRestarted` and pulls fresh snapshots so the client can rebuild.
 
-### Multicast load test
+### Tests
 
-`AgentCoreTests` runs N=50 simulated subscribers under bursty load (1000 events/sec for 5 seconds) and asserts that:
-
-- Each subscriber receives every event published while it was subscribed.
-- No subscriber's queue overflows under <600 events/sec aggregate fan-out.
-- The ring buffer's UUID lookup is O(1) (backed by a hash map alongside the deque).
+`MulticastEventBusTests` covers replay ordering, checkpoint resume/expiry, and self-unsubscribe on stream cancellation.
 
 ---
 
@@ -887,53 +898,46 @@ extension surface.
 
 ---
 
-## 17. State machine and turn lifecycle
+## 17. Engine lifecycle and turn reduction
 
-`AgentState` is the engine-side reducer over `AgentEvent`. The states:
+### Engine lifecycle (`EngineState`)
+
+The engine tracks coarse lifecycle only — not conversation content:
 
 ```swift
-public enum AgentState: Sendable, Equatable {
-    case bootstrapping
-    case awaitingAuth(reason: AuthReason)
-    case idle
-    case userTurn(text: String)
-    case thinking
-    case runningTool(name: String, id: String, startedAt: Date)
-    case awaitingPermission(prompt: PermissionPrompt)
-    case errored(reason: String)
-    case shutdown
+public enum EngineState: Sendable, Equatable {
+    case stopped
+    case starting
+    case running(sessionID: String?)
+    case stopping
 }
 ```
 
-### A canonical turn
+`AgentEngine.currentState` is used by the daemon idle-exit loop and health reporting. Conversation messages, tool cards, permissions, and activity substate live in **`EngineViewModel`** (and remote clients' own reducers), which fold the `MulticastEventBus` stream on `@MainActor`.
+
+### A canonical turn (event fold)
 
 ```
-.idle
-  ↓  AgentCommand.sendPrompt
-.userTurn(text:)
-  ↓  AgentEvent.userTurn   (server-confirmed; client renders bubble)
-.thinking
+(user sends prompt via AgentCommand.sendPrompt)
+  ↓  AgentEvent.userTurn   (engine echo; all surfaces render bubble)
   ↓  AgentEvent.thinkingChunk*  (streams into a ThinkingBlock)
   ↓  AgentEvent.thinkingComplete(duration:)
-.runningTool(name:, id:, startedAt:)  ← may iterate over several tools
-  ↓  AgentEvent.toolStart, toolProgress*, toolEnd
-.awaitingPermission(prompt:)            ← if a tool needs approval
-  ↓  AgentCommand.respondToPermission(decision:)
-.runningTool(...)
+  ↓  AgentEvent.toolStart / toolProgress* / toolEnd  (may iterate)
+  ↓  AgentEvent.permissionRequest  (optional)
+  ↓  AgentCommand.respondToPermission → agent resumes
   ↓  AgentEvent.assistantText(isFinal: true)
-.idle
+  ↓  activity returns to idle via HeartbeatActivityMonitor.endTurn
 ```
 
-### Reducers
-
-`AgentEngine` and each client (Mac UI, mobile client) hold a reducer instance. The reducer is pure — `(AgentState, AgentEvent) → AgentState` — and lives in `AgentCore`. UIs derive their view models from the result, but the canonical state lives in the engine.
+There is no separate `AgentState` reducer in `AgentCore`. The engine publishes events; clients reduce them.
 
 ### Optimistic send + echo reconciliation
 
 To keep sending instant, `EngineViewModel.sendPrompt` appends the user bubble and flips to a working state on the main actor *before* the engine round-trip, then reconciles when the real `.userTurn` arrives. Two subtleties make this safe:
 
 - The engine publishes `.userTurn` + starts the heartbeat **before** the awaited PTY write, so every surface — GUI and remote clients — reflects the turn at the same instant rather than after the write + bus fan-out. A failed write still throws, so the caller surfaces the error. `AgentEngineCommandTests` pins the publish-before-write invariant with an injected failing PTY; `RemoteControlE2ETests` pins the wire-visible ordering (`.userTurn` event before the failing command result).
-- Claude double-emits the turn (engine echo + the `UserPromptSubmit` hook). The view model arms a short dedup window (`ActivityTiming.userTurnEchoWindow`): the first matching echo adopts the engine's id onto the optimistic bubble; the second is dropped. If the send throws, the optimistic bubble rolls back and the status resets. Genuinely different turns always append.
+- Claude double-emits the **user** turn (engine echo + the `UserPromptSubmit` hook). The view model arms a short dedup window (`ActivityTiming.userTurnEchoWindow`): the first matching echo adopts the engine's id onto the optimistic bubble; the second is dropped. If the send throws, the optimistic bubble rolls back and the status resets. Genuinely different turns always append.
+- Claude can also double-emit the **assistant** reply (transcript JSONL + Stop `last_assistant_message`). That fusion lives in `ClaudeAdapter`: drain the transcript on Stop, then drop hook `assistantText` when the tailer has already emitted for the session. Transcript is canonical; Stop is fallback. See `ClaudeCode/CONTRACT.md` and `ClaudeAdapterEventStreamTests`.
 
 ### PTY write-failure contract
 
@@ -1008,7 +1012,7 @@ hook (Notification or PreToolUse)  ───► HookServer  ───► adapter
 ### Properties
 
 - **First responder wins.** Multiple clients may show the same prompt; the engine accepts the first valid `respondToPermission(id:, decision:)` and drops further responses for the same prompt id because the prompt has already been removed from `pendingPermissions`.
-- **Timeout cleanup.** If no client responds before `permissionTimeout`, the engine auto-denies and publishes `permissionAlreadyResolved(id, byDevice: "timeout")` so stale cards collapse consistently.
+- **Timeout cleanup.** If no client responds before `permissionTimeout`, the engine auto-denies, publishes `permissionAlreadyResolved(id, byDevice: "timeout")`, and publishes `AgentError.permissionTimeout`.
 - **Auto-approval rules** are a higher-level service that consumes `permissionRequest` events and synthesizes `respondToPermission` commands; rules are user-editable per project.
 - **Headless timeout.** With no client connected, the engine waits `permissionTimeout` (default 5 min) then synthesizes `.deny`.
 - **Delivery modes are adapter-owned.** Some agents accept permission answers by pty bytes, some by hook stdout, and Claude can need both. The engine preserves adapter intent and propagates pty write failures for `.writePTY` and `.both`.
@@ -1018,35 +1022,28 @@ hook (Notification or PreToolUse)  ───► HookServer  ───► adapter
 
 ## 19. Git diff subsystem
 
-The diff panel is driven by two cooperating sources:
+The diff panel is driven by **`AgentEngine`'s FSEvents monitor** plus git porcelain:
 
 ```
-FSEventsWatcher  ──────────► (workspace path changes, .gitignore-filtered)
-                                      │
-                                      ▼
-                              GitDiffEngine (actor)
-                                      │
-                                      │  on change: re-run
-                                      │
-                                      ▼
-                              git status --porcelain=v1 -z
-                              git diff --no-color --unified=3 -- <path>
-                                      │
-                                      ▼
-                              [ChangedFile] + [DiffHunk]
-                                      │
-                                      ▼
-                              published via AgentEvent.fileTouched + DiffPanelViewModel
-                                      │
-                                      ▼
-                              Mac UI DiffPanelView
-                              iPhone DiffPanelView (via wire)
+AgentEngine.start(adapter:workspace:)
+  ↓
+FSEventsWatcher (workspace, debounced) ──► scheduleDiffRefresh()
+  ↓
+GitDiffEngine.changedFiles()  (git status --porcelain=v1 -z)
+  ↓
+ChangedFilesReconciler.reconcile(current:changedFiles, gitPaths:)
+  ↓
+publish AgentEvent.fileTouched for added paths
+  ↓
+EngineViewModel → DiffPanelView
 ```
 
 ### Properties
 
 - All git invocations go through `agent_posix_spawn`, **never** through Swift's `Process`. Same fork-safety story as the agent itself.
-- FSEvents triggers a 50ms-debounced re-scan. Debounce avoids storms during big `git checkout` operations.
+- FSEvents triggers a coalesced re-scan (`AgentEngine.diffRefreshCoalesce`, 50ms). Debounce avoids storms during big `git checkout` operations.
+- `ChangedFilesReconciler` computes added/removed paths so the engine publishes `fileTouched` only for net-new changes.
+- If the watcher fails to start, the engine records `SilentDiagnostics` and continues without live diff updates.
 - `.gitignore` filtering uses `git check-ignore --stdin`; one round-trip per batch.
 - `revert(path:)` runs `git restore -- <path>`; `revertHunk(...)` writes a patch to stdin of `git apply -R --unidiff-zero`.
 - The diff engine never reads or modifies files; only `git` does. This keeps the engine's blast radius tiny.
@@ -1059,27 +1056,34 @@ Codemixer persists almost nothing itself. The agent writes JSONL transcripts; th
 
 ```
 ~/Library/Application Support/com.codecave.Codemixer/
-├── recent.json          # recent projects
-├── sessions.json        # last session id per (agentID, projectURL)
-├── workspaces.json      # per-workspace project list (navigator model)
-├── prefs.json           # appearance, voice, permissions, remote, debug
-└── auto-approval/<projectHash>.json
-~/Library/Caches/Codemixer/uploads/<sessionID>/<uuid>   # 24h-TTL attachments
-~/Library/LaunchAgents/com.codecave.Codemixer.daemon.plist  # if enabled
+├── sessions.json        # recent projects (SessionStore)
+├── workspaces.json      # Workspace→Projects navigator model
+├── prefs.json           # appearance + auto-approval rules (PrefsStore)
+└── (Keychain)           # paired-device token hashes, TLS P12 password
+~/Library/Caches/Codemixer/uploads/<sessionID>/<uuid>   # attachment staging
+~/Library/LaunchAgents/com.codecave.Codemixer.daemon.plist  # if LaunchAgent installed
 ```
+
+### Stores
+
+| Store | File | On decode failure |
+| --- | --- | --- |
+| `PrefsStore` | `prefs.json` | Use in-memory defaults; record `SilentDiagnostics.prefsQuietReset` |
+| `SessionStore` | `sessions.json` | Empty recents list; record `sessionsQuietReset` |
+| `WorkspaceProjectsStore` | `workspaces.json` | If `schemaVersion` > supported: keep in-memory defaults + `workspacesSchemaTooNew`; otherwise quiet-reset + `workspacesQuietReset` |
+| `PairedDeviceStore` | Keychain | Quiet-reset paired devices + `pairedDevicesQuietReset` |
+
+There is **no** `PrefsMigrator` or forward migration pipeline. Unreadable or unsupported files reset to defaults **silently** — no toast, no blocking dialog. Recovery actions are journaled in `SilentDiagnostics` (see below).
+
+`AppearancePrefs` uses tolerant `decodeIfPresent` for individual keys so adding a field does not invalidate the whole file. Only `workspaces.json` carries an explicit `schemaVersion` integer today.
 
 ### `SessionStore`
 
-```swift
-public actor SessionStore {
-    public init(fileSystem: any FileSystem, baseURL: URL)
-    public func recentProjects() async -> [RecentProject]
-    public func rememberProject(_ url: URL, lastSessionID: String?) async throws
-    public func sessionID(for agent: AgentID, project: URL) async -> String?
-    public func loadPrefs() async -> Prefs
-    public func savePrefs(_ prefs: Prefs) async throws
-}
-```
+Recent projects list (most-recent-first, bounded). Persists at `AppSupportPaths.sessionsURL`.
+
+### `PrefsStore`
+
+Persists `AppearancePrefs` and auto-approval rules. Appearance includes theme (`system` / light / dark — no separate "Midnight" theme), density, sidebar visibility, and the opt-in `showSilentRecoveryLog` flag.
 
 ### `WorkspaceProjectsStore`
 
@@ -1102,9 +1106,15 @@ It contains **no** Claude/terminal specifics — sessions are not modelled here;
 
 Every persisted file uses the temp + `rename(2)` pattern in `SystemFileSystem.writeAtomically`. Power-loss or crash never leaves a half-written file.
 
-### Schemas are versioned
+### `SilentDiagnostics` — quiet recovery journal
 
-Each file embeds a `"schemaVersion": Int`. Migration is forward-only; older Codemixer versions ignore unknown fields (`Codable` with `decodeIfPresent`); a higher version refuses to write a lower version.
+Always-on ring buffer (`StreamBufferDefaults.silentDiagnostics`) of silent recovery records: quiet-resets, Mode B fallback, cert rotation, wire-version reject, permission delivery failures, etc.
+
+- **Logger:** `category: "SilentDiagnostics"` (mirrors every record at `.notice`).
+- **Opt-in UI:** Settings → "Show Silent Recovery Log" (`AppearancePrefs.showSilentRecoveryLog`) opens `SilentDiagnosticsView`.
+- **HTTP sidecar:** `GET /v1/diagnostics/silent` (`RemoteDefaults.silentDiagnosticsPath`) returns JSON array of records for scripts.
+
+No user-facing toast on quiet-reset — inspect the journal when debugging persistence or daemon fallback.
 
 ---
 
@@ -1128,41 +1138,48 @@ NWListener (WebSocket, :8421 — see RemoteDefaults.webSocketPort)
    │
 HTTPSidecarServer (:8422 — see RemoteDefaults.sidecarPort)
    │
-   ├── HTTP handler for POST /v1/attachments (multipart)
-   │       │
+   ├── POST /v1/attachments (multipart)
    │       └── stage to ~/Library/Caches/Codemixer/uploads/<sessionID>/<uuid>
    │           return {ref: "attachment://<uuid>"}
    │
-   └── GET /v1/health
-           returns {version, engineState, clientCount, uptime}
+   ├── GET  /v1/health
+   │       returns {version, engineState, clientCount, uptime}
+   │
+   └── GET  /v1/diagnostics/silent
+           returns JSON array of SilentDiagnostics records
 ```
 
 ### Wire frames
 
 ```swift
 public enum ClientFrame: Codable, Sendable {
+    case command(id: UUID, command: AgentCommand)
     case subscribe(lastSeenEventID: UUID?)
-    case command(AgentCommand)
-    case ping
+    case snapshot(kind: SnapshotKind)
+    case ping(id: UUID)
+    case pair(pin: String, clientName: String)
+    case auth(token: String)
 }
 
 public enum ServerFrame: Codable, Sendable {
-    case event(AgentEventWire)
-    case ack(commandID: UUID)
-    case error(WireError)
-    case pong
+    case event(id: UUID, event: AgentEventWire)
+    case result(for: UUID, ok: Bool, error: WireAgentError?)
+    case snapshot(kind: SnapshotKind, payload: Data)
+    case pong(for: UUID)
+    case paired(token: String)
+    case pairFailed(reason: PairFailureReason)
+    case versionMismatch(supported: [WireVersion])
+    case subscribed(latestEventID: UUID?, outcome: SubscribeReplayOutcome)
 }
-
-public let wireProtocolVersion: Int = 1   // bumped only on breaking changes
 ```
 
-Every frame carries `"v": wireProtocolVersion` and a `correlationID` for command/ack pairing.
+Every frame carries `"v": WireVersion.current` (today `1`). Decoders reject mismatches — there is no dual-speak across versions.
 
 ### Pairing
 
 - **First-time pairing**: Mac UI shows a 6-digit PIN plus a QR (`codemixer://pair?host=...&port=...&fingerprint=<sha256>`). Phone scans, sends `{type: "pair", pin: "...", deviceName: "..."}`. Service verifies with constant-time compare, issues a bearer token (32 random bytes, base64), persists `{deviceName, tokenHash, createdAt, lastSeen}` in Keychain.
 - **Lockout**: 5 wrong PIN attempts → 60-second timeout, doubled on each subsequent failure (60 → 120 → 240 → …).
-- **TLS cert** is self-signed RSA-2048, valid 5 years, stored in Keychain with `kSecAttrAccessibleAfterFirstUnlock`. Fingerprint pinning on the client.
+- **TLS cert** is self-signed **RSA-2048** (via `openssl`), stored as PKCS#12 in app support and imported through Keychain. Fingerprint pinning on the client.
 
 ### Binding rules
 
@@ -1186,8 +1203,8 @@ The daemon is a thin `@main` over `AgentEngine + AgentRemoteControl + ClaudeCode
 
 ### Properties
 
-- **No SwiftUI.** CI greps the binary's symbol table for `SwiftUI.` — any match fails the build.
-- **Idle exit.** With 0 connected clients and `AgentState == .idle` for 10 minutes, the daemon `_exit(0)`s. LaunchAgent's `KeepAlive = {SuccessfulExit: false}` won't restart it. Next GUI launch spawns it again via `launchctl bootstrap`.
+- **No SwiftUI.** `codemixerd` does not link `AgentUI`.
+- **Idle exit.** With 0 connected clients and `engine.currentState` is `.stopped` or `.stopping` for `DaemonDefaults.idleExitAfterChecks` consecutive checks (`DaemonDefaults.idleCheckInterval` apart — 10 minutes total), the daemon `_exit(0)`s. LaunchAgent's `KeepAlive = {SuccessfulExit: false}` won't restart it. Next GUI launch spawns it again via `launchctl bootstrap`.
 - **Crash recovery.** `KeepAlive = {SuccessfulExit: false}` *does* restart on unexpected exits.
 - **No GUI bleed.** The daemon never opens windows, never makes alerts, never calls `NSAlert`/`UNNotificationCenter` (notifications are the client's concern).
 
@@ -1196,15 +1213,11 @@ The daemon is a thin `@main` over `AgentEngine + AgentRemoteControl + ClaudeCode
 - **Install**: `Settings → Remote → Enable on login` writes `~/Library/LaunchAgents/com.codecave.Codemixer.daemon.plist` and `launchctl bootstrap gui/$UID <plist>`. The GUI now connects via loopback.
 - **Uninstall**: toggle off → `launchctl bootout gui/$UID/com.codecave.Codemixer.daemon` → remove the plist. GUI falls back to in-process Mode A.
 
-### Loopback bridging
+### Loopback bridging (Mode B probe)
 
-When the daemon is running and the GUI launches:
+When the LaunchAgent is installed or `CODEMIXER_UI_BACKEND=daemon` is set, `Bootstrap` probes the daemon via `RemoteEngineClient.connect()`. On success the GUI is a loopback WebSocket client (same wire as any remote peer). On failure it records `SilentDiagnostics.modeBFallback` and starts an in-process `AgentEngine` instead — no error toast.
 
-1. GUI's `EngineConnection` actor probes `GET http://127.0.0.1:8422/v1/health`.
-2. If healthy, GUI opens a WebSocket connection to `ws://127.0.0.1:8421/v1/ws` (daemon default) or `wss://…` when TLS is enabled, sends `subscribe(lastSeenEventID: nil)`, and treats the daemon's engine as authoritative.
-3. If unhealthy / not running and Mode A is the user's preference, GUI starts an in-process engine instead.
-
-The user never sees the seam; the activity state, conversation, and pairing list are the same.
+`Bootstrap.startAppEventBridge` subscribes to the bus and wires `authURL` → auth sheet, `bell` / hook status phrases → `UserNotificationBridge`, and TTS requests.
 
 ---
 
@@ -1230,7 +1243,7 @@ A native Mac app that spawns child processes, opens TTYs, watches arbitrary file
 - **PIN**: 6 random decimal digits from `SecRandomCopyBytes`. 90-second expiry. Constant-time compare via `CryptoKit.SymmetricKey.timingSafeCompare`.
 - **Lockout**: 5 attempts → exponential backoff.
 - **Bearer tokens**: 32 random bytes, base64-encoded, stored as SHA-256 hash in Keychain (we compare the hash, never the token). Per-device, revocable.
-- **TLS certificate**: self-signed RSA-2048, 5-year validity, in Keychain with `kSecAttrAccessibleAfterFirstUnlock`. Fingerprint shown in the pairing QR for client-side pinning. TLS is controlled by `RemoteControlServer.Configuration.useTLS`: the GUI embedded server defaults to TLS on; `codemixerd` defaults to plain WebSocket on loopback for local development.
+- **TLS certificate**: self-signed RSA-2048 via `CertificateManager`, fingerprint shown in the pairing QR for client-side pinning. TLS is controlled by `RemoteControlServer.Configuration.useTLS`: the GUI embedded server defaults to TLS on; `codemixerd` defaults to plain WebSocket on loopback for local development.
 - **Port ownership**: `RemoteDefaults.webSocketPort` (8421) and `RemoteDefaults.sidecarPort` (8422) are the single source of truth — do not hardcode ports elsewhere.
 
 ### Logging
@@ -1282,7 +1295,7 @@ public enum RemoteControlError: Error, Codable, Sendable {
 
 ### Rules
 
-- **Errors are typed at the throwing site.** Swift 6.2 typed throws (`throws(PTYError)`) is used at function signatures that have a closed error set.
+- **Errors are typed at the throwing site.** Closed error sets use plain `throws` with a dedicated `Error` enum — the codebase does not use Swift typed throws (`throws(SomeError)`) today.
 - **Errors that cross the wire are `Codable`.** Remote clients see the same case the engine raised, complete with associated values.
 - **`localizedDescription`** is implemented per case with actionable phrasing — *"binary not found at /usr/local/bin/claude — install with `npm i -g @anthropic-ai/claude-code`"* — not opaque enum names.
 - **No `fatalError` outside of `Logger.fatal` shims**, which assert in debug and `os_log_fault` in release.
@@ -1342,7 +1355,8 @@ When the system reports Reduce Motion or low-power mode, ShimmerDots become stat
 └─────────────────────────────────────────────────────────────┘
 ┌─────────────────────────────────────────────────────────────┐
 │ ClaudeCodeTwinTests         (digital-twin contract, engine   │
-│                              E2E via ClaudeCodeTwin)         │
+│                              E2E via ClaudeCodeTwin, opt-in  │
+│                              LiveClaudeHarness)              │
 └─────────────────────────────────────────────────────────────┘
 ┌─────────────────────────────────────────────────────────────┐
 │ AgentProtocolTests          (Codable round-trip per case,    │
@@ -1373,36 +1387,41 @@ When the system reports Reduce Motion or low-power mode, ShimmerDots become stat
   short async-stream drain points and real-PTY integration coverage.
 - **Scripted PTY seam tests** in `AgentEngineCommandTests` inject `AgentPTY`
   doubles to cover exact bytes and failure propagation for every pty-writing
-  command: `.sendPrompt`, `.cancelCurrentTurn`, `.respondToInlinePrompt`, all
-  typed slash commands, `.editAndResubmitLast`, and every
-  `respondToPermission` delivery mode.
+  command: `.sendPrompt`, `.cancelCurrentTurn`, typed slash commands,
+  `.editAndResubmitLast`, and every `respondToPermission` delivery mode.
 - **Remote PTY failure E2E tests** in `Remote/AgentRemoteControlTests/RemoteControlE2ETests` use the same seam
   behind an in-memory WebSocket server to prove command failures become failed
   wire results and `.sendPrompt` preserves event-before-error ordering.
-- **Real-PTY suite** (`tests-pty-integration`) runs a `sleep 1` child end-to-end,
-  asserting the read pipeline, reap, and graceful shutdown work against the
-  real kernel. Gated by an env var so CI on Linux skips it.
+- **Real-PTY integration** uses `/bin/echo` or similar in `PTYHostTests`; there is no separate Linux CI matrix (package is macOS-only).
 
 ---
 
 ## 27. Tooling and enforcement
 
-Architecture is only useful if it survives the next pull request. The enforcement chain:
+Architecture survives review through **local scripts** and the pre-merge checklist in `docs/style/code-style.md` §26. There is no checked-in GitHub Actions workflow today (`.github/` may be absent).
 
 | Tool | What it enforces |
 | --- | --- |
-| `SwiftFormat` (checked-in `.swiftformat`) | Style. Pre-commit + CI. |
-| `SwiftLint` (checked-in `.swiftlint.yml`) | `force_unwrapping` / `force_try` / `large_tuple` as errors; `file_length=400`, `function_body_length=60`, `function_parameter_count=5`; custom rules rejecting `Date()` / `Int.random` / `ProcessInfo.processInfo.environment` / `FileManager.default` outside `Live*` files; `print(`; bare `// TODO`. |
-| Custom import-graph linter | Rejects forbidden cross-target imports (e.g. SwiftUI in `AgentCore`). |
-| `swift build -Xswiftc -warnings-as-errors` | All warnings are errors in CI. |
-| `swift test --warnings-as-errors` | Tests must be warning-free too. |
-| CI symbol-table check on `codemixerd` | `nm codemixerd | grep SwiftUI.` fails the job. |
-| CI entitlements check on `Codemixer.app` | Asserts `com.apple.security.app-sandbox` key is absent. |
-| `RemoteParityTests` in CI | Mac UI / wire parity. |
-| Pre-merge review checklist (PR template) | The checklist from `code-style.md` §13 in copy-pastable form. |
-| `CODEOWNERS` | Style-conscious reviewer required on every PR. |
+| `scripts/pre-commit.swift` | **Narrow gate:** `swift build`, `swift test --no-parallel`, SwiftFormat lint, SwiftLint. Install via `.git/hooks/pre-commit`. |
+| `scripts/check-no-swiftui-imports.swift` | SwiftUI imports only in allowed UI targets. |
+| `scripts/check-direct-framework-calls.swift` | Wrapped Apple APIs only through `External/` seams. |
+| `scripts/check-a11y.swift` | Icon-only controls have accessibility metadata. |
+| `scripts/regen-coverage-manifest.swift --check` | Public API surface matches `CoverageManifest.swift`. |
+| `scripts/check-package-layout.swift` | Test suite layout matches `Package.swift`. |
+| `scripts/check-test-runtime.swift` | Per-suite runtime budgets (pipe `swift test` output). |
+| Pre-merge review checklist | Human gate in `code-style.md` §26 and `docs/reference/templates/pr.template.md`. |
 
-The combined effect: the architecture rules above are mostly self-enforcing. If a PR breaks one, CI rejects it before a human reviews.
+**Full merge gate** (run manually before opening a PR):
+
+```bash
+swift build && swift test --no-parallel
+scripts/check-package-layout.swift
+scripts/check-no-swiftui-imports.swift
+scripts/check-direct-framework-calls.swift
+scripts/check-a11y.swift
+scripts/regen-coverage-manifest.swift --check
+swift test --no-parallel 2>&1 | scripts/check-test-runtime.swift
+```
 
 ---
 
@@ -1414,9 +1433,9 @@ Three canonical walkthroughs. Reading them in order is the fastest way to intern
 
 ```
 1. User types "fix the test failure" in ComposerView, hits Cmd-Return.
-2. ComposerModel constructs:
+2. `PromptComposerView` / `EngineViewModel` constructs:
      AgentCommand.sendPrompt(text: "fix the test failure", attachments: [])
-3. ComposerModel calls: await engine.send(.sendPrompt(...))
+3. View model calls: await engine.send(.sendPrompt(...))
    (where `engine` is either an in-process AgentEngine actor OR a
     loopback EngineRemoteProxy that wraps a WSS connection — either way,
     the same AgentEngineCommandPort.)
@@ -1498,14 +1517,16 @@ These three flows touch every joint in the system. Reviewers should be able to r
 | PTY write fails | `AgentPTY.write` throws `PTYError` | The command throws. Remote callers receive a failed command result; GUI callers roll back optimistic state where applicable. `.sendPrompt` has already published `.userTurn` by design. |
 | Transcript file missing | Tailer's `open(2)` fails | Adapter emits `error(.adapter("transcript", "missing"))`. UI shows banner ("Live updates unavailable; using TUI fallback only"). |
 | Hook UDS socket conflict | `NWListener.start` fails with EADDRINUSE | Engine tries `${TMPDIR}/codemixer-<pid>.sock`; retries up to 3 times with fresh paths. |
-| Remote client falls behind | Subscriber's outbound queue exceeds 1024 | Drop-oldest + emit `eventDropped(count:)` signal. Client receives this and asks for `requestSnapshot(.conversation)`. |
+| Remote client falls behind | Subscriber queue drops oldest events (`bufferingOldest`) | Client reconnects with `lastSeenEventID`; if checkpoint expired, receives `subscribed(outcome: .checkpointExpired)` and `.engineRestarted`, then requests snapshots. |
+| Unreadable prefs/sessions/workspaces | JSON decode throws on load | Quiet-reset to defaults; `SilentDiagnostics` records the failure (no toast). |
+| Mode B daemon unreachable | `RemoteEngineClient.connect()` fails | `Bootstrap` falls back to in-process engine; records `SilentDiagnostics.modeBFallback`. |
 | Daemon crash | LaunchAgent restarts via `KeepAlive` | GUI's `EngineConnection` reconnects on `/v1/health` becoming 200 again; sends `subscribe(lastSeenEventID:)`; bus replays. |
 | TLS cert expired | Client cert validation fails | UI shows "Refresh TLS cert" in Settings → Remote; one click regenerates and re-shares fingerprint. All paired clients must re-pair. |
 | Pairing PIN brute-force | 5 failed attempts in 90s window | Exponential lockout starting 60s. Logged with `pin_lockout_started` to Console. |
 | FSEvents storm | > 1000 events / sec | Debounce widens from 50ms → 250ms automatically; `GitDiffEngine` runs at most once per debounce window. |
 | Network drop on mobile | WSS heartbeat (15s) misses | Server marks subscriber `.stale`, keeps queue alive 60s. Client reconnect within 60s gets replay; later gets `engineRestarted` + full snapshot. |
 
-The general principle: **every failure produces a typed event the user can observe.** No silent retries, no spinning forever.
+The general principle: **every user-visible failure produces a typed event or error message.** Silent recoveries (quiet-reset, daemon fallback, cert regen) go to `SilentDiagnostics` and the system log — not toasts.
 
 ---
 
@@ -1515,21 +1536,17 @@ The wire protocol is the most rigid part of the system because clients we don't 
 
 ### Version field
 
-Every frame carries `"v": Int`. Current version is 1. The version is read **before** decoding the rest, so a future version can be detected and rejected with a clean `versionMismatch` error.
+Every frame carries `"v": WireVersion.current` (today `1`), declared in `Core/AgentProtocol/WireVersion.swift`. Decoders read `v` first; mismatches produce `ServerFrame.versionMismatch(supported:)` and a `SilentDiagnostics.wireVersionRejected` record. **There is no dual-speak** — servers and clients must agree on the version.
 
 ### Compatibility policy
 
-- **Additive change** (new event case, new command case, new optional field): minor — clients on v1 can ignore unknown cases via `Codable`'s lenient decoding (we use `decodeIfPresent` + a `case unknown(String)` fallback on every wire enum).
-- **Breaking change** (renamed case, removed field, semantic shift): major — `v` bumps from 1 to 2; the server speaks both for a release; old clients are warned.
-- **Removed features** stay in the protocol as deprecated cases until the version bump.
+- **Additive change** (new optional field on an existing case): usually no version bump; ship coordinated adapter + codec updates.
+- **Breaking change** (renamed tag, removed field, stricter decoding): bump `WireVersion.current`; old clients are rejected cleanly.
+- **No `unknown` wire catch-alls.** Wire enums decode exhaustively; new cases require a version bump and coordinated release.
 
-### Migration
+### Persistence evolution
 
-Every persisted file (prefs, sessions, recent) has a `schemaVersion`. The reader migrates forward; the writer always writes the latest. Downgrade is unsupported — a user who downgrades Codemixer must accept losing newer-format files (the migration code refuses to write older versions).
-
-### Telemetry on protocol mismatch
-
-When a client sends `v != 1`, the server logs `wire_version_mismatch { client: <n>, server: 1 }` once per connection and returns `WireError.versionMismatch(server: 1, client: n)`. Phones with stale builds see a clear in-app message and a deep link to App Store.
+Only `workspaces.json` uses an explicit `schemaVersion`. Other stores tolerate new keys via `decodeIfPresent` or quiet-reset on total decode failure (see §20). There are no forward migrators.
 
 ---
 

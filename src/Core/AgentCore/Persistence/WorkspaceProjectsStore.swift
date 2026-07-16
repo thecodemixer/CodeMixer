@@ -88,12 +88,35 @@ public actor WorkspaceProjectsStore {
                     is newer than \(Self.currentSchemaVersion, privacy: .public); ignoring to \
                     avoid corrupting a newer build's data.
                     """)
+                await SilentDiagnostics.shared.record(kind: .workspacesSchemaTooNew,
+                                                      owner: "WorkspaceProjectsStore",
+                                                      summary: "workspaces.json schema too new; keeping in-memory model",
+                                                      details: "schemaVersion=\(persisted.schemaVersion)")
                 return
             }
-            workspaces = Dictionary(uniqueKeysWithValues:
-                persisted.workspaces.map { ($0.workspacePath, $0.projects) })
+            var merged: [String: [ProjectRef]] = [:]
+            var duplicatePaths: [String] = []
+            for entry in persisted.workspaces {
+                if merged[entry.workspacePath] != nil {
+                    duplicatePaths.append(entry.workspacePath)
+                }
+                merged[entry.workspacePath] = entry.projects
+            }
+            workspaces = merged
+            if !duplicatePaths.isEmpty {
+                let paths = duplicatePaths.joined(separator: ", ")
+                log.warning("workspaces.json duplicate workspacePath(s); last entry wins: \(paths, privacy: .public)")
+                await SilentDiagnostics.shared.record(kind: .other,
+                                                      owner: "WorkspaceProjectsStore",
+                                                      summary: "duplicate workspacePath in workspaces.json; last entry wins",
+                                                      details: paths)
+            }
         } catch {
             log.warning("workspaces load failed: \(String(describing: error), privacy: .public). Using empty model.")
+            await SilentDiagnostics.shared.record(kind: .workspacesQuietReset,
+                                                  owner: "WorkspaceProjectsStore",
+                                                  summary: "workspaces.json unreadable; using empty model",
+                                                  details: String(describing: error))
         }
     }
 

@@ -4,11 +4,9 @@
 //   scripts/generate-xcodeproj.swift
 // which is equivalent to running `tuist generate` from this directory.
 //
-// This file is the single source of truth for the GUI Xcode project. There is
-// no separate Info.plist — Tuist generates it from `.extendingDefault(with:)`
-// above, so all bundle metadata lives here. App Sandbox is off, strict
-// concurrency is on, and the two microphone/speech privacy strings are
-// declared on the GUI target only.
+// This file is the single source of truth for the GUI Xcode project. Bundle
+// metadata is generated from `.extendingDefault(with:)` below; entitlements
+// come from `Codemixer.entitlements`. The legacy `Info.plist` is obsolete.
 
 import ProjectDescription
 
@@ -49,18 +47,33 @@ let project = Project(
             product: .app,
             bundleId: "com.codecave.Codemixer",
             deploymentTargets: .macOS("14.0"),
-            // .extendingDefault generates all boilerplate (CFBundle*, LSMinimumSystemVersion,
-            // NSPrincipalClass, etc.) automatically. We only add the two privacy strings
-            // that macOS requires before presenting the microphone / speech prompts.
             infoPlist: .extendingDefault(with: [
+                "LSApplicationCategoryType": "public.app-category.developer-tools",
+                "NSHighResolutionCapable": true,
+                "NSSupportsAutomaticGraphicsSwitching": true,
                 "NSMicrophoneUsageDescription":
                     "Codemixer uses the microphone for voice prompt dictation.",
                 "NSSpeechRecognitionUsageDescription":
                     "Codemixer uses speech recognition to transcribe your voice into prompts.",
+                "NSLocalNetworkUsageDescription":
+                    "Codemixer can be controlled from your phone over the local network.",
+                "NSDocumentsFolderUsageDescription":
+                    "Codemixer opens and edits project files in your Documents folder.",
+                "NSDownloadsFolderUsageDescription":
+                    "Codemixer can read files from your Downloads folder when referenced in prompts.",
+                "NSDesktopFolderUsageDescription":
+                    "Codemixer can read files from your Desktop when referenced in prompts.",
+                "NSAppleEventsUsageDescription":
+                    "Codemixer uses Reveal in Finder to show changed files in the diff panel.",
+                "NSBonjourServices": ["_codemixer._tcp"],
             ]),
             sources: [
                 .glob("**/*.swift", excluding: ["Project.swift"]),
             ],
+            resources: [
+                "Resources/**",
+            ],
+            entitlements: .file(path: "Codemixer.entitlements"),
             dependencies: [
                 .package(product: "AgentCore"),
                 .package(product: "AgentUI"),

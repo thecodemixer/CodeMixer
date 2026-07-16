@@ -122,8 +122,12 @@ struct WireCodecParityTests {
         let event = AgentEvent.error(.spawnFailed(errno: 22, detail: "bad arg"))
         let restored = WireCodec.decode(WireCodec.encode(event))
         guard case .error(let err) = restored else { Issue.record("not error"); return }
-        // Wire converts to .internalInvariant carrying "spawn_failed: ..."
-        #expect(err.userMessage.contains("spawn_failed"))
+        #expect(err.code == "spawn_failed")
+        guard case .spawnFailed(let errno, let detail) = err else {
+            Issue.record("expected spawnFailed"); return
+        }
+        #expect(errno == 22)
+        #expect(detail == "bad arg")
     }
 
     @Test("noEventGap duration round-trips with ms granularity")
@@ -216,7 +220,7 @@ extension AgentEvent {
     /// Field-level equality that ignores known lossy round-trip conversions:
     ///   • `URL.path` canonicalisation (string round-trip via `URL.absoluteString`)
     ///   • `Duration` → integer milliseconds → `Duration` (ms granularity)
-    ///   • `AgentError` decode → `.internalInvariant("<code>: <message>")`
+    ///   • `AgentError` unknown codes decode to `.internalInvariant`
     fileprivate func semanticallyEquals(_ other: AgentEvent) -> Bool {
         guard self.shape == other.shape else { return false }
         switch (self, other) {
@@ -269,10 +273,8 @@ extension AgentEvent {
             return true
         case (.stopped(let r1), .stopped(let r2)):
             return r1 == r2
-        case (.error, .error):
-            // Wire collapses every AgentError into internalInvariant; assert
-            // shape only, code preservation is covered by errorCodeSurvives.
-            return true
+        case (.error(let e1), .error(let e2)):
+            return e1 == e2
         case (.speakBubbleRequested(let id1), .speakBubbleRequested(let id2)):
             return id1 == id2
         case (.fileReverted(let p1), .fileReverted(let p2)):

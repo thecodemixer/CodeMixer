@@ -12,6 +12,6 @@ struct InteractionCoverageTests {
 
     @Test("Remote-only exceptions stay explicit and narrow")
     func remoteOnlyExceptionsAreNarrow() {
-        #expect(InteractionCoverage.remoteOnly == [.respondToInlinePrompt])
+        #expect(InteractionCoverage.remoteOnly.isEmpty)
     }
 }

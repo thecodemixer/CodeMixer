@@ -16,25 +16,35 @@ public extension EngineViewModel {
     /// A view model populated with sample projects + sessions for previews.
     static var preview: EngineViewModel {
         let model = EngineViewModel(engine: NoopEnginePort(), bus: MulticastEventBus())
-        let workspace = URL(fileURLWithPath: "/Users/you/Code/Sample")
         model.applyPreviewState(
-            workspace: workspace,
+            workspace: PreviewFixtures.workspace,
             projects: [
-                .init(path: workspace.path, displayName: "Sample"),
-                .init(path: workspace.appendingPathComponent("api").path, displayName: "api"),
+                .init(path: PreviewFixtures.workspace.path, displayName: "Sample"),
+                .init(path: PreviewFixtures.workspace.appendingPathComponent("api").path, displayName: "api"),
             ],
             sessions: [
-                workspace.path: [
-                    SessionSummary(id: "s1", workspace: workspace,
+                PreviewFixtures.workspace.path: [
+                    SessionSummary(id: "s1", workspace: PreviewFixtures.workspace,
                                    title: "Add session navigator",
                                    lastActivity: Date(), messageCount: 12),
-                    SessionSummary(id: "s2", workspace: workspace,
+                    SessionSummary(id: "s2", workspace: PreviewFixtures.workspace,
                                    title: "Fix transcript slug bug",
                                    lastActivity: Date().addingTimeInterval(-90_000),
                                    messageCount: 5),
                 ],
             ]
         )
+        model.availableModels = [
+            AgentModelOption(id: "sonnet", label: "Sonnet"),
+            AgentModelOption(id: "opus", label: "Opus"),
+        ]
+        return model
+    }
+
+    /// Navigator + conversation sample for conversation/composer previews.
+    static var previewConversation: EngineViewModel {
+        let model = preview
+        model.applyPreviewConversationState()
         return model
     }
 }

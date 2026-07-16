@@ -3,13 +3,13 @@ import Foundation
 /// Top-level frame sent from a client to the server over the WebSocket.
 public enum ClientFrame: Sendable, Codable {
     case command(id: UUID, command: AgentCommand)
-    /// Subscribe to one or more named streams.
+    /// Subscribe to the event bus.
     ///
     /// - Parameter lastSeenEventID: The `HistoryEntry.id` of the last event the
     ///   client received in a previous connection. When provided, the server
     ///   replays only events that arrived *after* that checkpoint instead of
     ///   re-sending the full ring-buffer. Pass `nil` on a fresh connection.
-    case subscribe(streams: [SubscribableStream], lastSeenEventID: UUID? = nil)
+    case subscribe(lastSeenEventID: UUID? = nil)
     case snapshot(kind: SnapshotKind)
     case ping(id: UUID)
     case pair(pin: String, clientName: String)
@@ -18,9 +18,18 @@ public enum ClientFrame: Sendable, Codable {
     public var version: WireVersion { .current }
 }
 
+/// Result of a checkpointed subscribe — mirrors `MulticastEventBus.SubscribeOutcome`.
+public enum SubscribeReplayOutcome: String, Sendable, Codable {
+    case fresh
+    case resumed
+    case checkpointExpired
+}
+
 /// Top-level frame sent from the server to a client over the WebSocket.
 public enum ServerFrame: Sendable, Codable {
-    case event(AgentEventWire)
+    /// A bus-tagged engine event. `id` is the opaque checkpoint token clients
+    /// store and pass back as `subscribe.lastSeenEventID` on reconnect.
+    case event(id: UUID, event: AgentEventWire)
     case result(for: UUID, ok: Bool, error: WireAgentError?)
     case snapshot(kind: SnapshotKind, payload: Data)
     case pong(for: UUID)
@@ -31,16 +40,11 @@ public enum ServerFrame: Sendable, Codable {
     /// the bus ID of the most recently published event at subscribe time;
     /// clients should store this value and send it as `lastSeenEventID` on
     /// their next reconnect. `nil` means the bus has no events yet.
-    case subscribed(latestEventID: UUID?)
+    /// `outcome` tells reconnecting clients whether replay is complete,
+    /// resumed from a known checkpoint, or the checkpoint fell out of the ring.
+    case subscribed(latestEventID: UUID?, outcome: SubscribeReplayOutcome)
 
     public var version: WireVersion { .current }
-}
-
-/// Named stream a client can subscribe to.
-public enum SubscribableStream: String, Sendable, Codable {
-    case events
-    case diff
-    case status
 }
 
 /// Reason a pairing attempt was rejected.
@@ -58,7 +62,7 @@ public enum PairFailureReason: String, Sendable, Codable {
 /// `singleValueContainer` synthesis.
 extension ClientFrame {
     private enum CodingKeys: String, CodingKey {
-        case v, type, id, command, streams, lastSeenEventID, kind, pin, clientName, token
+        case v, type, id, command, lastSeenEventID, kind, pin, clientName, token
     }
     private enum Tag: String, Codable { case command, subscribe, snapshot, ping, pair, auth }
 
@@ -76,7 +80,6 @@ extension ClientFrame {
                             command: try c.decode(AgentCommand.self, forKey: .command))
         case .subscribe:
             self = .subscribe(
-                streams: try c.decode([SubscribableStream].self, forKey: .streams),
                 lastSeenEventID: try c.decodeIfPresent(UUID.self, forKey: .lastSeenEventID)
             )
         case .snapshot:
@@ -99,9 +102,8 @@ extension ClientFrame {
             try c.encode(Tag.command, forKey: .type)
             try c.encode(id, forKey: .id)
             try c.encode(cmd, forKey: .command)
-        case .subscribe(let streams, let lastSeenEventID):
+        case .subscribe(let lastSeenEventID):
             try c.encode(Tag.subscribe, forKey: .type)
-            try c.encode(streams, forKey: .streams)
             try c.encodeIfPresent(lastSeenEventID, forKey: .lastSeenEventID)
         case .snapshot(let kind):
             try c.encode(Tag.snapshot, forKey: .type)
@@ -122,8 +124,8 @@ extension ClientFrame {
 
 extension ServerFrame {
     private enum CodingKeys: String, CodingKey {
-        case v, type, event, `for`, ok, error, kind, payload,
-             token, reason, supported, latestEventID
+        case v, type, id, event, `for`, ok, error, kind, payload,
+             token, reason, supported, latestEventID, outcome
     }
     private enum Tag: String, Codable {
         case event, result, snapshot, pong, paired, pairFailed, versionMismatch, subscribed
@@ -131,9 +133,16 @@ extension ServerFrame {
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        let version = try c.decode(WireVersion.self, forKey: .v)
+        guard version == .current else {
+            throw DecodingError.dataCorruptedError(forKey: .v,
+                                                   in: c,
+                                                   debugDescription: "Unsupported wire version")
+        }
         switch try c.decode(Tag.self, forKey: .type) {
         case .event:
-            self = .event(try c.decode(AgentEventWire.self, forKey: .event))
+            self = .event(id: try c.decode(UUID.self, forKey: .id),
+                          event: try c.decode(AgentEventWire.self, forKey: .event))
         case .result:
             self = .result(for: try c.decode(UUID.self, forKey: .for),
                            ok: try c.decode(Bool.self, forKey: .ok),
@@ -150,7 +159,10 @@ extension ServerFrame {
         case .versionMismatch:
             self = .versionMismatch(supported: try c.decode([WireVersion].self, forKey: .supported))
         case .subscribed:
-            self = .subscribed(latestEventID: try c.decodeIfPresent(UUID.self, forKey: .latestEventID))
+            self = .subscribed(
+                latestEventID: try c.decodeIfPresent(UUID.self, forKey: .latestEventID),
+                outcome: try c.decode(SubscribeReplayOutcome.self, forKey: .outcome)
+            )
         }
     }
 
@@ -158,8 +170,9 @@ extension ServerFrame {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(version, forKey: .v)
         switch self {
-        case .event(let e):
+        case .event(let id, let e):
             try c.encode(Tag.event, forKey: .type)
+            try c.encode(id, forKey: .id)
             try c.encode(e, forKey: .event)
         case .result(let id, let ok, let err):
             try c.encode(Tag.result, forKey: .type)
@@ -182,9 +195,10 @@ extension ServerFrame {
         case .versionMismatch(let supported):
             try c.encode(Tag.versionMismatch, forKey: .type)
             try c.encode(supported, forKey: .supported)
-        case .subscribed(let latestEventID):
+        case .subscribed(let latestEventID, let outcome):
             try c.encode(Tag.subscribed, forKey: .type)
             try c.encodeIfPresent(latestEventID, forKey: .latestEventID)
+            try c.encode(outcome, forKey: .outcome)
         }
     }
 }

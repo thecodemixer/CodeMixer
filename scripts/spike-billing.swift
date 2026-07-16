@@ -8,6 +8,95 @@
 import Darwin
 import Foundation
 
+// MARK: - Shared hook helpers (keep in sync with spike-events.swift)
+
+enum SpikeHookSupport {
+
+    static func quotedShell(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    static func extractJSONObjects(from stream: String) -> [String] {
+        var objects: [String] = []
+        var start: String.Index?
+        var depth = 0
+        var inString = false
+        var escaped = false
+
+        for index in stream.indices {
+            let ch = stream[index]
+            if start == nil {
+                if ch == "{" {
+                    start = index
+                    depth = 1
+                    inString = false
+                    escaped = false
+                }
+                continue
+            }
+
+            if inString {
+                if escaped {
+                    escaped = false
+                } else if ch == "\\" {
+                    escaped = true
+                } else if ch == "\"" {
+                    inString = false
+                }
+                continue
+            }
+
+            if ch == "\"" {
+                inString = true
+            } else if ch == "{" {
+                depth += 1
+            } else if ch == "}" {
+                depth -= 1
+                if depth == 0, let objectStart = start {
+                    objects.append(String(stream[objectStart...index]))
+                    start = nil
+                }
+            }
+        }
+
+        return objects
+    }
+
+    static func hookClientCommand(socketPath: String) -> String {
+        let script = """
+        import socket, sys
+        path = sys.argv[1]
+        payload = sys.stdin.buffer.read()
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.connect(path)
+        sock.sendall(payload)
+        sock.shutdown(socket.SHUT_WR)
+        sys.stdout.buffer.write(sock.recv(65536))
+        """
+        return "/usr/bin/python3 -c \(quotedShell(script)) \(quotedShell(socketPath))"
+    }
+
+    static func writePythonHookSettings(file: URL, socketPath: String, hookNames: [String]) throws {
+        let command = hookClientCommand(socketPath: socketPath)
+        let hookEntry: [String: Any] = [
+            "matcher": "*",
+            "hooks": [
+                [
+                    "type": "command",
+                    "command": command,
+                ],
+            ],
+        ]
+        var hooks: [String: Any] = [:]
+        for name in hookNames {
+            hooks[name] = [hookEntry]
+        }
+        let root: [String: Any] = ["hooks": hooks]
+        let data = try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])
+        try data.write(to: file)
+    }
+}
+
 struct Config {
     let workspace: URL
     let prompt: String
@@ -107,45 +196,6 @@ func locateClaude() -> String? {
     return (searchPaths + pathCandidates).first(where: commandExists)
 }
 
-func quotedShell(_ value: String) -> String {
-    "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
-}
-
-func hookClientCommand(socketPath: String) -> String {
-    let script = """
-    import socket, sys
-    path = sys.argv[1]
-    payload = sys.stdin.buffer.read()
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    sock.connect(path)
-    sock.sendall(payload)
-    sock.shutdown(socket.SHUT_WR)
-    sys.stdout.buffer.write(sock.recv(65536))
-    """
-    return "/usr/bin/python3 -c \(quotedShell(script)) \(quotedShell(socketPath))"
-}
-
-func writeHookSettings(file: URL, socketPath: String) throws {
-    let command = hookClientCommand(socketPath: socketPath)
-    let hookEntry: [String: Any] = [
-        "matcher": "*",
-        "hooks": [
-            [
-                "type": "command",
-                "command": command,
-            ],
-        ],
-    ]
-    let root: [String: Any] = [
-        "hooks": [
-            "SessionStart": [hookEntry],
-            "Stop": [hookEntry],
-        ],
-    ]
-    let data = try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])
-    try data.write(to: file)
-}
-
 func runHookListener(socketPath: String, captureFile: URL) throws -> Process {
     let script = """
     import os, socket, sys
@@ -180,52 +230,6 @@ func runHookListener(socketPath: String, captureFile: URL) throws -> Process {
     return process
 }
 
-func extractJSONObjects(from stream: String) -> [String] {
-    var objects: [String] = []
-    var start: String.Index?
-    var depth = 0
-    var inString = false
-    var escaped = false
-
-    for index in stream.indices {
-        let ch = stream[index]
-        if start == nil {
-            if ch == "{" {
-                start = index
-                depth = 1
-                inString = false
-                escaped = false
-            }
-            continue
-        }
-
-        if inString {
-            if escaped {
-                escaped = false
-            } else if ch == "\\" {
-                escaped = true
-            } else if ch == "\"" {
-                inString = false
-            }
-            continue
-        }
-
-        if ch == "\"" {
-            inString = true
-        } else if ch == "{" {
-            depth += 1
-        } else if ch == "}" {
-            depth -= 1
-            if depth == 0, let objectStart = start {
-                objects.append(String(stream[objectStart...index]))
-                start = nil
-            }
-        }
-    }
-
-    return objects
-}
-
 func hookState(captureFile: URL) -> (sawStop: Bool, sessionID: String?) {
     guard let data = try? Data(contentsOf: captureFile),
           let text = String(data: data, encoding: .utf8) else {
@@ -233,7 +237,7 @@ func hookState(captureFile: URL) -> (sawStop: Bool, sessionID: String?) {
     }
     var sawStop = false
     var sessionID: String?
-    for objectText in extractJSONObjects(from: text) {
+    for objectText in SpikeHookSupport.extractJSONObjects(from: text) {
         guard let data = objectText.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             continue
@@ -369,7 +373,9 @@ func restoreSettings() {
 }
 
 do {
-    try writeHookSettings(file: settingsFile, socketPath: socketPath)
+    try SpikeHookSupport.writePythonHookSettings(file: settingsFile,
+                                                 socketPath: socketPath,
+                                                 hookNames: ["SessionStart", "Stop"])
 } catch {
     restoreSettings()
     fputs("spike-billing: failed writing hook settings: \(error)\n", stderr)

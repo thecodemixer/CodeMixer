@@ -15,7 +15,7 @@
 | **Domain** | Core module (e.g. `AgentCore`). Imports Foundation. | `URL`, `Date`, `Duration`, `UUID`, rich enums with associated values, computed properties, methods. | The engine, its subsystems, in-process consumers. |
 | **Wire** | Portable module (e.g. `AgentProtocol`). Imports Foundation only. | `String` for URLs, ISO-8601 strings or epoch-ms for dates, integer-millisecond durations, simple Codable enums. | The network, persisted files, remote clients on any platform. |
 
-The portable module compiles on macOS, iOS, **and Linux**. It has no `import AppKit`, no `import Network`, no platform-specific Foundation calls.
+The portable module has no `import AppKit`, no `import Network`, no platform-specific Foundation calls. In Codemixer, `AgentProtocol` ships inside a **macOS-only** SPM package today, but stays Foundation-only so a future non-Mac client can import the same wire types.
 
 ---
 
@@ -232,36 +232,16 @@ The reader checks `v` before decoding the rest. Mismatches produce a typed `vers
 
 **Compatibility policy:**
 
-- **Additive**: new event case, new command case, new optional field → no version bump.
-- **Breaking**: rename, remove, semantic change → bump `v`.
-
-`Codable` decoders default to `decodeIfPresent` for optional fields and `case unknown(String)` for unknown enum variants, so old clients can ignore new cases:
+- **Additive**: new optional field on an existing case → usually no `WireVersion` bump; ship coordinated codec updates.
+- **Breaking**: renamed tag, removed field, stricter decoding → bump `WireVersion.current`.
+- **No dual-speak:** mismatched `v` is rejected with `ServerFrame.versionMismatch`; servers do not decode multiple versions concurrently.
+- **No `unknown` wire catch-alls:** wire enums decode exhaustively; new event/command cases require a version bump and coordinated release.
 
 ```swift
-public enum AgentEventWire: Codable, Sendable {
-    case sessionStarted(SessionStartedPayload)
-    case taskOutput(TaskOutputPayload)
-    // …
-    case unknown(rawType: String, rawJSON: Data)   // catch-all
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: TypeKey.self)
-        let type = try container.decode(String.self, forKey: .type)
-        let payload = try container.decode(JSONValue.self, forKey: .payload)
-        switch type {
-        case "sessionStarted":
-            self = .sessionStarted(try decode(payload))
-        case "taskOutput":
-            self = .taskOutput(try decode(payload))
-        // …
-        default:
-            self = .unknown(rawType: type, rawJSON: try JSONEncoder().encode(payload))
-        }
-    }
-}
+// Decoders guard version before branching on type:
+let version = try c.decode(WireVersion.self, forKey: .v)
+guard version == .current else { throw DecodingError... }
 ```
-
-Old clients see `.unknown` for new event types; they fail closed (ignore the event) rather than crash.
 
 ---
 
@@ -335,7 +315,8 @@ Same pattern, different cardinality.
 | No golden file | Wire format changes silently, breaking remote clients. | Checked-in JSON golden per case. |
 | Field renames without `v` bump | Old clients break. | Bump `v`, write a migration. |
 | `Codable` synthesis without explicit `CodingKeys` | Re-ordering or renaming the property changes the wire. | Always declare `CodingKeys` on wire DTOs. |
-| Forgetting `.unknown` catch-all | Old clients crash on new event types. | Always include a `.unknown(rawType:rawJSON:)` case in wire enums. |
+| Forgetting to bump `WireVersion` on breaking change | Old and new clients disagree silently until runtime reject. | Bump `WireVersion.current`; reject mismatch with `versionMismatch`. |
+| `unknown` catch-all on wire enums | Masks schema drift; clients hide new cases instead of upgrading. | Exhaustive wire enums; version bump for new cases. |
 
 ---
 
@@ -344,8 +325,8 @@ Same pattern, different cardinality.
 - Domain types live in `Core/AgentCore/Events/AgentEvent.swift`.
 - Wire types live in `Core/AgentProtocol/AgentEventWire.swift`.
 - Converter lives in `Core/AgentCore/Events/WireCodec.swift`.
-- Parity tests are in `tests/Remote/RemoteParityTests/`, with golden JSON files in `tests/Remote/RemoteParityTests/Fixtures/`.
-- Wire version pinned at `1`, declared in `Core/AgentProtocol/WireVersion.swift`.
+- Parity tests are in `tests/Remote/RemoteParityTests/` (`WireCodecParityTests`, `CommandDispatchParityTests`).
+- Wire version declared in `Core/AgentProtocol/WireVersion.swift`; frames in `WireFrames.swift`.
 
 See [docs/architecture.md §§8, 30](../../architecture.md) for the Codemixer narrative on event-sourcing and protocol evolution.
 

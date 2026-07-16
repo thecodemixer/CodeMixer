@@ -39,6 +39,30 @@ struct ResolvedEnvironmentTests {
         #expect(env.path == "/usr/bin")
     }
 
+    @Test("ptySpawnEnvironment strips billing-poison keys before PTY spawn")
+    func ptySpawnEnvironmentStripsBillingPoisonKeys() {
+        let env = ResolvedEnvironment(
+            variables: [
+                "PATH": "/usr/bin",
+                "CLAUDE_CODE_ENTRYPOINT": "sdk",
+                "ANTHROPIC_API_KEY": "sk-test",
+                "HOME": "/Users/test",
+            ],
+            shell: URL(fileURLWithPath: "/bin/zsh")
+        )
+
+        let spawn = env.ptySpawnEnvironment(adapterOverrides: [
+            "TERM": "xterm-256color",
+            "ANTHROPIC_API_KEY": "should-not-win",
+        ])
+
+        #expect(spawn["PATH"] == "/usr/bin")
+        #expect(spawn["HOME"] == "/Users/test")
+        #expect(spawn["TERM"] == "xterm-256color")
+        #expect(spawn["CLAUDE_CODE_ENTRYPOINT"] == nil)
+        #expect(spawn["ANTHROPIC_API_KEY"] == nil)
+    }
+
     @Test("ResolvedEnvironment equality includes variables, path-derived variables, and shell")
     func equalityUsesStoredValues() {
         let lhs = ResolvedEnvironment(variables: ["PATH": "/bin"], shell: URL(fileURLWithPath: "/bin/zsh"))

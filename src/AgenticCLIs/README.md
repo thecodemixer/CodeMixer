@@ -110,3 +110,6 @@ Adding `src/AgenticCLIs/CodexCLI/` (example):
 ## Cross-links
 
 - Claude Code contract (v1 reference): [`ClaudeCode/README.md`](ClaudeCode/README.md)
+- Claude Code executable spec: [`ClaudeCode/CONTRACT.md`](ClaudeCode/CONTRACT.md)
+- Adapter / twin / live test catalog: [`tests/AgenticCLIs/README.md`](../../tests/AgenticCLIs/README.md)
+  (includes opt-in `CODEMIXER_LIVE_CLAUDE=1` harness and assistant-text fusion policy)

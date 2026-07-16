@@ -33,7 +33,7 @@ public struct ProjectPickerView: View {
         VStack(spacing: Theme.spacing.s24) {
             VStack(spacing: Theme.spacing.s8) {
                 Image(systemName: "folder.fill.badge.gearshape")
-                    .accessibilityLabel("Project picker")
+                    .accessibilityHidden(true)
                     .font(Theme.typography.heroIcon)
                     .foregroundStyle(Theme.text.tertiary)
                 Text("Open a project")
@@ -157,13 +157,20 @@ public struct ProjectPickerView: View {
     /// Returns `"CLAUDE.md"` or `"AGENTS.md"` if either file is present
     /// in the project root, or `nil` if neither exists.
     private func memoryFileBadge(at path: String) -> String? {
-        let fm = FileManager.default
-        if fm.fileExists(atPath: (path as NSString).appendingPathComponent("CLAUDE.md")) {
-            return "CLAUDE.md"
-        }
-        if fm.fileExists(atPath: (path as NSString).appendingPathComponent("AGENTS.md")) {
-            return "AGENTS.md"
-        }
-        return nil
+        DesktopActions.memoryFileBadge(atProjectPath: path)
     }
 }
+
+#if DEBUG
+#Preview("Project picker – Light") {
+    ProjectPickerView(recent: PreviewFixtures.recentProjects) { _, _ in }
+        .frame(width: 480, height: 420)
+        .preferredColorScheme(.light)
+}
+
+#Preview("Project picker – Dark") {
+    ProjectPickerView(recent: PreviewFixtures.recentProjects) { _, _ in }
+        .frame(width: 480, height: 420)
+        .preferredColorScheme(.dark)
+}
+#endif

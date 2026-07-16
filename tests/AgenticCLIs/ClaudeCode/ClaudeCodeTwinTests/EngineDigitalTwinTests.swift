@@ -149,8 +149,8 @@ struct EngineDigitalTwinTests {
         do {
             events = try await withTimeout(.seconds(5)) {
                 var collected: [AgentEvent] = []
-                for await event in sub.stream {
-                    collected.append(event)
+                for await entry in sub.stream {
+                    collected.append(entry.event)
                     if until(collected) { break }
                     if collected.count > 256 { break }
                 }

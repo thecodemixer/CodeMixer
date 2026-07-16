@@ -141,12 +141,9 @@ Pick a *single* root for app-owned persisted state. macOS canonical:
 
 ```
 ~/Library/Application Support/com.codecave.Codemixer/
-    ├── prefs.json                # global prefs (singleton)
-    ├── recent.json               # recent projects (singleton)
-    ├── sessions.json             # last session id per (agent, project)
-    └── auto-approval/
-        ├── <projectHash>.json    # per-project state
-        └── <projectHash>.json
+    ├── prefs.json                # PrefsStore (appearance + auto-approval rules)
+    ├── sessions.json             # SessionStore (recent projects)
+    └── workspaces.json           # WorkspaceProjectsStore (schemaVersion here only)
 ~/Library/Caches/Codemixer/       # deletable; macOS may reclaim
     └── uploads/<sessionID>/<uuid>
 ```
@@ -265,11 +262,10 @@ Codemixer routes all persistence through `SessionStore` (a `public actor`); the 
 
 ## Codemixer instance
 
-- `SessionStore` ↔ `Core/AgentCore/Sessions/SessionStore.swift`.
-- `AppPaths` ↔ `Core/AgentCore/Persistence/AppPaths.swift`.
-- `PersistenceCodec` ↔ `Core/AgentCore/Persistence/PersistenceCodec.swift`.
-- Prefs DTO ↔ `Core/AgentProtocol/Prefs.swift`.
+- `PrefsStore`, `SessionStore`, `WorkspaceProjectsStore` ↔ `Core/AgentCore/Persistence/`.
+- Paths ↔ `Core/AgentCore/Paths/AppSupportPaths.swift`.
 - Atomic write ↔ `Core/AgentCore/Seams/SystemFileSystem.swift`.
+- **Quiet-reset policy:** decode failures reset to defaults and record `SilentDiagnostics` — no migrators, no toasts (see [architecture.md §20](../../architecture.md)).
 
 See [docs/architecture.md §20](../../architecture.md) for the Codemixer narrative on persistence.
 

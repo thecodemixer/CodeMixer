@@ -5,9 +5,10 @@ import AgentProtocol
 
 /// Tiny HTTP sidecar that companions the WebSocket server.
 ///
-/// Two endpoints:
-///   * `GET  /v1/health`      → JSON `{ ok, version, uptime, clients }`
-///   * `POST /v1/attachments` → raw body persisted under the engine's tmp dir;
+/// Three endpoints:
+///   * `GET  /v1/health`                → JSON `{ ok, version, uptime, clients }`
+///   * `GET  /v1/diagnostics/silent`    → JSON array of silent-recovery records
+///   * `POST /v1/attachments`           → raw body persisted under the engine's tmp dir;
 ///     responds with `{ id, path }` so the client can reference it from a
 ///     subsequent command.
 ///
@@ -154,9 +155,11 @@ public actor HTTPSidecarServer {
 
     private func respond(to request: HTTPRequest) async -> HTTPResponse {
         switch (request.method, request.path) {
-        case ("GET", "/v1/health"):
+        case ("GET", RemoteDefaults.healthPath):
             return healthResponse()
-        case ("POST", "/v1/attachments"):
+        case ("GET", RemoteDefaults.silentDiagnosticsPath):
+            return await silentDiagnosticsResponse()
+        case ("POST", RemoteDefaults.attachmentsPath):
             return attachmentResponse(body: request.body, headers: request.headers)
         default:
             return HTTPResponse(status: 404,
@@ -173,6 +176,13 @@ public actor HTTPSidecarServer {
         return HTTPResponse(status: 200,
                             headers: ["Content-Type": "application/json"],
                             body: encodeJSON(info))
+    }
+
+    private func silentDiagnosticsResponse() async -> HTTPResponse {
+        let records = await SilentDiagnostics.shared.snapshot()
+        return HTTPResponse(status: 200,
+                            headers: ["Content-Type": "application/json"],
+                            body: encodeJSON(records))
     }
 
     private func attachmentResponse(body: Data, headers: [String: String]) -> HTTPResponse {

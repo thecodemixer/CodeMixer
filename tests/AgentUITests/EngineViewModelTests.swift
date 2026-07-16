@@ -1,4 +1,5 @@
 import Foundation
+import os
 import Testing
 @testable import AgentUI
 @testable import AgentCore
@@ -143,6 +144,37 @@ struct EngineViewModelTests {
         await bus.shutdown()
     }
 
+    @Test("resume startup gap without a sent prompt does not show stalled toast")
+    func resumeStartupGapDoesNotShowStalledToast() async {
+        let (vm, bus) = makeModel()
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        await bus.publish(.activityStateChanged(.probablyStuck))
+        await bus.publish(.noEventGap(turnID: UUID(), elapsed: .seconds(91)))
+        await drain()
+
+        #expect(!vm.stalledToastVisible)
+
+        await bus.shutdown()
+    }
+
+    @Test("first agent reply prevents later no-event gap from showing stalled toast")
+    func firstReplySuppressesLaterStalledToast() async {
+        let (vm, bus) = makeModel()
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        vm.sendPrompt("hello")
+        await bus.publish(.textDelta(messageID: UUID(), delta: "Working"))
+        await bus.publish(.noEventGap(turnID: UUID(), elapsed: .seconds(91)))
+        await drain()
+
+        #expect(!vm.stalledToastVisible)
+
+        await bus.shutdown()
+    }
+
     @Test("noEventGap ≤ 10 s updates status phrase but does not show toast")
     func shortGapUpdatesStatusOnly() async {
         let (vm, bus) = makeModel()
@@ -198,6 +230,33 @@ struct EngineViewModelTests {
 
         #expect(!vm.stalledToastVisible)
         #expect(vm.activity == .idle)
+
+        await bus.shutdown()
+    }
+
+    @Test("cancelCurrentTurn hides stalled toast immediately and forwards cancel")
+    func cancelCurrentTurnClearsStalledToast() async {
+        let port = RecordingCommandPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port, bus: bus)
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        vm.sendPrompt("hello")
+        await bus.publish(.noEventGap(turnID: UUID(), elapsed: .seconds(91)))
+        await drain()
+        #expect(vm.stalledToastVisible)
+
+        vm.cancelCurrentTurn()
+        await drain()
+
+        #expect(!vm.stalledToastVisible)
+        #expect(vm.activity == .idle)
+        if case .idle = vm.status {} else { #expect(Bool(false), "status should be idle") }
+        #expect(port.commands.contains {
+            if case .cancelCurrentTurn = $0 { return true }
+            return false
+        })
 
         await bus.shutdown()
     }
@@ -647,6 +706,15 @@ private func drain() async {
 
 private final class StubCommandPort: AgentEngineCommandPort, @unchecked Sendable {
     func send(_ command: AgentCommand) async throws {}
+}
+
+private final class RecordingCommandPort: AgentEngineCommandPort, @unchecked Sendable {
+    private let state = OSAllocatedUnfairLock<[AgentCommand]>(initialState: [])
+    var commands: [AgentCommand] { state.withLock { $0 } }
+
+    func send(_ command: AgentCommand) async throws {
+        state.withLock { $0.append(command) }
+    }
 }
 
 private final class ThrowingCommandPort: AgentEngineCommandPort, @unchecked Sendable {

@@ -40,6 +40,10 @@ public actor PrefsStore {
             cached = try JSONDecoder().decode(State.self, from: data)
         } catch {
             log.warning("prefs load failed: \(String(describing: error), privacy: .public). Using defaults.")
+            await SilentDiagnostics.shared.record(kind: .prefsQuietReset,
+                                                  owner: "PrefsStore",
+                                                  summary: "prefs.json unreadable; using defaults",
+                                                  details: String(describing: error))
         }
     }
 

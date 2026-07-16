@@ -94,12 +94,6 @@ public final class ClaudeAdapter: AgentAdapter, @unchecked Sendable {
         return .unauthenticated
     }
 
-    public func authURLPattern() -> NSRegularExpression? {
-        try? NSRegularExpression(pattern: #"https://claude\.ai/oauth/[^\s]+"#)
-    }
-
-    public func loginCommandArgv() -> [String]? { ["/login"] }
-
     // MARK: - Event stream
 
     public func makeEventStream(inputs: AgentInputs) -> AsyncStream<AgentEvent> {
@@ -135,7 +129,11 @@ public final class ClaudeAdapter: AgentAdapter, @unchecked Sendable {
                     if request.eventName == "Stop" || request.eventName == "SubagentStop" {
                         await tailer.drain()
                     }
-                    let events = hookDecoder.events(from: request)
+                    var events = hookDecoder.events(from: request)
+                    if request.eventName == "Stop" || request.eventName == "SubagentStop",
+                       await tailer.hasEmittedAssistantText() {
+                        events.removeAll { if case .assistantText = $0 { return true }; return false }
+                    }
                     for event in events {
                         if case .sessionStarted(let id, _, _) = event {
                             await tailer.bind(sessionID: id)
@@ -165,13 +163,14 @@ public final class ClaudeAdapter: AgentAdapter, @unchecked Sendable {
                 }
             }
 
-            // TUI fallback: poll the headless terminal framebuffer every 500ms.
-            // Runs only when hooks haven't been confirmed active — once the hook
-            // channel fires, `hooksFlag.active` suppresses this path so we never
-            // double-emit the same information from two sources.
+            // TUI fallback: poll the headless terminal framebuffer on the same
+            // cadence as the engine heartbeat poll. Runs only when hooks haven't
+            // been confirmed active — once the hook channel fires, `hooksFlag.active`
+            // suppresses this path so we never double-emit the same information
+            // from two sources.
             let tuiTask = Task {
                 while !Task.isCancelled {
-                    try? await Task.sleep(for: .milliseconds(500))
+                    try? await Task.sleep(for: ActivityTiming.noEventPollInterval)
                     guard shouldScrapeTUI(hooksActive: hooksFlag.active) else { continue }
                     let rows = await inputs.screen.snapshotRows()
                     let snapshot = TerminalSnapshot(
@@ -269,6 +268,14 @@ public final class ClaudeAdapter: AgentAdapter, @unchecked Sendable {
 
     public var slashCommandCatalog: [SlashCommand] { ClaudeSlashCommands.builtIn }
 
+    public func availableModels() -> [AgentModelOption] {
+        [
+            AgentModelOption(id: "sonnet", label: "Sonnet"),
+            AgentModelOption(id: "opus", label: "Opus"),
+            AgentModelOption(id: "haiku", label: "Haiku"),
+        ]
+    }
+
     public func enumerateProjectCommands(workspace: URL) async -> [SlashCommand] {
         ClaudeSlashCommands.enumerateProjectCommands(workspace: workspace,
                                                      claudeDirectory: environment.claudeDirectory,
@@ -292,61 +299,6 @@ public final class ClaudeAdapter: AgentAdapter, @unchecked Sendable {
                                          fileSystem: any FileSystem) async throws {
         try ClaudeHookInstaller(fileSystem: fileSystem)
             .install(socketPath: socketPath, into: workspace)
-    }
-
-    // MARK: - Tool rendering
-
-    public func toolRenderHint(toolName: String, input: ToolInput) -> ToolRenderHint {
-        switch toolName {
-        case "Bash":
-            return .bashStreaming(initialCommand: input.summary)
-        case "Edit", "Write", "MultiEdit":
-            let pathString = extractPath(from: input)
-            return .fileEdit(path: URL(fileURLWithPath: pathString),
-                             language: detectLanguage(path: pathString))
-        case "Read":
-            let pathString = extractPath(from: input)
-            return .fileRead(path: URL(fileURLWithPath: pathString),
-                             language: detectLanguage(path: pathString))
-        case "Grep", "Glob":
-            return .fileSearch(pattern: input.summary)
-        case "WebFetch", "WebSearch":
-            if let url = URL(string: input.summary) {
-                return .webFetch(url: url)
-            }
-            return .raw(json: input.jsonPayload ?? "")
-        default:
-            if toolName.hasPrefix("mcp__") {
-                let parts = toolName.dropFirst("mcp__".count).split(separator: "__", maxSplits: 1)
-                let server = parts.first.map(String.init) ?? "mcp"
-                let name = parts.count > 1 ? String(parts[1]) : toolName
-                return .mcpTool(serverName: server, toolName: name)
-            }
-            return .raw(json: input.jsonPayload ?? "")
-        }
-    }
-
-    private func extractPath(from input: ToolInput) -> String {
-        // Best-effort heuristic — adapter's hook decoder usually stuffs the
-        // path into the summary already.
-        if input.summary.hasPrefix("Modify ") { return String(input.summary.dropFirst("Modify ".count)) }
-        if input.summary.hasPrefix("Read ")   { return String(input.summary.dropFirst("Read ".count)) }
-        return input.summary
-    }
-
-    private func detectLanguage(path: String) -> String? {
-        let ext = (path as NSString).pathExtension.lowercased()
-        switch ext {
-        case "swift":            return "swift"
-        case "ts", "tsx":        return "typescript"
-        case "js", "jsx":        return "javascript"
-        case "py":               return "python"
-        case "go":               return "go"
-        case "rs":               return "rust"
-        case "md":               return "markdown"
-        case "json":             return "json"
-        default:                 return nil
-        }
     }
 }
 

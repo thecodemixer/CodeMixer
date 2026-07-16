@@ -2,8 +2,10 @@ import Foundation
 
 /// Shared timing constants for activity escalation and UI affordances.
 ///
-/// Server-side escalation remains canonical; UI-only durations are named here
-/// so clients do not grow unexplained timeout literals.
+/// Server-side escalation (`noEventGap`, heartbeat thresholds) remains
+/// canonical and is **not** affected by the UI-only Reduce Motion preference.
+/// UI-only durations are named here so clients do not grow unexplained
+/// timeout literals.
 public enum ActivityTiming {
     public static let noEventPollInterval: Duration = .milliseconds(500)
     public static let stillWorkingThreshold: Duration = .seconds(10)
@@ -31,4 +33,8 @@ public enum ActivityTiming {
     /// How long the "project removed · Undo" toast stays offered before the
     /// removal becomes final.
     public static let undoToastWindow: Duration = .seconds(8)
+    /// Default status phrase when no higher-priority source is active.
+    public static let idlePhrase = "Idle"
+    /// Fallback heuristic phrase when sources are cleared but the turn is active.
+    public static let thinkingPhrase = "Thinking…"
 }

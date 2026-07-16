@@ -16,6 +16,7 @@ struct RootView: View {
                                voice: bootstrap.voice,
                                tts: bootstrap.tts,
                                diffPanelVisible: $diffPanelVisible)
+                    .codemixerAppearance(model.appearancePrefs)
                     .navigationTitle(model.workspace?.lastPathComponent ?? "Codemixer")
                     .toolbar {
                         ToolbarItemGroup(placement: .primaryAction) {
@@ -38,6 +39,7 @@ struct RootView: View {
                     .background(Theme.surface.canvas)
             }
         }
+        .codemixerAppearance(bootstrap.viewModel?.appearancePrefs ?? AppearancePrefs())
         .sheet(isPresented: $bootstrap.showProjectPicker) {
             ProjectPickerView(recent: bootstrap.recents) { url, resume in
                 Task { await bootstrap.openWorkspace(url, resumeSessionID: resume) }
@@ -55,6 +57,9 @@ struct RootView: View {
         }
         .sheet(isPresented: $bootstrap.showEventLog) {
             if let bus = bootstrap.bus { EventLogView(bus: bus) }
+        }
+        .sheet(isPresented: $bootstrap.showSilentDiagnostics) {
+            SilentDiagnosticsView()
         }
         .sheet(item: $bootstrap.authURL) { url in
             AuthGateView(url: url, onDismiss: { bootstrap.authURL = nil })
@@ -126,8 +131,11 @@ struct RootView: View {
                 Button("Close Session") { model.send(.closeSession) }
             }
             Section("Model") {
-                Button("Use Sonnet") { model.send(.selectModel(id: "sonnet")) }
-                Button("Use Opus") { model.send(.selectModel(id: "opus")) }
+                ForEach(model.availableModels, id: \.id) { option in
+                    Button("Use \(option.label)") {
+                        model.send(.selectModel(id: option.id))
+                    }
+                }
             }
             Section("Mode") {
                 Button("Default Permissions") { model.send(.setPermissionMode(.default)) }
@@ -150,6 +158,9 @@ struct RootView: View {
             Divider()
             Button("Show Debug Terminal") { bootstrap.showDebugTerminal = true }
             Button("Show Event Log") { bootstrap.showEventLog = true }
+            if model.showSilentRecoveryLog {
+                Button("Show Silent Recovery Log") { bootstrap.showSilentDiagnostics = true }
+            }
             Button("Settings…") { bootstrap.showSettings = true }
                 .keyboardShortcut(",", modifiers: .command)
         } label: {

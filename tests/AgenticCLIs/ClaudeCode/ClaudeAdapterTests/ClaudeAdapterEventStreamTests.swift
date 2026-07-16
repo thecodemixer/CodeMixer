@@ -89,6 +89,50 @@ struct ClaudeAdapterEventStreamTests {
         }
         hookContinuation.finish()
     }
+
+    @Test("Stop last_assistant_message is dropped when transcript already supplied assistantText")
+    func stopDropsDuplicateAssistantFromHook() async throws {
+        let fileSystem = InMemoryFileSystem()
+        let home = URL(fileURLWithPath: "/tmp/codemixer-adapter-dedup")
+        let environment = FakeEnvironment(home: home)
+        let workspace = URL(fileURLWithPath: "/tmp/codemixer-workspace")
+        let sessionID = "dedup-session"
+        let projects = ClaudeProjectPaths.projectDirectory(for: workspace,
+                                                           claudeDirectory: environment.claudeDirectory)
+        try fileSystem.createDirectory(at: projects, withIntermediates: true)
+
+        var hookContinuation: AsyncStream<HookRequest>.Continuation!
+        let hookStream = AsyncStream<HookRequest> { hookContinuation = $0 }
+        let hookHandle = HookSocketHandle(incoming: hookStream, respond: { _, _ in })
+        let adapter = ClaudeAdapter(environment: environment, fileSystem: fileSystem)
+        let stream = adapter.makeEventStream(inputs: AgentInputs(
+            ptyOutput: AsyncStream { $0.finish() },
+            screen: EmptyScreen(),
+            hookSocket: hookHandle,
+            workspace: workspace,
+            sessionID: AsyncStream { $0.finish() }
+        ))
+
+        hookContinuation.yield(HookRequest(id: UUID(),
+                                           eventName: "SessionStart",
+                                           jsonPayload: Data(#"{"session_id":"dedup-session","cwd":"/tmp/codemixer-workspace"}"#.utf8)))
+        try fileSystem.writeAtomically(
+            Data(#"{"type":"assistant","uuid":"answer-dedup","sessionId":"dedup-session","message":{"role":"assistant","content":[{"type":"text","text":"transcript reply"}]}}"#.utf8),
+            to: projects.appendingPathComponent("\(sessionID).jsonl")
+        )
+        hookContinuation.yield(HookRequest(id: UUID(),
+                                           eventName: "Stop",
+                                           jsonPayload: Data(#"{"hook_event_name":"Stop","session_id":"dedup-session","last_assistant_message":"hook duplicate"}"#.utf8)))
+
+        let event = await nextAssistantText(from: stream)
+        guard case .assistantText(_, _, let text, true)? = event else {
+            Issue.record("expected assistantText, got \(String(describing: event))")
+            hookContinuation.finish()
+            return
+        }
+        #expect(text == "transcript reply")
+        hookContinuation.finish()
+    }
 }
 
 private struct EmptyScreen: TerminalSnapshotting {

@@ -1,9 +1,8 @@
 <!--
-SwiftLint configuration template.
+SwiftLint configuration template (reference only).
 
-Copy the block below to `.swiftlint.yml` at repo root.
-This config matches the conventions in `docs/code-style.md` and includes custom rules
-that enforce structured logging, typed errors, and "no print / no fatalError".
+Codemixer's checked-in `.swiftlint.yml` is narrower than this template —
+it does not include a `no_print` custom rule. See `docs/LOGGING.md`.
 -->
 
 # SwiftLint configuration

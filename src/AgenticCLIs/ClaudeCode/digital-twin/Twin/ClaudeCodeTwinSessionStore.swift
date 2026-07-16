@@ -5,11 +5,16 @@ public struct ClaudeCodeTwinSessionStore: Sendable {
     public let sessionID: String
     public let workspace: URL
     public let claudeDirectory: URL
+    public let runtime: TwinRuntimeSeams
 
-    public init(sessionID: String, workspace: URL, claudeDirectory: URL) {
+    public init(sessionID: String,
+                workspace: URL,
+                claudeDirectory: URL,
+                runtime: TwinRuntimeSeams = .live) {
         self.sessionID = sessionID
         self.workspace = workspace
         self.claudeDirectory = claudeDirectory
+        self.runtime = runtime
     }
 
     public var transcriptURL: URL {
@@ -19,19 +24,11 @@ public struct ClaudeCodeTwinSessionStore: Sendable {
     }
 
     public func ensureDirectory() throws {
-        let dir = transcriptURL.deletingLastPathComponent()
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try runtime.ensureParentDirectory(for: transcriptURL)
     }
 
     public func append(_ line: ClaudeCodeTwinTranscript.TranscriptLine) throws {
-        try ensureDirectory()
-        if !FileManager.default.fileExists(atPath: transcriptURL.path) {
-            FileManager.default.createFile(atPath: transcriptURL.path, contents: nil)
-        }
-        let handle = try FileHandle(forWritingTo: transcriptURL)
-        defer { try? handle.close() }
-        try handle.seekToEnd()
-        try handle.write(contentsOf: line.encoded())
+        try runtime.append(line.encoded(), to: transcriptURL)
     }
 
     public func appendLines(_ lines: [ClaudeCodeTwinTranscript.TranscriptLine]) throws {

@@ -126,6 +126,7 @@ private struct AppearanceSettingsTab: View {
     @State private var fontScale: Double = 1.0
     @State private var showUsage: Bool = false
     @State private var reduceMotion: Bool = false
+    @State private var showSilentLog: Bool = false
 
     var body: some View {
         Form {
@@ -133,7 +134,6 @@ private struct AppearanceSettingsTab: View {
                 Text("System").tag("system")
                 Text("Light").tag("light")
                 Text("Dark").tag("dark")
-                Text("Midnight").tag("midnight")
             }
             .onChange(of: theme) { _, new in
                 model.send(.updateAppearancePref(key: .theme, value: .string(new)))
@@ -165,6 +165,11 @@ private struct AppearanceSettingsTab: View {
                 .onChange(of: reduceMotion) { _, new in
                     model.send(.updateAppearancePref(key: .reduceMotion, value: .bool(new)))
                 }
+
+            Toggle("Show silent recovery log", isOn: $showSilentLog)
+                .onChange(of: showSilentLog) { _, new in
+                    model.send(.updateAppearancePref(key: .showSilentRecoveryLog, value: .bool(new)))
+                }
         }
         .formStyle(.grouped)
         .task {
@@ -173,6 +178,7 @@ private struct AppearanceSettingsTab: View {
             fontScale = model.appearancePrefs.fontSizeScale
             showUsage = model.appearancePrefs.showUsageChip
             reduceMotion = model.appearancePrefs.reduceMotion
+            showSilentLog = model.appearancePrefs.showSilentRecoveryLog
         }
     }
 }
@@ -251,7 +257,6 @@ private struct RemoteSettingsTab: View {
 
     @State private var remoteEnabled: Bool = false
     @State private var lanEnabled: Bool = false
-    @State private var requireAuth: Bool = true
     @State private var state = RemoteSettingsState()
 
     var body: some View {
@@ -322,7 +327,6 @@ private struct RemoteSettingsTab: View {
                     }
                     .disabled(!remoteEnabled)
                     .accessibilityLabel("Bind server to all network interfaces for LAN access")
-                Toggle("Require pairing token", isOn: $requireAuth)
                 LabeledContent("Port", value: "\(RemoteDefaults.webSocketPort)")
                 LabeledContent("Connected clients", value: "\(state.connectedClientCount)")
             }
@@ -401,3 +405,15 @@ private struct ClaudeSettingsTab: View {
         .formStyle(.grouped)
     }
 }
+
+#if DEBUG
+#Preview("Settings – Light") {
+    SettingsView(model: .preview)
+        .preferredColorScheme(.light)
+}
+
+#Preview("Settings – Dark") {
+    SettingsView(model: .preview)
+        .preferredColorScheme(.dark)
+}
+#endif

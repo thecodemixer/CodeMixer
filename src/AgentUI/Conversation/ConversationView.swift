@@ -232,3 +232,17 @@ public struct ConversationView: View {
     }
 }
 
+#if DEBUG
+#Preview("Conversation – Light") {
+    ConversationView(model: .previewConversation)
+        .frame(width: 560, height: 480)
+        .preferredColorScheme(.light)
+}
+
+#Preview("Conversation – Dark") {
+    ConversationView(model: .previewConversation)
+        .frame(width: 560, height: 480)
+        .preferredColorScheme(.dark)
+}
+#endif
+

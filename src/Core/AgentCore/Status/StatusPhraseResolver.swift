@@ -6,12 +6,12 @@ import AgentProtocol
 /// the winner changes.
 ///
 /// Priority order, highest wins: `.adapterPinned > .hookHint > .tuiScrape >
-/// .heuristic`. When the engine has no input for 500ms the resolver decays
-/// back to the heuristic source ("Thinking…").
+/// `.heuristic`. When every source is cleared the resolver falls back to the
+/// heuristic phrase (`ActivityTiming.thinkingPhrase`).
 public actor StatusPhraseResolver {
 
     /// Current best phrase, exposed for log lines and remote snapshot.
-    public private(set) var current: String = "Idle"
+    public private(set) var current: String = ActivityTiming.idlePhrase
     public private(set) var currentSource: StatusPhraseSource = .heuristic
 
     private var byPriority: [StatusPhraseSource: String] = [:]
@@ -33,7 +33,7 @@ public actor StatusPhraseResolver {
     /// Drop every source — used on session end.
     public func reset() {
         byPriority.removeAll()
-        current = "Idle"
+        current = ActivityTiming.idlePhrase
         currentSource = .heuristic
     }
 
@@ -44,7 +44,7 @@ public actor StatusPhraseResolver {
             .max(by: { $0.key < $1.key })
             .map { (source: $0.key, phrase: $0.value) }
 
-        let (winnerSource, winnerPhrase) = candidate ?? (.heuristic, "Thinking…")
+        let (winnerSource, winnerPhrase) = candidate ?? (.heuristic, ActivityTiming.thinkingPhrase)
         if winnerSource == currentSource && winnerPhrase == current {
             return nil
         }

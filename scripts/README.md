@@ -21,7 +21,8 @@ This directory contains local automation and validation helpers for Codemixer.
     - `scripts/generate-xcodeproj.swift --clean`
 
 - `pre-commit.swift`
-  - Pre-commit gate: `swift build`, `swift test --no-parallel`, SwiftFormat lint, SwiftLint.
+  - Local pre-commit hook: `swift build`, `swift test --no-parallel`, SwiftFormat lint, SwiftLint.
+  - This is a **narrow** gate — it does not run the full merge checklist (`check-package-layout`, `check-a11y`, `regen-coverage-manifest --check`, `check-test-runtime`, etc.). Run those manually before opening a PR.
   - Typical install:
     - `ln -sf ../../scripts/pre-commit.swift .git/hooks/pre-commit`
 
@@ -61,9 +62,19 @@ This directory contains local automation and validation helpers for Codemixer.
 
 ### Live Spikes (Manual Validation)
 
+Prefer the **SPM live harness** for automated opt-in checks when a logged-in
+`claude` is available:
+
+```bash
+CODEMIXER_LIVE_CLAUDE=1 swift test --no-parallel --filter LiveClaudeIntegrationTests
+```
+
+See [`tests/AgenticCLIs/README.md`](../tests/AgenticCLIs/README.md). The spikes
+below remain useful for raw hook/billing characterization outside the test runner.
+
 - `spike-billing.swift`
   - Live Claude token/cost capture spike using the same interactive PTY path
-    as Codemixer.
+    as Codemixer (no `-p` / `--print`).
   - Sends one prompt, waits for Claude's Stop hook, then reads usage from the
     interactive transcript JSONL.
   - Usage:
@@ -82,6 +93,9 @@ This directory contains local automation and validation helpers for Codemixer.
     - `jq`
     - `claude`
 
+- Hook JSON helpers (`SpikeHookSupport`) are duplicated in both spike scripts
+  because Swift's single-file script runner cannot import a sibling source file.
+
 - `characterize-claude-code.swift`
   - Manual fixture capture scaffold for Claude Code hook/transcript characterization.
   - Writes a provenance manifest; not run in CI.
@@ -94,7 +108,8 @@ This directory contains local automation and validation helpers for Codemixer.
   - Per-suite runtime budget overrides for `check-test-runtime.swift`.
 
 - `com.codecave.Codemixer.daemon.plist`
-  - LaunchAgent template for running `codemixerd` at login.
+  - Canonical LaunchAgent template at `src/CodemixerApp/Resources/com.codecave.Codemixer.daemon.plist`.
+  - The GUI installer substitutes `__CODEMIXERD_PATH__` at install time.
 
 ## Quick Examples
 

@@ -22,8 +22,8 @@ struct EngineIntegrationTests {
 
         let collector = Task<[AgentEvent], Never> {
             var out: [AgentEvent] = []
-            for await event in sub.stream {
-                out.append(event)
+            for await entry in sub.stream {
+                out.append(entry.event)
                 if out.count >= 2 { break }
             }
             return out

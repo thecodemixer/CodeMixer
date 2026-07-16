@@ -8,9 +8,9 @@ public enum ClaudeCodeTwinSettings: Sendable {
         public var shellCommand: String
     }
 
-    public static func loadHookCommands(from settingsURL: URL) -> [HookCommand] {
-        guard FileManager.default.fileExists(atPath: settingsURL.path),
-              let data = try? Data(contentsOf: settingsURL),
+    public static func loadHookCommands(from settingsURL: URL,
+                                        runtime: TwinRuntimeSeams = .live) -> [HookCommand] {
+        guard let data = runtime.readDataIfPresent(at: settingsURL),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let hooks = root["hooks"] as? [String: Any] else {
             return []

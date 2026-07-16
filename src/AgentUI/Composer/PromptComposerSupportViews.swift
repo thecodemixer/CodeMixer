@@ -7,6 +7,120 @@ private enum WorkspaceFilePickerLimits {
     static let maxVisibleMatches = 100
 }
 
+// MARK: - Mode / model menus
+
+struct ComposerModeModelMenus: View {
+    @Bindable var model: EngineViewModel
+    @Binding var thinkOn: Bool
+    @Binding var reviewOn: Bool
+    @Binding var selectedModelID: String
+    @Binding var modeMenuAnchor: NSView?
+    @Binding var modelMenuAnchor: NSView?
+
+    private var selectedModelLabel: String {
+        model.availableModels.first { $0.id == selectedModelID }?.label
+            ?? model.availableModels.first?.label
+            ?? "Model"
+    }
+
+    var body: some View {
+        HStack(spacing: Theme.spacing.s24) {
+            modeMenu
+            modelMenu
+        }
+    }
+
+    private var modeMenu: some View {
+        Button { showModeMenu() } label: {
+            modeMenuLabel
+                .background(ComposerMenuAnchorView { modeMenuAnchor = $0 })
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+        .accessibilityLabel("Mode \(thinkOn ? "Think" : (reviewOn ? "Review" : "Agent"))")
+    }
+
+    private var modelMenu: some View {
+        Button { showModelMenu() } label: {
+            modelMenuLabel
+                .background(ComposerMenuAnchorView { modelMenuAnchor = $0 })
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+        .accessibilityLabel("Model \(selectedModelLabel)")
+    }
+
+    private var modeMenuLabel: some View {
+        HStack(spacing: Theme.spacing.s4) {
+            Image(systemName: "infinity")
+                .accessibilityHidden(true)
+            Text(thinkOn ? "Think" : (reviewOn ? "Review" : "Agent"))
+            Image(systemName: "chevron.down")
+                .accessibilityHidden(true)
+                .font(Theme.typography.iconSmall)
+                .foregroundStyle(Theme.text.tertiary.opacity(Theme.opacity.secondary))
+        }
+        .padding(.horizontal, Theme.spacing.s8)
+        .padding(.top, Theme.spacing.s4)
+        .padding(.bottom, CGFloat.zero)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.corner.small)
+                .fill(Theme.surface.card.opacity(Theme.opacity.emphasized))
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.corner.small)
+                        .stroke(Theme.surface.divider, lineWidth: Theme.stroke.hairline)
+                )
+        )
+        .foregroundStyle(Theme.text.secondary)
+    }
+
+    private var modelMenuLabel: some View {
+        HStack(spacing: Theme.spacing.s4) {
+            Text(selectedModelLabel)
+                .font(Theme.typography.label)
+            Image(systemName: "chevron.down")
+                .accessibilityHidden(true)
+                .font(Theme.typography.iconSmall)
+                .foregroundStyle(Theme.text.tertiary.opacity(Theme.opacity.secondary))
+        }
+        .padding(.top, Theme.spacing.s4)
+        .padding(.bottom, CGFloat.zero)
+        .padding(.horizontal, Theme.spacing.s4)
+        .contentShape(Rectangle())
+        .foregroundStyle(Theme.text.secondary)
+    }
+
+    private func showModeMenu() {
+        DesktopMenuPresenter.popUp(items: [
+            DesktopMenuItem(title: "Agent") {
+                thinkOn = false
+                reviewOn = false
+                model.send(.toggleThinkMode(enabled: false))
+                model.send(.toggleReviewMode(enabled: false))
+            },
+            DesktopMenuItem(title: "Think") {
+                thinkOn = true
+                reviewOn = false
+                model.send(.toggleThinkMode(enabled: true))
+            },
+            DesktopMenuItem(title: "Review") {
+                thinkOn = false
+                reviewOn = true
+                model.send(.toggleReviewMode(enabled: true))
+            },
+        ], from: modeMenuAnchor)
+    }
+
+    private func showModelMenu() {
+        DesktopMenuPresenter.popUp(items: model.availableModels.map { option in
+            DesktopMenuItem(title: option.label) {
+                selectedModelID = option.id
+                model.send(.selectModel(id: option.id))
+            }
+        }, from: modelMenuAnchor)
+    }
+}
+
 // MARK: - Slash palette
 
 struct ComposerActionButton: View {
@@ -93,30 +207,6 @@ struct ComposerMicButton: View {
                     .animation(Theme.motion.quick, value: isListening)
             }
         }
-    }
-}
-
-struct ComposerModeToggle: View {
-    let label: String
-    let system: String
-    @Binding var isOn: Bool
-    @Binding var otherIsOn: Bool
-    @Bindable var model: EngineViewModel
-    let command: (Bool) -> AgentCommand
-
-    var body: some View {
-        Button {
-            isOn.toggle()
-            if isOn { otherIsOn = false }
-            model.send(command(isOn))
-        } label: {
-            Label(label, systemImage: system)
-                .labelStyle(.iconOnly)
-                .foregroundStyle(isOn ? Theme.signal.info : Theme.text.secondary)
-        }
-        .buttonStyle(.bordered)
-        .help("\(label) mode")
-        .accessibilityLabel("\(label) mode \(isOn ? "on" : "off")")
     }
 }
 
@@ -296,40 +386,5 @@ struct WaveformCanvas: View {
             }
         }
         .accessibilityLabel("Audio waveform")
-    }
-}
-
-// MARK: - File listing (free function — not MainActor isolated)
-
-/// Recursively lists files in `workspace`, skipping common noise directories.
-/// Capped at 200 entries. FileManager is thread-safe for read-only enumeration.
-func listWorkspaceFiles(in workspace: URL) -> [String] {
-    let skipDirs: Set<String> = [".git", "node_modules", ".build", "DerivedData",
-                                 ".swiftpm", "__pycache__", ".DS_Store"]
-    var results: [String] = []
-    guard let enumerator = FileManager.default.enumerator(
-        at: workspace,
-        includingPropertiesForKeys: [.isRegularFileKey],
-        options: [.skipsHiddenFiles]
-    ) else { return [] }
-    for case let url as URL in enumerator {
-        if results.count >= 200 { break }
-        if skipDirs.contains(url.lastPathComponent) {
-            enumerator.skipDescendants()
-            continue
-        }
-        if (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true {
-            let rel = url.path.replacingOccurrences(of: workspace.path + "/", with: "")
-            results.append(rel)
-        }
-    }
-    return results.sorted()
-}
-
-// MARK: - Regex helpers (Swift 5.7+ Regex literals)
-
-extension String {
-    func lastMatch(of regex: Regex<(Substring, Substring)>) -> (Substring, Substring)? {
-        try? regex.firstMatch(in: self).map { ($0.output.0, $0.output.1) }
     }
 }

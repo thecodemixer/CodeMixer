@@ -17,6 +17,7 @@ struct AgentErrorTests {
             .staleEditTarget(targetID: UUID()),
             .unsupportedCommand(name: "/wat"),
             .engineRestartLimitReached,
+            .permissionTimeout(promptID: UUID(), action: .deny),
             .internalInvariant(detail: "logic bug"),
             .unsupportedOperation(detail: "revertHunk"),
         ]
@@ -44,12 +45,12 @@ struct AgentErrorTests {
 
     @Test("Codes are stable identifiers, not localised strings")
     func codesAreStable() {
-        #expect(AgentError.binaryNotFound(agentID: .claudeCode, hint: "").code == "binary_not_found")
-        #expect(AgentError.spawnFailed(errno: 0, detail: "").code == "spawn_failed")
-        #expect(AgentError.unsupportedOperation(detail: "").code == "unsupported_operation")
+        #expect(AgentError.binaryNotFound(agentID: .claudeCode, hint: "").wireCode == .binaryNotFound)
+        #expect(AgentError.spawnFailed(errno: 0, detail: "").wireCode == .spawnFailed)
+        #expect(AgentError.unsupportedOperation(detail: "").wireCode == .unsupportedOperation)
     }
 
-    @Test(".error event survives wire round-trip preserving the code in the message")
+    @Test(".error event survives wire round-trip preserving the typed case")
     func errorEventPreservesCode() {
         for error in allCases() {
             let event = AgentEvent.error(error)
@@ -57,10 +58,7 @@ struct AgentErrorTests {
             guard case .error(let restoredErr) = restored else {
                 Issue.record("not .error after round-trip: \(restored)"); continue
             }
-            // Wire collapses to internalInvariant("<code>: <message>"). Verify
-            // the original code is visible in the restored message.
-            #expect(restoredErr.userMessage.contains(error.code),
-                    "lost code \(error.code) in \(restoredErr.userMessage)")
+            #expect(restoredErr == error, "round-trip mismatch for \(error)")
         }
     }
 

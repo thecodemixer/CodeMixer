@@ -41,8 +41,9 @@ transcripts/
 *.pfx
 *.mobileprovision
 
-# Editor
-.vscode/
+# Local characterization output (manual `characterize-claude-code.swift` runs)
+tests/AgenticCLIs/ClaudeCode/ClaudeAdapterTests/Fixtures/live/
+
 .idea/
 *.swp
 *~

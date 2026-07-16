@@ -76,7 +76,7 @@ public enum TLSIdentityStore {
 - **One certificate per host install.** Generated at first listener start, persisted with `kSecAttrAccessibleAfterFirstUnlock`.
 - **5-year validity.** Long enough that re-pairing is a deliberate event, short enough that key rotation is possible.
 - **No CA chain.** The certificate is its own root. Clients verify via fingerprint pinning, not chain validation.
-- **RSA-2048 or ECDSA P-256.** Either is fine; the wider TLS world supports both.
+- **RSA-2048 (Codemixer default via `CertificateManager` / `openssl`).** Clients pin the fingerprint regardless of key type.
 
 ---
 

@@ -37,7 +37,7 @@ struct RemoteControlE2ETests {
         }
 
         // Subscribe before sending commands so event frames are delivered.
-        try await client.send(try encoder.encode(ClientFrame.subscribe(streams: [.events])))
+        try await client.send(try encoder.encode(ClientFrame.subscribe()))
         for _ in 0..<5 {
             guard let subData = try await client.receive() else { break }
             if case .subscribed = (try? decoder.decode(ServerFrame.self, from: subData)) { break }
@@ -55,7 +55,7 @@ struct RemoteControlE2ETests {
             switch frame {
             case .result(let id, true, _) where id == cmdID:
                 sawResult = true
-            case .event(let wire):
+            case .event(_, let wire):
                 if case .appearancePrefChanged = wire { sawEvent = true }
             default:
                 break
@@ -294,7 +294,7 @@ struct RemoteControlE2ETests {
         let encoder = JSONEncoder()
         let decoder = JSONDecoder()
 
-        try await client.send(try encoder.encode(ClientFrame.subscribe(streams: [.events])))
+        try await client.send(try encoder.encode(ClientFrame.subscribe()))
         for _ in 0..<8 {
             guard let data = try await client.receive() else { break }
             if case .subscribed = try? decoder.decode(ServerFrame.self, from: data) { break }
@@ -313,7 +313,7 @@ struct RemoteControlE2ETests {
             guard let data = try await client.receive() else { break }
             guard let frame = try? decoder.decode(ServerFrame.self, from: data) else { continue }
             switch frame {
-            case .event(.userTurn(_, let text)) where text == "wire fail":
+            case .event(_, .userTurn(_, let text)) where text == "wire fail":
                 userTurnIndex = framesSeen
             case .result(let id, false, let error?) where id == cmdID:
                 resultIndex = framesSeen
@@ -356,7 +356,6 @@ struct RemoteControlE2ETests {
         let cases: [WriteFailureCase] = [
             .init(.sendPrompt(text: "remote prompt", attachments: []), "remote prompt"),
             .init(.cancelCurrentTurn, bytes: Data([0x03])),
-            .init(.respondToInlinePrompt(id: UUID(), text: "remote inline"), "remote inline"),
             .init(.newSession, "/clear\n"),
             .init(.compact, "/compact\n"),
             .init(.selectModel(id: "sonnet"), "/model sonnet\n"),
@@ -438,17 +437,18 @@ struct RemoteControlE2ETests {
         let decoder = JSONDecoder()
 
         // Client reconnects claiming it already saw the first event.
-        let frame = ClientFrame.subscribe(streams: [.events], lastSeenEventID: id1)
+        let frame = ClientFrame.subscribe(lastSeenEventID: id1)
         try await client.send(try encoder.encode(frame))
 
         // Collect server frames. The server will:
         //   1. Replay events after id1 (only the second one)
-        //   2. Send .subscribed(latestEventID:) as an ack
+        //   2. Send .subscribed(latestEventID:outcome:) as an ack
         // We collect until we've seen .subscribed, then read one more cycle
         // to pick up any replayed events that arrive after the ack.
         var eventCount = 0
         var sawSubscribed = false
         var latestID: UUID?
+        var outcome: SubscribeReplayOutcome?
 
         for _ in 0..<15 {
             guard let data = try await client.receive() else { break }
@@ -456,9 +456,10 @@ struct RemoteControlE2ETests {
             switch serverFrame {
             case .event:
                 eventCount += 1
-            case .subscribed(let lid):
+            case .subscribed(let lid, let replayOutcome):
                 sawSubscribed = true
                 latestID = lid
+                outcome = replayOutcome
             default:
                 break
             }
@@ -470,7 +471,94 @@ struct RemoteControlE2ETests {
         #expect(eventCount == 1)
         #expect(sawSubscribed)
         #expect(latestID != nil)
+        #expect(outcome == .resumed)
         await server.stop()
+    }
+
+    @Test("expired checkpoint subscribe reports checkpointExpired outcome")
+    func expiredCheckpointSubscribe() async throws {
+        let net = InMemoryNetwork()
+        let (server, transport, _, engine) = try await makeServer(transport: net.transport,
+                                                                   requireAuth: false)
+        let port = await server.boundPort ?? 0
+
+        for _ in 0..<8 {
+            _ = await engine.bus.publish(.bell)
+        }
+        let staleID = UUID()
+
+        let client = try await transport.connect(to: .loopback(port: port), options: .plainWebSocket)
+        let encoder = JSONEncoder()
+        let decoder = JSONDecoder()
+
+        try await client.send(try encoder.encode(
+            ClientFrame.subscribe(lastSeenEventID: staleID)
+        ))
+
+        var outcome: SubscribeReplayOutcome?
+        for _ in 0..<20 {
+            guard let data = try await client.receive() else { break }
+            guard let frame = try? decoder.decode(ServerFrame.self, from: data) else { continue }
+            if case .subscribed(_, let replayOutcome) = frame {
+                outcome = replayOutcome
+                break
+            }
+        }
+        #expect(outcome == .checkpointExpired)
+        await server.stop()
+    }
+
+    @Test("snapshot frame serves resync payloads after checkpoint expiry")
+    func snapshotResyncAfterExpiry() async throws {
+        let net = InMemoryNetwork()
+        let seams = Seams.fake()
+        let engine = AgentEngine(seams: seams)
+        await engine.bootstrap()
+        let pairing = PairingService(clock: seams.clock, random: seams.random)
+        let server = RemoteControlServer(engine: engine,
+                                         bus: engine.bus,
+                                         pairing: pairing,
+                                         transport: net.transport)
+        try await server.start(configuration: .init(host: .loopback,
+                                                    port: 0,
+                                                    requireAuth: false,
+                                                    useTLS: false))
+        let port = try #require(await server.boundPort)
+
+        _ = await engine.bus.publish(.userTurn(id: "u1", text: "hello"))
+        let staleID = await engine.bus.lastPublishedID
+        for _ in 0..<StreamBufferDefaults.eventHistory {
+            _ = await engine.bus.publish(.bell)
+        }
+
+        let client = try await net.transport.connect(to: .loopback(port: port), options: .plainWebSocket)
+        let encoder = JSONEncoder()
+        let decoder = JSONDecoder()
+
+        try await client.send(try encoder.encode(
+            ClientFrame.subscribe(lastSeenEventID: staleID)
+        ))
+        for _ in 0..<20 {
+            guard let data = try await client.receive() else { break }
+            if case .subscribed = try? decoder.decode(ServerFrame.self, from: data) { break }
+        }
+
+        try await client.send(try encoder.encode(ClientFrame.snapshot(kind: .prefs)))
+        var gotSnapshot = false
+        for _ in 0..<600 {
+            guard let data = try await client.receive() else { break }
+            if case .snapshot(let kind, let payload) = try? decoder.decode(ServerFrame.self, from: data) {
+                #expect(kind == .prefs)
+                #expect(!payload.isEmpty)
+                gotSnapshot = true
+                break
+            }
+        }
+        #expect(gotSnapshot)
+
+        await client.close()
+        await server.stop()
+        await engine.shutdown(reason: .naturalExit)
     }
 
     private func makeServer(transport: any NetworkTransport,

@@ -8,7 +8,7 @@ struct StatusPhraseResolverTests {
     @Test("Higher-priority source overrides lower-priority phrase")
     func priorityOverride() async {
         let resolver = StatusPhraseResolver()
-        _ = await resolver.update(.heuristic, phrase: "Thinking…")
+        _ = await resolver.update(.heuristic, phrase: ActivityTiming.thinkingPhrase)
         let winner = await resolver.update(.hookHint, phrase: "Reading file")
         #expect(winner?.0 == .hookHint)
         #expect(winner?.1 == "Reading file")
@@ -17,11 +17,11 @@ struct StatusPhraseResolverTests {
     @Test("Removing the winning source falls back to next-highest")
     func fallbackOnRemoval() async {
         let resolver = StatusPhraseResolver()
-        _ = await resolver.update(.heuristic, phrase: "Thinking…")
+        _ = await resolver.update(.heuristic, phrase: ActivityTiming.thinkingPhrase)
         _ = await resolver.update(.adapterPinned, phrase: "Compacting")
         let winner = await resolver.update(.adapterPinned, phrase: nil)
         #expect(winner?.0 == .heuristic)
-        #expect(winner?.1 == "Thinking…")
+        #expect(winner?.1 == ActivityTiming.thinkingPhrase)
     }
 
     @Test("All four sources respect the documented priority order")
@@ -63,13 +63,13 @@ struct StatusPhraseResolverTests {
 
         let current = await resolver.current
         let source  = await resolver.currentSource
-        #expect(current == "Idle")
+        #expect(current == ActivityTiming.idlePhrase)
         #expect(source == .heuristic)
 
         // After reset, a low-priority update should win.
-        let result = await resolver.update(.heuristic, phrase: "Thinking…")
+        let result = await resolver.update(.heuristic, phrase: ActivityTiming.thinkingPhrase)
         #expect(result?.0 == .heuristic)
-        #expect(result?.1 == "Thinking…")
+        #expect(result?.1 == ActivityTiming.thinkingPhrase)
     }
 
     @Test("Same source + same phrase returns nil (no change)")

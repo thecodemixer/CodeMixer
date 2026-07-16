@@ -54,6 +54,10 @@ public actor SessionStore {
             cached = State(projects: decoded.projects.filter { Self.isPersistableWorkspacePath($0.path) })
         } catch {
             log.warning("sessions load failed: \(String(describing: error), privacy: .public). Using empty list.")
+            await SilentDiagnostics.shared.record(kind: .sessionsQuietReset,
+                                                  owner: "SessionStore",
+                                                  summary: "sessions.json unreadable; using empty list",
+                                                  details: String(describing: error))
         }
     }
 

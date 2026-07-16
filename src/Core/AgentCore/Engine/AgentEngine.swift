@@ -43,6 +43,8 @@ public actor AgentEngine: AgentEngineCommandPort {
     var heartbeat: HeartbeatActivityMonitor?
     private var phraseResolver: StatusPhraseResolver
     private var eventForwardingTask: Task<Void, Never>?
+    private var ptyFanoutTask: Task<Void, Never>?
+    private var shutdownInFlight = false
     var workspace: URL?
     var transcript: [SnapshotService.SnapshotMessage] = []
     var changedFiles: [String] = []
@@ -55,8 +57,12 @@ public actor AgentEngine: AgentEngineCommandPort {
     private var resumeStartupWaiters: [CheckedContinuation<Void, Never>] = []
     var startupSubmitRecoveryArmed = false
     private var startupSubmitRecoveryTask: Task<Void, Never>?
+    private var fsWatcher: FSEventsWatcher?
+    private var fsWatcherTask: Task<Void, Never>?
+    private var diffRefreshTask: Task<Void, Never>?
 
     private static let resumePromptReadyRequiredSamples = 2
+    private static let diffRefreshCoalesce: Duration = .milliseconds(50)
 
     /// Permissions that go unresolved for longer than this are auto-denied so
     /// a headless session never deadlocks waiting for human input. Injected at
@@ -96,9 +102,7 @@ public actor AgentEngine: AgentEngineCommandPort {
         let s = SessionStore(environment: seams.environment, fileSystem: seams.fileSystem)
         self.prefs = p
         self.sessions = s
-        self.snapshots = SnapshotService(prefs: p,
-                                         sessions: s,
-                                         fileSystem: seams.fileSystem)
+        self.snapshots = SnapshotService(prefs: p, sessions: s)
         self.attachmentResolver = AttachmentResolver(environment: seams.environment,
                                                      fileSystem: seams.fileSystem)
         self.gitReverter = GitReverter()
@@ -147,10 +151,17 @@ public actor AgentEngine: AgentEngineCommandPort {
         resumePromptReadySampleCount = 0
         resumeStartupWaiters.removeAll()
 
-        try? await sessions.recordOpen(path: workspace.path,
-                                       displayName: workspace.lastPathComponent,
-                                       clock: seams.clock,
-                                       sessionID: resumeSessionID)
+        do {
+            try await sessions.recordOpen(path: workspace.path,
+                                          displayName: workspace.lastPathComponent,
+                                          clock: seams.clock,
+                                          sessionID: resumeSessionID)
+        } catch {
+            await SilentDiagnostics.shared.record(kind: .other,
+                                                  owner: "AgentEngine",
+                                                  summary: "sessions.recordOpen failed during start",
+                                                  details: String(describing: error))
+        }
 
         let resolvedEnv = await ShellEnvironmentResolver(environment: seams.environment).resolve()
 
@@ -178,7 +189,7 @@ public actor AgentEngine: AgentEngineCommandPort {
         do {
             binary = try await adapter.locateBinary(env: resolvedEnv)
         } catch {
-            state = .stopped
+            await rollbackPartialStart()
             throw AgentError.binaryNotFound(agentID: adapter.id,
                                             hint: error.localizedDescription)
         }
@@ -189,7 +200,7 @@ public actor AgentEngine: AgentEngineCommandPort {
                                     permissionMode: permissionMode,
                                     extraEnv: adapter.defaultEnvOverrides())
         let argv = adapter.buildLaunchArgv(context: context)
-        let env = resolvedEnv.withOverrides(adapter.defaultEnvOverrides())
+        let env = resolvedEnv.ptySpawnEnvironment(adapterOverrides: adapter.defaultEnvOverrides())
 
         // Spawn the PTY + terminal engine.
         let terminal = TerminalEngine()
@@ -203,7 +214,7 @@ public actor AgentEngine: AgentEngineCommandPort {
         do {
             pty = try ptyFactory(spec)
         } catch {
-            state = .stopped
+            await rollbackPartialStart()
             throw AgentError.spawnFailed(errno: Self.errno(from: error),
                                          detail: String(describing: error))
         }
@@ -215,9 +226,12 @@ public actor AgentEngine: AgentEngineCommandPort {
         let ptyFanout = AsyncStream<Data>(bufferingPolicy: .bufferingOldest(StreamBufferDefaults.ptyChunks)) { c in ptyFanoutContinuation = c }
 
         let outbound = pty.outboundBytes
-        Task { [weak self] in
+        ptyFanoutTask = Task { [weak self] in
             for await chunk in outbound {
                 await self?.terminal?.feed(chunk)
+                if await self?.terminal?.consumeBell() == true {
+                    await self?.bus.publish(.bell)
+                }
                 ptyFanoutContinuation.yield(chunk)
             }
             ptyFanoutContinuation.finish()
@@ -264,6 +278,8 @@ public actor AgentEngine: AgentEngineCommandPort {
             startResumePromptReadyWait(sessionID: startupGateID)
             startResumeStartupWatchdog(sessionID: startupGateID)
         }
+
+        await startFSWatcher(workspace: workspace)
     }
 
     /// Shut everything down: cancel the read pipeline, kill the child, close
@@ -274,6 +290,9 @@ public actor AgentEngine: AgentEngineCommandPort {
 
         eventForwardingTask?.cancel()
         eventForwardingTask = nil
+        ptyFanoutTask?.cancel()
+        ptyFanoutTask = nil
+        await stopFSWatcher()
         cancelResumeStartupWatchdog()
         cancelResumePromptReadyWait()
         startupSubmitRecoveryTask?.cancel()
@@ -300,7 +319,57 @@ public actor AgentEngine: AgentEngineCommandPort {
 
         await bus.publish(.stopped(reason: reason))
         state = .stopped
+        shutdownInFlight = false
         log.notice("engine stopped reason=\(String(describing: reason), privacy: .public)")
+    }
+
+    /// Tear down a partially started session without publishing `.stopped`.
+    private func rollbackPartialStart() async {
+        eventForwardingTask?.cancel()
+        eventForwardingTask = nil
+        ptyFanoutTask?.cancel()
+        ptyFanoutTask = nil
+        await stopFSWatcher()
+        cancelResumeStartupWatchdog()
+        cancelResumePromptReadyWait()
+        startupSubmitRecoveryTask?.cancel()
+        startupSubmitRecoveryTask = nil
+        startupSubmitRecoveryArmed = false
+        finishResumeStartupGate()
+        await pty?.close()
+        pty = nil
+        await hookServer?.stop()
+        hookServer = nil
+        sessionIDContinuation?.finish()
+        sessionIDContinuation = nil
+        await heartbeat?.endTurn()
+        heartbeat = nil
+        terminal = nil
+        adapter = nil
+        workspace = nil
+        currentSessionID = nil
+        currentTurnID = nil
+        pendingPermissions.removeAll()
+        lastUserBubbleID = nil
+        for task in permissionTimeouts.values { task.cancel() }
+        permissionTimeouts.removeAll()
+        transcript = []
+        changedFiles = []
+        await phraseResolver.reset()
+        state = .stopped
+        await SilentDiagnostics.shared.record(kind: .enginePartialStartRollback,
+                                              owner: "AgentEngine",
+                                              summary: "Rolled back partial engine start")
+    }
+
+    /// Serialize adapter-driven shutdown so nested ingest/shutdown races cannot
+    /// double-stop or cancel the forwarding task mid-flight.
+    private func requestShutdown(reason: StopReason) {
+        guard !shutdownInFlight else { return }
+        shutdownInFlight = true
+        Task { [weak self] in
+            await self?.shutdown(reason: reason)
+        }
     }
 
     // MARK: - Internal — adapter event ingestion
@@ -329,11 +398,29 @@ public actor AgentEngine: AgentEngineCommandPort {
             sessionIDContinuation?.yield(id)
             state = .running(sessionID: id)
         case .permissionRequest(let prompt):
+            if let rule = await prefs.matchingRule(toolName: prompt.toolName,
+                                                   summary: prompt.summary) {
+                do {
+                    try await deliverPermissionResponse(rule.decision, for: prompt, id: prompt.id)
+                    await bus.publish(.permissionAlreadyResolved(id: prompt.id, byDevice: "auto-approval"))
+                } catch {
+                    await SilentDiagnostics.shared.record(kind: .permissionDeliveryFailed,
+                                                          owner: "AgentEngine",
+                                                          summary: "Auto-approval delivery failed",
+                                                          details: String(describing: error))
+                    await bus.publish(.error(.internalInvariant(detail: "permission delivery failed: \(error)")))
+                    pendingPermissions[prompt.id] = prompt
+                    startPermissionTimeout(for: prompt.id)
+                    await record(event)
+                    await bus.publish(event)
+                }
+                return
+            }
             pendingPermissions[prompt.id] = prompt
             startPermissionTimeout(for: prompt.id)
-        case .stopped:
-            // Adapter signalled the agent exited — let `shutdown` finish up.
-            Task { [weak self] in await self?.shutdown(reason: .naturalExit) }
+        case .stopped(let reason):
+            requestShutdown(reason: reason)
+            return
         case .toolEnd:
             await heartbeat?.bump(baseline: .awaitingFirstChunk)
         case .assistantText:
@@ -379,7 +466,7 @@ public actor AgentEngine: AgentEngineCommandPort {
         case .assistantText(_, _, let text, let isFinal) where isFinal:
             transcript.append(.init(role: "assistant", text: text, timestamp: seams.clock.now()))
         case .fileTouched(let url, _):
-            let path = url.path
+            let path = relativePath(for: url)
             if !changedFiles.contains(path) { changedFiles.append(path) }
         default:
             break
@@ -561,12 +648,17 @@ public actor AgentEngine: AgentEngineCommandPort {
         permissionTimeouts.removeValue(forKey: id)?.cancel()
         log.notice("permission timeout for \(id, privacy: .public) — auto-denying")
 
-        try? await deliverPermissionResponse(.deny, for: prompt, id: id)
-        await bus.publish(.permissionAlreadyResolved(id: id, byDevice: "timeout"))
-        let totalSeconds = Int(Double(permissionTimeout.components.seconds))
-        await bus.publish(.error(.unsupportedOperation(
-            detail: "Permission request timed out after \(max(1, totalSeconds / 60)) minutes — auto-denied."
-        )))
+        do {
+            try await deliverPermissionResponse(.deny, for: prompt, id: id)
+            await bus.publish(.permissionAlreadyResolved(id: id, byDevice: "timeout"))
+            await bus.publish(.error(.permissionTimeout(promptID: id, action: .deny)))
+        } catch {
+            await SilentDiagnostics.shared.record(kind: .permissionDeliveryFailed,
+                                                  owner: "AgentEngine",
+                                                  summary: "Permission delivery failed on timeout",
+                                                  details: String(describing: error))
+            await bus.publish(.error(.internalInvariant(detail: "permission delivery failed: \(error)")))
+        }
     }
 
     func deliverPermissionResponse(_ decision: PermissionDecision,
@@ -582,6 +674,75 @@ public actor AgentEngine: AgentEngineCommandPort {
             try await pty?.write(ptyBytes)
             await hookServer?.respond(to: id, with: hookOut)
         }
+    }
+
+    // MARK: - Filesystem diff monitor
+
+    private func startFSWatcher(workspace: URL) async {
+        let watcher = FSEventsWatcher(workspace: workspace)
+        do {
+            try await watcher.start()
+        } catch {
+            await SilentDiagnostics.shared.record(kind: .other,
+                                                  owner: "AgentEngine",
+                                                  summary: "FSEvents watcher failed to start",
+                                                  details: String(describing: error))
+            return
+        }
+        fsWatcher = watcher
+        fsWatcherTask = Task { [weak self] in
+            for await _ in watcher.events {
+                await self?.scheduleDiffRefresh()
+            }
+        }
+        await refreshChangedFilesFromGit()
+    }
+
+    private func stopFSWatcher() async {
+        diffRefreshTask?.cancel()
+        diffRefreshTask = nil
+        fsWatcherTask?.cancel()
+        fsWatcherTask = nil
+        await fsWatcher?.stop()
+        fsWatcher = nil
+    }
+
+    private func scheduleDiffRefresh() {
+        diffRefreshTask?.cancel()
+        diffRefreshTask = Task { [weak self, clock = seams.clock] in
+            do {
+                try await clock.sleep(for: Self.diffRefreshCoalesce)
+            } catch {
+                return
+            }
+            await self?.refreshChangedFilesFromGit()
+        }
+    }
+
+    private func refreshChangedFilesFromGit() async {
+        guard let workspace else { return }
+        let diffEngine = GitDiffEngine(workspace: workspace)
+        guard let gitPaths = try? await diffEngine.changedFiles() else { return }
+        let delta = ChangedFilesReconciler.reconcile(current: changedFiles, gitPaths: gitPaths)
+        changedFiles = delta.next
+        for path in delta.added {
+            let url = workspace.appendingPathComponent(path)
+            await bus.publish(.fileTouched(url, kind: .fsObserved))
+        }
+        for path in delta.removed {
+            await bus.publish(.fileReverted(path: path))
+        }
+    }
+
+    private func relativePath(for url: URL) -> String {
+        guard let workspace else { return url.path }
+        let workspacePath = workspace.standardizedFileURL.path
+        let filePath = url.standardizedFileURL.path
+        if filePath.hasPrefix(workspacePath + "/") {
+            return String(filePath.dropFirst(workspacePath.count + 1))
+        }
+        if filePath == workspacePath { return url.lastPathComponent }
+        return url.path
     }
 
     private static func errno(from error: any Error) -> Int32 {

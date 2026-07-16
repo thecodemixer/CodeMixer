@@ -2,8 +2,10 @@ import Foundation
 
 /// Wire-protocol version carried on every frame.
 ///
-/// Bumped only for breaking changes. Additive changes (new optional fields,
-/// new enum cases gated by `unknown` decoding) keep the same major version.
+/// Bump `current` whenever a breaking wire change ships (removed fields, renamed
+/// tags, stricter decoding). Clients and servers must agree on the version —
+/// mismatches are rejected with `ServerFrame.versionMismatch`; there is no
+/// dual-speak or `unknown`-case fallback decoding across versions.
 public enum WireVersion: Int, Sendable, Codable {
     case v1 = 1
 

@@ -27,7 +27,8 @@ Derived from behavior matrices in `CONTRACT.md`:
 - Exact TUI cursor choreography — parser subset only
 - `--print` non-interactive mode
 - Deep subagent recursion (>1 level)
-- Undocumented transcript internals — `pending live verification`; hooks supply `transcript_path` / `last_assistant_message`
+- Undocumented transcript internals — hooks supply `transcript_path` / `last_assistant_message`; live harness verifies fusion policy
+- Real interactive billing path — use live harness / spikes, not the twin
 
 ## Verified against
 
@@ -35,7 +36,7 @@ Derived from behavior matrices in `CONTRACT.md`:
 | --- | --- | --- |
 | hooks-synthetic | N/A (L3) | CI default |
 | transcripts-synthetic | N/A (L3) | CI default |
-| live-capture | pending | Manual characterization |
+| live-harness | 2.1.x | Opt-in: `CODEMIXER_LIVE_CLAUDE=1` (see [`tests/AgenticCLIs/README.md`](../../../tests/AgenticCLIs/README.md)) |
 
 ## How to drive
 
@@ -53,3 +54,4 @@ Fixtures: `tests/AgenticCLIs/ClaudeCode/ClaudeAdapterTests/Fixtures/`
 
 - Contract spec: [`../CONTRACT.md`](../CONTRACT.md)
 - Conformance: `TwinDecoderParityTests`, `ConformanceFixturesTests`, `FakeClaudeIntegrationTests`
+- Live account (not twin): `LiveClaudeHarness` / `LiveClaudeIntegrationTests` in `ClaudeCodeTwinTests`

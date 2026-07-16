@@ -25,9 +25,8 @@ public struct PromptComposerView: View {
     @State private var showSlashPalette: Bool = false
     @State private var showFilePicker: Bool = false
     @State private var filePickerQuery: String = ""
-    @State private var showMemoryTip: Bool = false
-    @State private var selectedModel = ComposerModelCatalog.defaultOption
-    @State private var workspaceFiles: [String] = []
+    @State private var selectedModelID: String = ""
+    @State private var fileIndex = ComposerWorkspaceFileIndex()
     @State private var modeMenuAnchor: NSView?
     @State private var modelMenuAnchor: NSView?
     @FocusState private var focused: Bool
@@ -35,102 +34,6 @@ public struct PromptComposerView: View {
     public init(model: EngineViewModel, voice: VoiceInputService? = nil) {
         self.model = model
         self.voice = voice
-    }
-
-    @ViewBuilder
-    private var modeMenu: some View {
-        Button {
-            showModeMenu()
-        } label: {
-            modeMenuLabel
-                .background(MenuAnchorView { modeMenuAnchor = $0 })
-        }
-        .buttonStyle(.plain)
-        .fixedSize()
-        .accessibilityLabel("Mode \(thinkOn ? "Think" : (reviewOn ? "Review" : "Agent"))")
-    }
-
-    @ViewBuilder
-    private var modelMenu: some View {
-        Button {
-            showModelMenu()
-        } label: {
-            modelMenuLabel
-                .background(MenuAnchorView { modelMenuAnchor = $0 })
-        }
-        .buttonStyle(.plain)
-        .fixedSize()
-        .accessibilityLabel("Model \(selectedModel.label)")
-    }
-
-    private var modeMenuLabel: some View {
-        HStack(spacing: Theme.spacing.s4) {
-            Image(systemName: "infinity")
-                .accessibilityHidden(true)
-            Text(thinkOn ? "Think" : (reviewOn ? "Review" : "Agent"))
-            Image(systemName: "chevron.down")
-                .accessibilityHidden(true)
-                .font(Theme.typography.iconSmall)
-                .foregroundStyle(Theme.text.tertiary.opacity(Theme.opacity.secondary))
-        }
-        .padding(.horizontal, Theme.spacing.s8)
-        .padding(.top, Theme.spacing.s4)
-        .padding(.bottom, CGFloat.zero)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.corner.small)
-                .fill(Theme.surface.card.opacity(Theme.opacity.emphasized))
-                .overlay(
-                    RoundedRectangle(cornerRadius: Theme.corner.small)
-                        .stroke(Theme.surface.divider, lineWidth: Theme.stroke.hairline)
-                )
-        )
-        .foregroundStyle(Theme.text.secondary)
-    }
-
-    private var modelMenuLabel: some View {
-        HStack(spacing: Theme.spacing.s4) {
-            Text(selectedModel.label)
-                .font(Theme.typography.label)
-            Image(systemName: "chevron.down")
-                .accessibilityHidden(true)
-                .font(Theme.typography.iconSmall)
-                .foregroundStyle(Theme.text.tertiary.opacity(Theme.opacity.secondary))
-        }
-        .padding(.top, Theme.spacing.s4)
-        .padding(.bottom, CGFloat.zero)
-        .padding(.horizontal, Theme.spacing.s4)
-        .contentShape(Rectangle())
-        .foregroundStyle(Theme.text.secondary)
-    }
-
-    private func showModeMenu() {
-        DesktopMenuPresenter.popUp(items: [
-            DesktopMenuItem(title: "Agent") {
-                thinkOn = false
-                reviewOn = false
-                model.send(.toggleThinkMode(enabled: false))
-                model.send(.toggleReviewMode(enabled: false))
-            },
-            DesktopMenuItem(title: "Think") {
-                thinkOn = true
-                reviewOn = false
-                model.send(.toggleThinkMode(enabled: true))
-            },
-            DesktopMenuItem(title: "Review") {
-                thinkOn = false
-                reviewOn = true
-                model.send(.toggleReviewMode(enabled: true))
-            },
-        ], from: modeMenuAnchor)
-    }
-
-    private func showModelMenu() {
-        DesktopMenuPresenter.popUp(items: ComposerModelCatalog.options.map { option in
-            DesktopMenuItem(title: option.label) {
-                selectedModel = option
-                model.send(.selectModel(id: option.id))
-            }
-        }, from: modelMenuAnchor)
     }
 
     public var body: some View {
@@ -146,7 +49,7 @@ public struct PromptComposerView: View {
                     Image(systemName: "pencil.circle.fill")
                         .foregroundStyle(Theme.signal.info)
                         .imageScale(.small)
-                        .accessibilityLabel("Editing last message")
+                        .accessibilityHidden(true)
                     Text("Editing last message")
                         .font(Theme.typography.caption)
                         .foregroundStyle(Theme.signal.info)
@@ -183,7 +86,7 @@ public struct PromptComposerView: View {
                              attachmentAnchor: .point(.top),
                              arrowEdge: .bottom) {
                         SlashPaletteView(
-                            query: slashQuery,
+                            query: PromptComposerDraftLogic.slashQuery(from: draft),
                             commands: model.slashCommands,
                             onSelect: { command in
                                 if command.isProjectDefined {
@@ -203,7 +106,7 @@ public struct PromptComposerView: View {
                              arrowEdge: .bottom) {
                         FilePickerView(
                             query: filePickerQuery,
-                            files: workspaceFiles,
+                            files: fileIndex.files,
                             onSelect: { path in
                                 insertAtPath(path)
                                 showFilePicker = false
@@ -214,10 +117,12 @@ public struct PromptComposerView: View {
                     .layoutPriority(1)
 
                 HStack(alignment: .bottom, spacing: Theme.spacing.s8) {
-                    HStack(spacing: Theme.spacing.s24) {
-                        modeMenu
-                        modelMenu
-                    }
+                    ComposerModeModelMenus(model: model,
+                                           thinkOn: $thinkOn,
+                                           reviewOn: $reviewOn,
+                                           selectedModelID: $selectedModelID,
+                                           modeMenuAnchor: $modeMenuAnchor,
+                                           modelMenuAnchor: $modelMenuAnchor)
 
                     Spacer()
 
@@ -262,7 +167,7 @@ public struct PromptComposerView: View {
         }
         .onChange(of: model.workspace) { _, workspace in
             guard let workspace else { return }
-            refreshWorkspaceFiles(workspace)
+            fileIndex.refresh(workspace: workspace)
         }
         .onChange(of: voice?.latestTranscript) { _, transcript in
             guard let transcript, !transcript.isEmpty else { return }
@@ -270,7 +175,10 @@ public struct PromptComposerView: View {
             focused = true
         }
         .onAppear {
-            if let workspace = model.workspace { refreshWorkspaceFiles(workspace) }
+            if selectedModelID.isEmpty, let first = model.availableModels.first {
+                selectedModelID = first.id
+            }
+            if let workspace = model.workspace { fileIndex.refresh(workspace: workspace) }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 focused = true
             }
@@ -288,48 +196,22 @@ public struct PromptComposerView: View {
                              cancel: cancel)
     }
 
-    // MARK: - Draft changes → palette triggers
-
-    private var slashQuery: String {
-        // Everything after the leading "/"
-        draft.hasPrefix("/") ? String(draft.dropFirst()) : ""
-    }
-
     private func handleDraftChange(_: String, _ new: String) {
-        // Slash palette: leading "/" with no space yet.
-        let slashMatch = new.hasPrefix("/") && !new.contains(" ")
-        if slashMatch != showSlashPalette { showSlashPalette = slashMatch }
-
-        // @-file picker: draft ends with "@" followed by optional non-space chars.
-        if let match = new.lastMatch(of: /(?:^|\s)@(\S*)$/) {
-            filePickerQuery = String(match.1)
-            if !showFilePicker { showFilePicker = true }
-        } else if showFilePicker {
-            showFilePicker = false
-        }
+        let triggers = PromptComposerDraftLogic.paletteTriggers(for: new,
+                                                                 showSlashPalette: showSlashPalette,
+                                                                 showFilePicker: showFilePicker)
+        showSlashPalette = triggers.showSlashPalette
+        showFilePicker = triggers.showFilePicker
+        filePickerQuery = triggers.filePickerQuery
     }
 
     // MARK: - Drag & drop
 
     private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
-        var handled = false
-        for provider in providers {
-            if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
-                provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier) { item, _ in
-                    guard let data = item as? Data,
-                          let url = URL(dataRepresentation: data, relativeTo: nil) else { return }
-                    Task { @MainActor in self.insertFileURL(url) }
-                }
-                handled = true
-            } else if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
-                provider.loadItem(forTypeIdentifier: UTType.image.identifier) { item, _ in
-                    guard let image = item as? NSImage else { return }
-                    Task { @MainActor in self.insertImage(image) }
-                }
-                handled = true
-            }
-        }
-        return handled
+        ComposerAttachmentHandling.handleDrop(providers,
+                                              workspace: model.workspace,
+                                              insertFileURL: insertFileURL,
+                                              insertImage: insertImage)
     }
 
     private func handlePaste(_ providers: [NSItemProvider]) {
@@ -337,55 +219,24 @@ public struct PromptComposerView: View {
     }
 
     private func insertFileURL(_ url: URL) {
-        let ref: String
-        if let workspace = model.workspace,
-           url.path.hasPrefix(workspace.path) {
-            ref = "@" + url.path.replacingOccurrences(of: workspace.path + "/", with: "")
-        } else {
-            ref = "@" + url.path
-        }
+        let ref = PromptComposerDraftLogic.fileReference(for: url, workspace: model.workspace)
         insertToken(ref)
     }
 
     private func insertImage(_ image: NSImage) {
-        let sessionID = model.sessionID ?? "unknown"
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("codemixer/\(sessionID)", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let name = UUID().uuidString + ".png"
-        let dest = dir.appendingPathComponent(name)
-        if let tiff = image.tiffRepresentation,
-           let rep = NSBitmapImageRep(data: tiff),
-           let png = rep.representation(using: .png, properties: [:]) {
-            try? png.write(to: dest)
-            insertToken("@" + dest.path)
+        guard let path = ComposerAttachmentHandling.persistPastedImage(image, sessionID: model.sessionID) else {
+            return
         }
+        insertToken("@" + path)
     }
 
     private func insertToken(_ token: String) {
-        draft += (draft.isEmpty ? "" : "\n") + token
+        PromptComposerDraftLogic.insertToken(token, into: &draft)
         focused = true
     }
 
     private func insertAtPath(_ path: String) {
-        // Replace the trailing @query token.
-        if let range = draft.range(of: #"(?:^|\s)@\S*$"#,
-                                   options: [.regularExpression, .backwards]) {
-            let prefix = draft[..<range.lowerBound]
-            let sep = draft[range.lowerBound] == " " ? " " : ""
-            draft = String(prefix) + sep + "@" + path
-        } else {
-            draft += "@" + path
-        }
-    }
-
-    // MARK: - Workspace file listing
-
-    private func refreshWorkspaceFiles(_ workspace: URL) {
-        Task.detached(priority: .utility) {
-            let files = listWorkspaceFiles(in: workspace)
-            await MainActor.run { self.workspaceFiles = files }
-        }
+        PromptComposerDraftLogic.insertAtPath(path, into: &draft)
     }
 
     // MARK: - Actions
@@ -404,7 +255,7 @@ public struct PromptComposerView: View {
     }
 
     private func cancel() {
-        model.send(.cancelCurrentTurn)
+        model.cancelCurrentTurn()
     }
 
     // MARK: - Mic button + waveform
@@ -429,10 +280,6 @@ public struct PromptComposerView: View {
                 draft += "\n"
                 focused = true
             }
-            Divider()
-            Button("Memory — Coming in v1.1", systemImage: "number") {
-                showMemoryTip.toggle()
-            }
         } label: {
             Image(systemName: "ellipsis.circle")
                 .foregroundStyle(Theme.text.secondary)
@@ -441,13 +288,6 @@ public struct PromptComposerView: View {
         .menuIndicator(.hidden)
         .help("More composer actions")
         .accessibilityLabel("More composer actions")
-        .popover(isPresented: $showMemoryTip) {
-            Text("Memory features are coming in v1.1")
-                .font(Theme.typography.caption)
-                .foregroundStyle(Theme.text.secondary)
-                .padding(Theme.spacing.s12)
-                .frame(minWidth: Theme.layout.commandPaletteMinWidth)
-        }
     }
 
     @ViewBuilder
@@ -473,17 +313,17 @@ public struct PromptComposerView: View {
     }
 }
 
-private struct MenuAnchorView: NSViewRepresentable {
-    let resolve: (NSView) -> Void
-
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView(frame: .zero)
-        DispatchQueue.main.async { resolve(view) }
-        return view
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {
-        DispatchQueue.main.async { resolve(nsView) }
-    }
+#if DEBUG
+#Preview("Composer – Light") {
+    PromptComposerView(model: .previewConversation)
+        .frame(width: 640)
+        .preferredColorScheme(.light)
 }
+
+#Preview("Composer – Dark") {
+    PromptComposerView(model: .previewConversation)
+        .frame(width: 640)
+        .preferredColorScheme(.dark)
+}
+#endif
 

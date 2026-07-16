@@ -20,6 +20,7 @@ public struct EventLogView: View {
                 Spacer()
                 Button("Clear") { lines.removeAll() }
                     .buttonStyle(.bordered).controlSize(.small)
+                    .accessibilityLabel("Clear event log")
             }
             .padding(Theme.spacing.s12)
 
@@ -50,9 +51,11 @@ public struct EventLogView: View {
     private func startTailing() {
         subscriptionTask = Task {
             let sub = await bus.subscribe()
-            for await event in sub.stream {
-                let line = Line(event: event)
+            for await entry in sub.stream {
                 await MainActor.run {
+                    let line = Line(id: entry.id,
+                                    ordinal: lines.count + 1,
+                                    event: entry.event)
                     lines.append(line)
                     if lines.count > 500 { lines.removeFirst(lines.count - 500) }
                 }
@@ -62,15 +65,15 @@ public struct EventLogView: View {
 }
 
 private struct Line: Identifiable {
-    let id = UUID()
+    let id: UUID
     let timestamp: String
     let kind: String
     let body: String
     let tint: Color
 
-    init(event: AgentEvent) {
-        let f = DateFormatter(); f.dateFormat = "HH:mm:ss.SSS"
-        self.timestamp = f.string(from: Date())
+    init(id: UUID, ordinal: Int, event: AgentEvent) {
+        self.id = id
+        self.timestamp = "#\(String(format: "%04d", ordinal))"
         switch event {
         case .sessionStarted(let id, _, _):       (kind, body, tint) = ("session", id, Theme.signal.info)
         case .userTurn(_, let t):                 (kind, body, tint) = ("user", t, Theme.text.primary)
@@ -101,3 +104,10 @@ private struct Line: Identifiable {
         }
     }
 }
+
+#if DEBUG
+#Preview("Event log") {
+    EventLogView(bus: MulticastEventBus())
+        .preferredColorScheme(.light)
+}
+#endif

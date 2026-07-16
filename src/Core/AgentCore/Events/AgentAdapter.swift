@@ -99,11 +99,6 @@ public protocol AgentAdapter: Sendable {
     // MARK: Authentication
 
     func authStatus(env: ResolvedEnvironment) async -> AuthStatus
-    /// Regex used to lift "open this URL to log in" prompts out of PTY bytes.
-    /// Return nil if the adapter never emits such URLs.
-    func authURLPattern() -> NSRegularExpression?
-    /// Argv to inject after spawn to start a login flow (e.g. `["/login"]`).
-    func loginCommandArgv() -> [String]?
 
     // MARK: Capability declaration
 
@@ -133,9 +128,11 @@ public protocol AgentAdapter: Sendable {
     func listResumableSessions(workspace: URL) async -> [SessionSummary]
     func resumeArgvAddition(sessionID: String) -> [String]
 
-    // MARK: Tool rendering
+    // MARK: Model catalog
 
-    func toolRenderHint(toolName: String, input: ToolInput) -> ToolRenderHint
+    /// Models the adapter exposes for composer / toolbar selection. Default
+    /// empty — adapters with a `/model` command override.
+    func availableModels() -> [AgentModelOption]
 
     // MARK: Hook configuration (optional)
 
@@ -170,6 +167,8 @@ public extension AgentAdapter {
     func truncateTranscript(afterUserTurnID turnID: String,
                             sessionID: String,
                             workspace: URL) async -> Bool { false }
+
+    func availableModels() -> [AgentModelOption] { [] }
 }
 
 /// Process-wide registry. UI surfaces resolve adapters through this rather

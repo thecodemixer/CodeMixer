@@ -11,15 +11,18 @@ public enum ClaudeCodeTwinHookEmitter {
         public var workspace: URL
         public var claudeDirectory: URL
         public var permissionMode: String
+        public var runtime: TwinRuntimeSeams
 
         public init(sessionID: String,
                     workspace: URL,
                     claudeDirectory: URL,
-                    permissionMode: String = "default") {
+                    permissionMode: String = "default",
+                    runtime: TwinRuntimeSeams = .live) {
             self.sessionID = sessionID
             self.workspace = workspace
             self.claudeDirectory = claudeDirectory
             self.permissionMode = permissionMode
+            self.runtime = runtime
         }
 
         public var transcriptPath: String {
@@ -65,7 +68,7 @@ public enum ClaudeCodeTwinHookEmitter {
         body["tool_input"] = input
         if needsPermission {
             body["needs_permission"] = true
-            body["permission_id"] = "perm_\(UUID().uuidString.prefix(8))"
+            body["permission_id"] = (context?.runtime ?? .live).permissionID()
         }
         return json(body)
     }

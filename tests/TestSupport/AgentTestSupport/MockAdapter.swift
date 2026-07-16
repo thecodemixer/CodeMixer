@@ -37,8 +37,6 @@ public final class MockAdapter: AgentAdapter, @unchecked Sendable {
     public func buildLaunchArgv(context: LaunchContext) -> [String] { ["true"] }
 
     public func authStatus(env: ResolvedEnvironment) async -> AuthStatus { .authenticated(account: "mock") }
-    public func authURLPattern() -> NSRegularExpression? { nil }
-    public func loginCommandArgv() -> [String]? { nil }
 
     public func makeEventStream(inputs: AgentInputs) -> AsyncStream<AgentEvent> {
         AsyncStream { continuation in
@@ -64,7 +62,4 @@ public final class MockAdapter: AgentAdapter, @unchecked Sendable {
     public func enumerateProjectCommands(workspace: URL) async -> [SlashCommand] { [] }
     public func listResumableSessions(workspace: URL) async -> [SessionSummary] { [] }
     public func resumeArgvAddition(sessionID: String) -> [String] { [] }
-    public func toolRenderHint(toolName: String, input: ToolInput) -> ToolRenderHint {
-        .raw(json: input.jsonPayload ?? "")
-    }
 }

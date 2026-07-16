@@ -42,9 +42,23 @@ private let _agentIDs: [AgentID] = [
 
 // AgentCapabilities
 private let _caps: AgentCapabilities = [
-    .hooksOverUDS, .transcriptJSONL, .streamJSONStdio,
+    .hooksOverUDS, .transcriptJSONL,
     .ptyTUIFallback, .permissionPrompts, .resumableSessions,
 ]
+private let _shippingAgents = AgentID.shipping
+
+// Policy constants (compile-time refs only)
+private let _pinTTL = RemoteAuthTiming.pinTTL
+private let _lockoutSeconds = RemoteAuthTiming.lockoutSeconds
+private let _maxAttempts = RemoteAuthTiming.maxAttempts
+private let _idleCheck = DaemonDefaults.idleCheckInterval
+private let _idleExit = DaemonDefaults.idleExitAfterChecks
+private let _idlePhrase = ActivityTiming.idlePhrase
+private let _thinkingPhrase = ActivityTiming.thinkingPhrase
+private let _bonjourType = RemoteDefaults.bonjourServiceType
+private let _bonjourName = RemoteDefaults.bonjourServiceName
+private let _bonjourVer = RemoteDefaults.bonjourTXTVersion
+private let _p12Name = AppSupportPaths.remoteServerP12FileName
 
 // PermissionPrompt
 private let _pp = PermissionPrompt(
@@ -60,15 +74,6 @@ private let _to = ToolOutput(summary: "s")
 private let _tpBash    = ToolProgress.bashLine("x")
 private let _tpFile    = ToolProgress.fileBytes(written: 1, total: nil)
 private let _tpGeneric = ToolProgress.generic(message: "x")
-
-// ToolRenderHint
-private let _trhBash   = ToolRenderHint.bashStreaming(initialCommand: "ls")
-private let _trhEdit   = ToolRenderHint.fileEdit(path: URL(fileURLWithPath: "/"), language: nil)
-private let _trhRead   = ToolRenderHint.fileRead(path: URL(fileURLWithPath: "/"), language: nil)
-private let _trhSearch = ToolRenderHint.fileSearch(pattern: "*")
-private let _trhFetch  = ToolRenderHint.webFetch(url: URL(string: "https://example.com")!)
-private let _trhMCP    = ToolRenderHint.mcpTool(serverName: "s", toolName: "t")
-private let _trhRaw    = ToolRenderHint.raw(json: "{}")
 
 // AuthStatus
 private let _asAuthenticated = AuthStatus.authenticated(account: nil)
@@ -192,13 +197,14 @@ private func _busReconnectAPI(_ bus: MulticastEventBus) async {
 
 // ServerFrame.subscribed — checked at type level
 private func _serverFrameSubscribed() -> [ServerFrame] {
-    [.subscribed(latestEventID: nil), .subscribed(latestEventID: UUID())]
+    [.subscribed(latestEventID: nil, outcome: .fresh),
+     .subscribed(latestEventID: UUID(), outcome: .resumed)]
 }
 
 // ClientFrame.subscribe with lastSeenEventID — checked at type level
 private func _clientFrameSubscribe() -> [ClientFrame] {
-    [.subscribe(streams: [.events], lastSeenEventID: nil),
-     .subscribe(streams: [.events], lastSeenEventID: UUID())]
+    [.subscribe(lastSeenEventID: nil),
+     .subscribe(lastSeenEventID: UUID())]
 }
 
 // NetworkConnectionMetadata — checked at type level
@@ -234,7 +240,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // AgentEventWire
 // AgentID
 // AgentInputs
-// AgentState
+// AgentModelOption
 // AppIdentity
 // AppSupportPaths
 // AppearancePrefKey
@@ -282,6 +288,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // ClientError
 // ClientFrame
 // CodeBlock
+// CodemixerResources
 // CommandPaletteView
 // CommandShape
 // Configuration
@@ -292,6 +299,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // ConversationSnapshot
 // ConversationView
 // CostBadgeView
+// DaemonDefaults
 // DebugTerminalSheet
 // DesktopActions
 // DesktopMenuItem
@@ -378,7 +386,9 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // PromptComposerView
 // RandomSource
 // RawEvent
+// ReconnectPolicy
 // Record
+// RemoteAuthTiming
 // RemoteControlServer
 // RemoteDefaults
 // RemoteEngineClient
@@ -403,6 +413,8 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // ShellEnvironmentResolver
 // ShimmerDots
 // SidecarError
+// SilentDiagnostics
+// SilentDiagnosticsView
 // SlashCommand
 // SnapshotKind
 // SnapshotMessage
@@ -417,7 +429,8 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // StopReason
 // StoreError
 // StreamBufferDefaults
-// SubscribableStream
+// SubscribeOutcome
+// SubscribeReplayOutcome
 // Subscription
 // SystemClock
 // SystemEnvironment
@@ -439,10 +452,10 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // ToolInput
 // ToolOutput
 // ToolProgress
-// ToolRenderHint
 // TranscriptLine
 // Trigger
 // Turn
+// TwinRuntimeSeams
 // Usage
 // UserNotificationBridge
 // VoiceInputService
@@ -458,7 +471,6 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // WorkspaceChip
 // WorkspaceProjectsStore
 // WorkspaceScene
-// WorkspaceTreeSnapshot
 // account
 // action
 // activityDotSize
@@ -491,19 +503,23 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // attachmentTTL
 // attachmentsDirectory
 // attachmentsDirectoryName
+// attachmentsPath
 // attemptPair
 // authGateContentMaxWidth
 // authGateMinHeight
 // authGateMinWidth
 // authStatus
 // authURL
-// authURLPattern
 // autoApprovalRules
+// availableModels
 // banner
 // bearerToken
 // bell
 // bind
 // body
+// bonjourServiceName
+// bonjourServiceType
+// bonjourTXTVersion
 // bootstrap
 // boundPort
 // bubble
@@ -531,6 +547,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // chip
 // chooseDirectoryPanel
 // claudeDirectory
+// clear
 // clearPendingExport
 // clientCount
 // clock
@@ -563,6 +580,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // currentSchemaVersion
 // currentState
 // cursorRow
+// daemon
 // danger
 // data
 // debugTerminalMinHeight
@@ -578,6 +596,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // deletions
 // densityMode
 // description
+// details
 // deviceName
 // diff
 // diffPanelMinWidth
@@ -606,7 +625,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // endTurn
 // engine
 // ensureDirectory
-// entries
+// ensureParentDirectory
 // enumerate
 // enumerateProjectCommands
 // env
@@ -644,6 +663,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // headByteBudget
 // header
 // headers
+// healthPath
 // heroIcon
 // hint
 // historySnapshot
@@ -663,11 +683,15 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // iconSymbol
 // id
 // identity
+// idleCheckInterval
+// idleExitAfterChecks
+// idlePhrase
 // importIdentity
 // incoming
 // index
 // info
 // ingest
+// initialDelay
 // input
 // input_tokens
 // install
@@ -700,6 +724,9 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // launchAgentInstalled
 // launchAgentLabel
 // launchAgentPlistName
+// launchAgentStderrPath
+// launchAgentStdoutPath
+// launchAgentThrottleIntervalSeconds
 // layout
 // leaving
 // level
@@ -715,8 +742,8 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // loadSessions
 // locate
 // locateBinary
+// lockoutSeconds
 // logSubsystem
-// loginCommandArgv
 // loopbackHost
 // macUI
 // makeCertificates
@@ -727,6 +754,8 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // match
 // matchCount
 // matchingRule
+// maxAttempts
+// maxDelay
 // medium
 // message
 // messageCount
@@ -734,6 +763,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // messages
 // metadata
 // mimeType
+// minAttemptInterval
 // model
 // modificationDate
 // mono
@@ -774,6 +804,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // outboundReplies
 // output
 // output_tokens
+// owner
 // pairedAt
 // pairedDevices
 // pairedDevicesService
@@ -784,11 +815,13 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // path
 // pause
 // payload
+// permissionID
 // permissionMode
 // permissionPrompts
 // permissionResponse
 // phrase
 // pin
+// pinTTL
 // plainTCP
 // plainWebSocket
 // popUp
@@ -811,7 +844,6 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // projects
 // prompt
 // promptReady
-// startupPromptReady
 // promptWithShortcutFooter
 // prose
 // ptyChunks
@@ -829,9 +861,12 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // rawValue
 // read
 // readData
+// readDataIfPresent
 // recent
 // recents
 // reconfigure
+// reconnect
+// record
 // recordOpen
 // recordUUID
 // reduceMotion
@@ -844,6 +879,8 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // remoteCertificatePasswordService
 // remoteEnabled
 // remoteOnly
+// remoteServerP12FileName
+// remoteServerP12URL
 // remoteSettingsMinHeight
 // remove
 // removeProject
@@ -870,11 +907,11 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // revoke
 // revokeToken
 // role
-// root
 // rotate
 // row
 // rows
 // run
+// runtime
 // s12
 // s16
 // s24
@@ -913,12 +950,16 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // shellCommand
 // shimmer
 // shimmerPhaseStep
+// shipping
+// showSilentRecoveryLog
 // showUsageChip
 // shutdown
 // sidebarVisible
 // sidecarPort
 // signal
 // signature
+// silentDiagnostics
+// silentDiagnosticsPath
 // skipParagraph
 // slashCommandCatalog
 // slashCommands
@@ -940,6 +981,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // startNewPairing
 // startPairing
 // startTurn
+// startupPromptReady
 // startupSubmitRecoveryDelay
 // state
 // status
@@ -954,7 +996,6 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // stopListening
 // store
 // stream
-// streamJSONStdio
 // stroke
 // subagentAssistantLine
 // subagentLines
@@ -962,6 +1003,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // subagentType
 // subagentsDirectory
 // subscribe
+// subscribeWithOutcome
 // subscriberCount
 // substate
 // subtitle
@@ -985,6 +1027,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // text
 // textContent
 // theme
+// thinkingPhrase
 // timestamp
 // tint
 // title
@@ -994,7 +1037,6 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // tokens
 // toolIndex
 // toolName
-// toolRenderHint
 // toolResultLine
 // toolUseID
 // transcriptEvents
@@ -1004,7 +1046,6 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // transport
 // truncateTranscript
 // tts
-// turnID
 // turns
 // txt
 // type
@@ -1028,6 +1069,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // userPromptSubmit
 // userTurnEchoWindow
 // uuid
+// uuidString
 // validateToken
 // variable
 // variables

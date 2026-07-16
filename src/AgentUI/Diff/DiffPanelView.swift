@@ -282,3 +282,17 @@ private struct HunkView: View {
         switch kind { case .addition: Theme.diff.addition; case .deletion: Theme.diff.deletion; case .context: Theme.diff.context }
     }
 }
+
+#if DEBUG
+#Preview("Diff panel – Light") {
+    DiffPanelView(model: .previewConversation, workspace: PreviewFixtures.workspace)
+        .frame(width: 720, height: 420)
+        .preferredColorScheme(.light)
+}
+
+#Preview("Diff panel – Dark") {
+    DiffPanelView(model: .previewConversation, workspace: PreviewFixtures.workspace)
+        .frame(width: 720, height: 420)
+        .preferredColorScheme(.dark)
+}
+#endif

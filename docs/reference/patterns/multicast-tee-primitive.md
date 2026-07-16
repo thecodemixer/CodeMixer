@@ -247,8 +247,8 @@ The plain `Tee` is the right primitive when you don't need replay (e.g. raw byte
 ## Codemixer instance
 
 - `AgentEngine.start()` uses a local inline fan-out for PTY bytes to both `TerminalEngine` and the adapter's event stream.
-- `MulticastEventBus` is the replay-aware multicast for `AgentEvent`.
-- This pattern remains reference material for future small fan-out needs; it is not a concrete production type today.
+- `MulticastEventBus` is the replay-aware multicast: `HistoryEntry`-tagged events, `subscribe(after:)`, `subscribeWithOutcome`, and self-cleaning `onTermination` unsubscribe.
+- FSEvents-driven diff refresh lives in `AgentEngine` (not in the adapter's `makeEventStream`).
 
 See [docs/architecture.md §§9, 14](../../architecture.md) for the Codemixer narrative.
 

@@ -1,7 +1,7 @@
 # Claude Code Contract (Codemixer)
 
-Version: 2026-06-25  
-Sources: [Anthropic hooks reference](https://code.claude.com/docs/en/hooks.md), [permissions](https://code.claude.com/docs/en/permissions), Codemixer adapter code, synthetic fixtures (`L3`).
+Version: 2026-07-16  
+Sources: [Anthropic hooks reference](https://code.claude.com/docs/en/hooks.md), [permissions](https://code.claude.com/docs/en/permissions), Codemixer adapter code, synthetic fixtures (`L3`), live harness (`CODEMIXER_LIVE_CLAUDE=1`).
 
 This document is the **executable specification** for what Codemixer expects from the `claude` CLI. The digital twin (`digital-twin/`) implements this contract; `ClaudeAdapter` consumes it.
 
@@ -41,6 +41,29 @@ Use `hook_event_name`, `tool_input`, `tool_response`, `tool_use_id`, `tool_name`
 
 `stop_hook_active`, `last_assistant_message`, `background_tasks`, `session_crons`.
 
+### Assistant-text fusion (`L1`)
+
+Claude can deliver the same final reply twice: once via transcript JSONL and once
+via Stop `last_assistant_message`. Codemixer policy:
+
+1. **Transcript is canonical** for final `assistantText`.
+2. On Stop/SubagentStop, drain the transcript, then emit hook events.
+3. If the tailer has already emitted `assistantText` for the session, **drop**
+   Stop/SubagentStop `assistantText` from the hook decoder output (keep idle /
+   other Stop side-effects).
+4. If the transcript never emitted, keep `last_assistant_message` as fallback.
+
+Tests: `ClaudeAdapterEventStreamTests` (synthetic), `LiveClaudeIntegrationTests`
+(`finalAssistantTextCount == 1` when opted in).
+
+### Interactive launch argv (`L0`)
+
+Codemixer spawns `claude` under a PTY with optional `--permission-mode` /
+`--resume` only. Forbidden on the production path: `-p`, `--print`,
+`--input-format`, `--output-format`, `stream-json`. Live sessions should record
+`entrypoint: "cli"` / `promptSource: "typed"` in transcript user records
+(not `sdk-cli` / `sdk`).
+
 ### Settings
 
 Project-local `.claude/settings.local.json` with `hooks` object. Precedence: managed policy → CLI → `.claude/settings.local.json` → `.claude/settings.json` → `~/.claude/settings.json`.
@@ -49,7 +72,7 @@ Project-local `.claude/settings.local.json` with `hooks` object. Precedence: man
 
 ## Behavior Matrices
 
-Status: `handled` = adapter + twin scenario + test; `unhandled` = triage pending; `ledger` = intentional gap.
+Status: `handled` = adapter + twin scenario + test; `ledger` = intentional deferred gap. There are **zero `unhandled` rows** in the matrices below — anything not handled is explicitly `ledger`.
 
 ### Hook events (`ClaudeHookDecoder`)
 
@@ -60,12 +83,12 @@ Status: `handled` = adapter + twin scenario + test; `unhandled` = triage pending
 | PreToolUse | handled | handled | TwinDecoderParityTests |
 | PostToolUse | handled | handled | TwinDecoderParityTests |
 | Notification | handled | handled | TwinDecoderParityTests |
-| Stop | handled (idle) | handled | TwinDecoderParityTests |
-| SubagentStop | handled (idle) | handled | ConformanceFixtures |
-| PermissionRequest | unhandled | ledger | — |
-| PostToolUseFailure | unhandled | ledger | — |
-| PostToolBatch | unhandled | ledger | — |
-| SubagentStart | unhandled | ledger | — |
+| Stop | handled (idle; `last_assistant_message` fallback after transcript drain) | handled | TwinDecoderParityTests, ClaudeAdapterEventStreamTests |
+| SubagentStop | handled (idle; same assistant-text fusion as Stop) | handled | ConformanceFixtures, ClaudeAdapterEventStreamTests |
+| PermissionRequest | ledger | ledger | — |
+| PostToolUseFailure | ledger | ledger | — |
+| PostToolBatch | ledger | ledger | — |
+| SubagentStart | ledger | ledger | — |
 
 ### Transcript record types (`ClaudeTranscriptTailer`)
 
@@ -103,11 +126,12 @@ PTY permission bytes: `1\r` allow, `2\r` allow-always, `3\r` deny (+ hook stdout
 | --- | --- | --- |
 | hooks-synthetic | N/A (L3) | CI default |
 | transcripts-synthetic | N/A (L3) | CI default |
-| live-capture | pending | Manual; requires logged-in `claude` |
+| live-harness | 2.1.x (logged-in `claude`) | Opt-in: `CODEMIXER_LIVE_CLAUDE=1` → `LiveClaudeIntegrationTests` |
+| live-spikes | same | Manual: `scripts/spike-billing.swift`, `scripts/spike-events.swift` |
 
-Minimum supported: TBD after first live capture. Last verified: synthetic-only (2026-06-25).
+Minimum supported interactive CLI: last verified with live harness against Claude Code **2.1.211** (2026-07-16) — PTY spawn, SessionStart hooks, transcript `assistantText`, billing markers `entrypoint: cli` / `promptSource: typed`.
 
-When live capture is unavailable, rows stay `L2`/`L3` and are marked `pending live verification` in matrices above.
+CI stays synthetic (`L3`). Live rows are opt-in so agents/CI without credentials stay green.
 
 ---
 
@@ -121,6 +145,7 @@ When live capture is unavailable, rows stay `L2`/`L3` and are marked `pending li
 | Exact TUI cursor choreography | Only need parser subset | ClaudeTUIFallback patterns |
 | `--print` non-interactive mode | Codemixer uses PTY only | Documented |
 | Deep subagent recursion (>1) | Twin caps at one level | Extend twin if needed |
+| PermissionRequest / PostToolUseFailure / PostToolBatch / SubagentStart hooks | Not Codemixer-critical v1; permission UX uses PreToolUse + PTY | Ledger; add when fixtures prove need |
 | Undocumented transcript internals | No public schema | Hooks supply `transcript_path`, `last_assistant_message` |
 | Long-tail hook events | Not Codemixer-critical v1 | Ledger; add when fixtures prove need |
 

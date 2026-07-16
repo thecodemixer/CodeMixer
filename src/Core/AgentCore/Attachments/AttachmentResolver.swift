@@ -13,8 +13,9 @@ public actor AttachmentResolver {
 
     public init(environment: any AgentEnvironment,
                 fileSystem: any FileSystem) {
-        self.attachmentsDirectory = environment.appSupportDirectory
-            .appendingPathComponent("attachments", isDirectory: true)
+        self.attachmentsDirectory = AppSupportPaths.attachmentsDirectory(
+            in: environment.appSupportDirectory
+        )
         self.fileSystem = fileSystem
     }
 

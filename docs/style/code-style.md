@@ -85,7 +85,7 @@ See `PTYHost.swift`, the reference exemplar.
 
 ### 1.2 Types encode invariants, not just data
 
-A type is a proof. If a `Session` cannot exist without an `id`, its `id` is non-optional even if it complicates construction. If an `AgentState` cannot be both `.idle` and `.runningTool`, those are cases of one enum, not two booleans.
+A type is a proof. If a `Session` cannot exist without an `id`, its `id` is non-optional even if it complicates construction. If the engine cannot be both `.stopped` and `.running`, those are cases of one enum (`EngineState`), not two booleans.
 
 **Tools:** enums with associated values, phantom types, non-empty collections, `Result`, the `Either`-shaped enum.
 
@@ -569,8 +569,6 @@ func heartbeatTickRate() async throws {
 tests/Remote/RemoteParityTests/
 ├── WireCodecParityTests.swift
 ├── CommandDispatchParityTests.swift
-└── Fixtures/                      # golden wire-frame JSON (version-controlled)
-    └── README.md
 
 tests/AgenticCLIs/ClaudeCode/ClaudeAdapterTests/
 ├── ClaudeHookDecoderTests.swift   # inline JSONL / hook payloads in test sources
@@ -582,7 +580,7 @@ tests/Core/AgentCoreTests/
 └── …
 ```
 
-- **Wire goldens** live under `tests/Remote/RemoteParityTests/Fixtures/` (processed as SPM resources).
+- Wire goldens and round-trip cases live in `tests/Remote/RemoteParityTests/` (inline in test sources; no separate Fixtures directory).
 - **Parser / hook / transcript payloads** are usually inline in the matching suite under `tests/Core/…`, `tests/AgenticCLIs/…`, or `tests/Remote/…`.
 - When a suite needs binary or large on-disk data, add a co-located `Fixtures/` subfolder next to that suite and hide paths behind a static factory (e.g. `Fixtures.helloWorldSession()`).
 
@@ -1018,7 +1016,7 @@ Otherwise, let synthesis do its job. Don't write boilerplate.
 
 ### Wire DTOs vs domain types
 
-Wire types (`AgentEventWire`, `ClientFrame`, etc.) live in `AgentProtocol` (Foundation-only, no platform deps). Domain types (`AgentEvent`, `AgentState`) live in `AgentCore` and use `URL`, `Date`, `Duration`. A `WireCodec` in `AgentProtocol` translates between them at the network boundary.
+Wire types (`AgentEventWire`, `ClientFrame`, etc.) live in `AgentProtocol` (Foundation-only, no platform deps). Domain types (`AgentEvent`, `EngineState`) live in `AgentCore` and use `URL`, `Date`, `Duration`. `WireCodec` in `AgentCore` translates between them at the network boundary.
 
 ```swift
 // In AgentProtocol
@@ -1365,97 +1363,49 @@ let prefsURL = appSupport
     .appendingPathComponent("prefs.json")
 ```
 
-- **`prefs.json`** at the resolved `prefsURL` — on macOS this is `~/Library/Application Support/com.codecave.Codemixer/prefs.json`; on iOS / iPadOS / visionOS it resolves inside the app's container. Atomic writes via temp + `rename(2)`. Schema-versioned.
-- **`SessionStore` JSON** at the same directory for session metadata.
-- **Keychain** [Apple cross-platform] for secrets (TLS certs, bearer tokens).
-- **`UserDefaults`** is **forbidden** for application config. (It's allowed for system-owned state like window frames [macOS] or SwiftUI `@SceneStorage` — that's not our config.)
+- **`prefs.json`** at `AppSupportPaths.prefsURL` — on macOS: `~/Library/Application Support/com.codecave.Codemixer/prefs.json`. Atomic writes via temp + `rename(2)`. Holds `AppearancePrefs` + auto-approval rules (not a monolithic versioned `Prefs` blob).
+- **`sessions.json`** — recent projects (`SessionStore`).
+- **`workspaces.json`** — navigator model; **only this file** carries an explicit `schemaVersion`.
+- **Keychain** for secrets (TLS P12 password, paired-device token hashes).
+- **`UserDefaults`** is **forbidden** for application config.
 
-### Schema
+### Quiet-reset policy (no migrators)
 
-```swift
-public struct Prefs: Codable, Sendable {
-    public var schemaVersion: Int = 1
-    public var appearance: AppearancePrefs
-    public var voice: VoicePrefs
-    public var permissions: PermissionPrefs
-    public var remote: RemotePrefs
-    public var ui: UIPrefs
-    // ...
-}
-```
+When a persistence file cannot be decoded:
 
-Every nested struct is `Codable` with explicit `CodingKeys` (§14). Defaults are defined as a single `Prefs.default` static.
+1. Reset to in-memory defaults (empty list or `AppearancePrefs()` defaults).
+2. Record `SilentDiagnostics.shared.record(...)` with the appropriate `Kind` (`prefsQuietReset`, `sessionsQuietReset`, etc.).
+3. Do **not** show a toast or blocking dialog.
 
-### Migration
-
-When the schema changes, increment `schemaVersion` and write a migrator in `PrefsMigrator.swift`:
-
-```swift
-public enum PrefsMigrator {
-    public static func migrate(_ data: Data) throws -> Prefs {
-        let raw = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
-        let version = raw["schemaVersion"] as? Int ?? 0
-        switch version {
-        case 0:   return try migrateV0toV1(raw)
-        case 1:   return try JSONDecoder().decode(Prefs.self, from: data)
-        default:  throw PrefsError.unsupportedSchemaVersion(version)
-        }
-    }
-}
-```
-
-Every migration is unit-tested with a golden fixture of the old version.
+There is no `PrefsMigrator.swift`. New appearance keys use `decodeIfPresent` with defaults in `AppearancePrefs.init(from:)`.
 
 ### Defaults
 
-`Prefs.default` declares every default at one site. Never inline defaults in usage code (`prefs.appearance.alwaysShowControls ?? false` is wrong — `Prefs.default.appearance.alwaysShowControls` is right).
+`AppearancePrefs()` and store empty states declare defaults at one site. Never inline defaults in usage code.
 
 ---
 
 ## 21. Localization
 
-Even though v1 ships English-only, the localization seam exists from day one.
+v1 ships **English-only**. User-facing strings use `LocalizedStringKey` literals where practical so a future catalog can land without rewiring views.
 
-### `LocalizedStringKey` everywhere user-facing
+### `LocalizedStringKey` for user-facing copy
 
 ```swift
 Text("Sign in to Claude")           // OK — LocalizedStringKey by literal
-Text(error.userFacingMessage)       // OK — userFacingMessage returns LocalizedStringKey
-Text(String(describing: error))     // ⚠ — bypasses localization
-Text(verbatim: someDynamicString)   // OK — explicitly verbatim (file paths, names)
+Text(error.userFacingMessage)       // OK when userFacingMessage is localized
+Text(verbatim: someDynamicString)   // OK — file paths, agent names, IDs
 ```
 
 ### Never concatenate localized strings
 
-Bad:
-
-```swift
-Text("Hello, ") + Text(userName) + Text("!")
-```
-
-Good — use string-format placeholders (`.stringsdict` for plurals):
-
-```swift
-Text("Hello, \(userName)!")
-```
-
-### Strings file
-
-`src/AgentUI/Resources/Localizable.xcstrings` (Xcode string catalog) — every user-facing string registered. CI fails if a `Text` literal isn't in the catalog.
-
-### Pluralization
-
-`.stringsdict` plural rules for any string with a count:
-
-```swift
-Text("^[\(count) file](inflect: true) changed")
-```
+Use format placeholders instead of `Text("Hello, ") + Text(name)`.
 
 ### Verbatim strings
 
-File paths, URLs, IDs, agent names — these are *not* localized. Use `Text(verbatim:)`.
+File paths, URLs, IDs, agent names — use `Text(verbatim:)`.
 
-### Non-Latin scripts
+There is **no** checked-in localization CI gate and no requirement for `Localizable.xcstrings` coverage in v1.
 
 - Use `Locale.current` for date / number formatting.
 - Test layouts at extreme widths (German concatenations, Chinese character density).
@@ -1624,29 +1574,11 @@ Minimal opinionated `.swiftlint.yml`:
 
 ### Pre-commit hook
 
-Runs SwiftFormat (write-mode), SwiftLint (lint-mode), and a fast `swift build -Xswiftc -parse-only` check. No commits without passing.
+`scripts/pre-commit.swift` runs `swift build`, `swift test --no-parallel`, SwiftFormat lint, and SwiftLint. This is a **narrow** gate — see `scripts/README.md` and `AGENTS.md` for the full manual merge checklist.
 
-### CI
+### Automation
 
-GitHub Actions on macOS-14 [macOS — Codemixer ships a macOS app; iOS / iPadOS targets would add an `iOS-latest` simulator job]:
-
-- `swift build -Xswiftc -warnings-as-errors`
-- `swift test --warnings-as-errors`
-- `-strict-concurrency=complete`
-- `scripts/check-a11y.swift` — scans SwiftUI files for icon-only `Button(...)` without `.accessibilityLabel`
-- Headless build job — greps the daemon binary's symbol table; fails if any `SwiftUI` symbol present
-- DocC build — generated docs must compile without warnings; symbol coverage ≥90% of public surface
-- Benchmark job (separate, non-blocking) — reports performance vs baseline; ≥10% regression auto-comments on the PR
-- `protocol-only` job — builds `AgentProtocol` with iOS conditional to verify mobile-client portability
-- `tests-remote-parity` job — runs the `AgentCommand` ↔ UI ↔ wire-decoder parity guard
-
-### CODEOWNERS
-
-`docs/style/code-style.md` and the `code-quality-tooling` configs (`.swiftformat`, `.swiftlint.yml`) have a style-conscious code-owner who reviews changes to them.
-
-### PR template
-
-`.github/pull_request_template.md` contains the §23 template and the §26 checklist as a collapsed `<details>` section.
+There is **no** checked-in GitHub Actions workflow (`.github/` may be absent). Run the merge gate commands locally before opening a PR.
 
 ---
 
@@ -1662,7 +1594,7 @@ Every reviewer reads these questions aloud (literally, in their head) before app
 6. **Does this match the rhythm of `PTYHost`?**
 7. **Would I write this exactly this way in two years?** If not, it's not done.
 8. **Are concurrency boundaries deliberate? Any new `Task {}` outside the three legal sites? Any new `@unchecked Sendable` without a proof?**
-9. **Are typed errors used wherever they can be? Any `throws -> any Error` introduced?**
+9. **Are typed errors used wherever they can be?** (Plain `throws` with dedicated enums — not `throws(any Error)`.)
 10. **Is every privacy level explicit in every new `Logger` call?**
 11. **Is every user-facing string a `LocalizedStringKey` (or explicitly `verbatim`)?**
 12. **Does this PR introduce a new dependency? If yes — license, size, last-commit date, alternative considered?**
@@ -1701,7 +1633,7 @@ A PR introducing novelty answers in its description: *what does this enable that
 ### Specifically
 
 - **Swift 6 strict concurrency**: required everywhere.
-- **Typed throws**: used at every layer that has a stable error vocabulary (most of Codemixer).
+- **Typed throws (`throws(MyError)`)**: not used in this codebase today; prefer dedicated `Error` enums with plain `throws`.
 - **`borrowing` / `consuming`** parameters: used only with measurement (§17).
 - **Macros (Swift 5.9+)**: allowed sparingly. `#expect`, `#require` (Swift Testing) are fine — they're standard library. Custom macros require a design review.
 - **Variadic generics**: allowed where they meaningfully simplify a call site.

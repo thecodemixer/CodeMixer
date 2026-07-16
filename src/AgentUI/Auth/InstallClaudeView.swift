@@ -26,7 +26,7 @@ public struct InstallClaudeView: View {
 
             HStack(spacing: Theme.spacing.s12) {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .accessibilityLabel("Claude Code not found")
+                    .accessibilityHidden(true)
                     .font(Theme.typography.iconLarge)
                     .foregroundStyle(Theme.signal.warning)
                 VStack(alignment: .leading, spacing: Theme.spacing.s4) {
@@ -104,3 +104,10 @@ public struct InstallClaudeView: View {
         .frame(minWidth: Theme.layout.installMinWidth, maxWidth: Theme.layout.installMaxWidth)
     }
 }
+
+#if DEBUG
+#Preview("Install Claude") {
+    InstallClaudeView(hint: PreviewFixtures.installHint, onDismiss: {})
+        .preferredColorScheme(.light)
+}
+#endif

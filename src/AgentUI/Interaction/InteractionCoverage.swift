@@ -21,7 +21,6 @@ public enum InteractionCoverage {
         case runSlashCommand
         case runCustomCommand
         case respondToPermission
-        case respondToInlinePrompt
         case openProject
         case closeSession
         case speakAssistantBubble
@@ -55,11 +54,5 @@ public enum InteractionCoverage {
         .requestSnapshot,
     ]
 
-    public static let remoteOnly: Set<CommandShape> = [
-        // The inline TUI fallback is surfaced by remote clients that model a
-        // pending prompt. The Mac UI currently sends free-form answers through
-        // the composer as normal prompts until the adapter emits a typed inline
-        // prompt event.
-        .respondToInlinePrompt,
-    ]
+    public static let remoteOnly: Set<CommandShape> = []
 }

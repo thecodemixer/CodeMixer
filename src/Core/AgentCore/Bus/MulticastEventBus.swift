@@ -5,9 +5,9 @@ import OSLog
 ///
 /// Subscribers each receive an `AsyncStream<AgentEvent>` independent of any
 /// other subscriber's consumption speed (back-pressure is per-stream:
-/// `bufferingOldest(StreamBufferDefaults.eventHistory)` so a slow client drops oldest events rather than
-/// stalling fast ones). On subscribe, the client also receives the rolling
-/// `StreamBufferDefaults.eventHistory` history so reconnecting remote clients catch up without losing
+/// `.bufferingOldest(historyLimit)` drops the oldest pending event for that
+/// subscriber when its queue is full, rather than stalling the bus). On
+/// subscribe, the client also receives the rolling `StreamBufferDefaults.eventHistory`
 /// recent context.
 ///
 /// Each published event is tagged with a bus-assigned `UUID` in
@@ -26,14 +26,14 @@ public actor MulticastEventBus {
 
     public struct Subscription: Sendable {
         public let id: UUID
-        public let stream: AsyncStream<AgentEvent>
+        public let stream: AsyncStream<HistoryEntry>
     }
 
     private let log = Logger(subsystem: AppIdentity.logSubsystem, category: "EventBus")
     private let random: any RandomSource
     private let historyLimit: Int
     private var history: [HistoryEntry] = []
-    private var continuations: [UUID: AsyncStream<AgentEvent>.Continuation] = [:]
+    private var continuations: [UUID: AsyncStream<HistoryEntry>.Continuation] = [:]
 
     public init(historyLimit: Int = StreamBufferDefaults.eventHistory,
                 random: any RandomSource = SystemRandomSource()) {
@@ -63,9 +63,13 @@ public actor MulticastEventBus {
     ///   for a client that just WiFi-dropped mid-turn.
     public func subscribe(after afterID: UUID?) -> Subscription {
         let id = random.uuid()
-        var continuation: AsyncStream<AgentEvent>.Continuation!
+        var continuation: AsyncStream<HistoryEntry>.Continuation!
         let stream = AsyncStream(bufferingPolicy: .bufferingOldest(historyLimit)) { c in
             continuation = c
+            // Self-clean when the consumer cancels so UI/debug tails do not leak.
+            c.onTermination = { [weak self] _ in
+                Task { await self?.unsubscribe(id) }
+            }
         }
 
         let slice: ArraySlice<HistoryEntry>
@@ -75,13 +79,39 @@ public actor MulticastEventBus {
             slice = history[(history.index(after: idx))...]
         } else {
             // Unknown checkpoint (or nil): replay full history.
+            // Callers that care about expired checkpoints use subscribeWithOutcome.
             slice = history[...]
         }
-        for entry in slice { continuation.yield(entry.event) }
+        for entry in slice { continuation.yield(entry) }
 
         continuations[id] = continuation
         log.debug("subscriber \(id, privacy: .public) added afterID=\(String(describing: afterID), privacy: .public) replayed=\(slice.count, privacy: .public) total=\(self.continuations.count, privacy: .public)")
         return Subscription(id: id, stream: stream)
+    }
+
+    /// Outcome of a checkpointed subscribe — used by remote clients.
+    public enum SubscribeOutcome: Sendable, Equatable {
+        case fresh
+        case resumed
+        case checkpointExpired
+    }
+
+    /// Subscribe and report whether history was fully replayed, resumed from
+    /// a known checkpoint, or the checkpoint had fallen out of the ring.
+    public func subscribeWithOutcome(after afterID: UUID?) -> (Subscription, SubscribeOutcome) {
+        let outcome: SubscribeOutcome
+        if let afterID {
+            if history.contains(where: { $0.id == afterID }) {
+                outcome = .resumed
+            } else if history.isEmpty {
+                outcome = .fresh
+            } else {
+                outcome = .checkpointExpired
+            }
+        } else {
+            outcome = .fresh
+        }
+        return (subscribe(after: afterID), outcome)
     }
 
     // MARK: - Publish / unsubscribe
@@ -100,12 +130,13 @@ public actor MulticastEventBus {
     @discardableResult
     public func publish(_ event: AgentEvent) -> UUID {
         let entryID = random.uuid()
-        history.append(HistoryEntry(id: entryID, event: event))
+        let entry = HistoryEntry(id: entryID, event: event)
+        history.append(entry)
         if history.count > historyLimit {
             history.removeFirst(history.count - historyLimit)
         }
         for c in continuations.values {
-            c.yield(event)
+            c.yield(entry)
         }
         return entryID
     }
