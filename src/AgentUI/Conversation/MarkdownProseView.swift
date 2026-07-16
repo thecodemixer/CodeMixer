@@ -134,6 +134,7 @@ struct CodeBlockView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(CodeSyntaxHighlighter.highlight(code, language: language))
                     .font(Theme.typography.monoSmall)
+                    .fontDesign(.monospaced)
                     .textSelection(.enabled)
                     .padding(Theme.spacing.s12)
                     .frame(maxWidth: .infinity, alignment: .leading)

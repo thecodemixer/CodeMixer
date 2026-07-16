@@ -40,6 +40,7 @@ public struct DebugTerminalSheet: View {
                 ScrollView([.vertical, .horizontal]) {
                     Text(text)
                         .font(Theme.typography.monoSmall)
+                        .fontDesign(.monospaced)
                         .foregroundStyle(Theme.text.primary)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .topLeading)

@@ -54,11 +54,7 @@ public struct CommandPaletteView: View {
         }
         .frame(width: Theme.layout.globalPaletteWidth)
         .frame(maxHeight: Theme.layout.globalPaletteMaxHeight)
-        .background(Theme.surface.card, in: RoundedRectangle(cornerRadius: Theme.corner.large))
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.corner.large)
-                .stroke(Theme.surface.divider, lineWidth: Theme.stroke.hairline)
-        )
+        .floatingPanelStyle()
         .shadow(color: .black.opacity(Theme.opacity.muted), radius: 24, y: 12)
         .onAppear { fieldFocused = true }
         .onChange(of: query) { _, _ in selection = 0 }

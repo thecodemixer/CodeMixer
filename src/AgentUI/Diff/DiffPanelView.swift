@@ -44,6 +44,7 @@ public struct DiffPanelView: View {
             if let hoveredFullPath {
                 Text(hoveredFullPath)
                     .font(Theme.typography.monoSmall)
+                    .fontDesign(.monospaced)
                     .foregroundStyle(Theme.text.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -83,6 +84,7 @@ public struct DiffPanelView: View {
                 HStack {
                     Text(filename)
                         .font(Theme.typography.monoSmall)
+                        .fontDesign(.monospaced)
                         .lineLimit(1)
                         .accessibilityLabel("Changed file \(path)")
                     Spacer()
@@ -235,6 +237,7 @@ private struct HunkView: View {
             HStack(spacing: Theme.spacing.s8) {
                 Text(hunk.header)
                     .font(Theme.typography.monoSmall)
+                    .fontDesign(.monospaced)
                     .foregroundStyle(Theme.text.tertiary)
                 Spacer()
                 Button(action: onRevert) {
@@ -259,6 +262,7 @@ private struct HunkView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .font(Theme.typography.monoSmall)
+                .fontDesign(.monospaced)
                 .padding(.horizontal, Theme.spacing.s4)
                 .background(backgroundTint(line.kind))
                 .contextMenu {

@@ -36,6 +36,7 @@ public struct SilentDiagnosticsView: View {
                                 HStack(spacing: Theme.spacing.s8) {
                                     Text(record.kind.rawValue)
                                         .font(Theme.typography.monoSmall)
+                                        .fontDesign(.monospaced)
                                         .foregroundStyle(Theme.signal.warning)
                                     Text(record.owner)
                                         .font(Theme.typography.caption)

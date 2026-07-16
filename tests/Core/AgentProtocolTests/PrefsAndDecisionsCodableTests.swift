@@ -61,7 +61,7 @@ struct PrefsAndDecisionsCodableTests {
     @Test("AppearancePrefKey round-trips for every case")
     func appearancePrefKey() throws {
         let cases: [AppearancePrefKey] = [
-            .theme, .codeTheme, .fontSizeScale, .showUsageChip, .reduceMotion, .densityMode,
+            .theme, .codeTheme, .fontFamily, .floatingCornerStyle, .fontSizeScale, .showUsageChip, .reduceMotion, .densityMode,
         ]
         for c in cases { try roundTrip(c) }
     }

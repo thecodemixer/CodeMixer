@@ -235,6 +235,7 @@ public struct CodeBlock: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(text)
                     .font(Theme.typography.monoSmall)
+                    .fontDesign(.monospaced)
                     .foregroundStyle(Theme.text.primary)
                     .padding(Theme.spacing.s8)
                     .textSelection(.enabled)

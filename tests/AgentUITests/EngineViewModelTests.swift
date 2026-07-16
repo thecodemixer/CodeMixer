@@ -159,6 +159,23 @@ struct EngineViewModelTests {
         await bus.shutdown()
     }
 
+    @Test("resume startup gap without a sent prompt does not show still-working status")
+    func resumeStartupGapDoesNotShowStillWorkingStatus() async {
+        let (vm, bus) = makeModel()
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        await bus.publish(.activityStateChanged(.probablyStuck))
+        await bus.publish(.noEventGap(turnID: UUID(), elapsed: .seconds(11)))
+        await drain()
+
+        if case .idle = vm.status {} else {
+            #expect(Bool(false), "status should stay idle before the user sends a prompt")
+        }
+
+        await bus.shutdown()
+    }
+
     @Test("first agent reply prevents later no-event gap from showing stalled toast")
     func firstReplySuppressesLaterStalledToast() async {
         let (vm, bus) = makeModel()

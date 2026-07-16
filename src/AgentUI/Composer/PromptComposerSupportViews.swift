@@ -243,6 +243,7 @@ struct SlashPaletteView: View {
                             HStack(spacing: Theme.spacing.s8) {
                                 Text(command.name)
                                     .font(Theme.typography.monoSmall)
+                                    .fontDesign(.monospaced)
                                     .foregroundStyle(Theme.text.primary)
                                 Text(command.summary)
                                     .font(Theme.typography.caption)
@@ -273,7 +274,8 @@ struct SlashPaletteView: View {
             }
         }
         .frame(minWidth: Theme.layout.attachmentPaletteMinWidth, maxWidth: Theme.layout.attachmentPaletteMaxWidth)
-        .background(Theme.surface.card)
+        .floatingPanelStyle()
+        .floatingPopoverChrome()
         .focusable()
         .focused($isFocused)
         .onKeyPress(.upArrow) {
@@ -332,6 +334,7 @@ struct FilePickerView: View {
                             } label: {
                                 Text(file)
                                     .font(Theme.typography.monoSmall)
+                                    .fontDesign(.monospaced)
                                     .foregroundStyle(Theme.text.primary)
                                     .lineLimit(1)
                                     .truncationMode(.middle)
@@ -355,7 +358,8 @@ struct FilePickerView: View {
             }
         }
         .frame(minWidth: Theme.layout.slashPaletteMinWidth, maxWidth: Theme.layout.commandPaletteMaxWidth)
-        .background(Theme.surface.card)
+        .floatingPanelStyle()
+        .floatingPopoverChrome()
     }
 }
 

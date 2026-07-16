@@ -175,6 +175,7 @@ struct ThinkingBlockView: View {
             if !text.isEmpty {
                 Text(text)
                     .font(Theme.typography.monoSmall)
+                    .fontDesign(.monospaced)
                     .foregroundStyle(Theme.text.secondary)
                     .padding(.top, Theme.spacing.s8)
                     .textSelection(.enabled)

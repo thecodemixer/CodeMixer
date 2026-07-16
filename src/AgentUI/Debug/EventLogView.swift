@@ -33,6 +33,7 @@ public struct EventLogView: View {
                                 .monospacedDigit()
                             Pill(label: line.kind, tint: line.tint)
                             Text(line.body).font(Theme.typography.monoSmall)
+                                .fontDesign(.monospaced)
                                 .textSelection(.enabled)
                                 .lineLimit(2)
                         }

@@ -24,6 +24,7 @@ struct PermissionPromptView: View {
             if !prompt.argumentsSummary.isEmpty {
                 Text(prompt.argumentsSummary)
                     .font(Theme.typography.monoSmall)
+                    .fontDesign(.monospaced)
                     .foregroundStyle(Theme.text.secondary)
                     .lineLimit(4)
             }

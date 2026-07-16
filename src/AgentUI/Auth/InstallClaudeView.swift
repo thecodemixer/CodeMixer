@@ -55,6 +55,7 @@ public struct InstallClaudeView: View {
                 HStack(spacing: Theme.spacing.s8) {
                     Text(Self.installCommand)
                         .font(Theme.typography.monoSmall)
+                        .fontDesign(.monospaced)
                         .foregroundStyle(Theme.text.primary)
                         .padding(.horizontal, Theme.spacing.s12)
                         .padding(.vertical, Theme.spacing.s8)

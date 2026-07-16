@@ -12,7 +12,7 @@ struct PrefsStoreTests {
     func defaultState() async {
         let store = makeStore()
         let state = await store.state()
-        #expect(state.appearance.theme == "system")
+        #expect(state.appearance.theme == .system)
         #expect(state.appearance.fontSizeScale == 1.0)
         #expect(state.autoApprovalRules.isEmpty)
     }
@@ -28,7 +28,7 @@ struct PrefsStoreTests {
         let freshStore = PrefsStore(environment: env, fileSystem: fs)
         await freshStore.load()
         let state = await freshStore.state()
-        #expect(state.appearance.theme == "dark")
+        #expect(state.appearance.theme == .dark)
     }
 
     @Test("updateRules persists and a fresh load reflects the rules")
@@ -73,7 +73,7 @@ struct PrefsStoreTests {
         // load() must not throw and the state must be default.
         await store.load()
         let state = await store.state()
-        #expect(state.appearance.theme == "system")
+        #expect(state.appearance.theme == .system)
         #expect(state.autoApprovalRules.isEmpty)
     }
 
@@ -83,7 +83,7 @@ struct PrefsStoreTests {
 
         // Fire both updates concurrently; the actor serialises them.
         try await withThrowingTaskGroup(of: Void.self) { group in
-            group.addTask { try await store.updateAppearance(.theme, value: .string("midnight")) }
+            group.addTask { try await store.updateAppearance(.theme, value: .string("dark")) }
             group.addTask {
                 let rule = AutoApprovalRule(match: "Read *", decision: .allow)
                 try await store.updateRules([rule])
@@ -95,8 +95,8 @@ struct PrefsStoreTests {
         // Both mutations must be visible — order is non-deterministic but
         // the actor guarantees at-most one concurrent write at a time.
         // We can only assert that neither update was lost.
-        #expect(state.appearance.theme == "midnight" || !state.autoApprovalRules.isEmpty
-                || (state.appearance.theme == "midnight" && !state.autoApprovalRules.isEmpty))
+        #expect(state.appearance.theme == .dark)
+        #expect(!state.autoApprovalRules.isEmpty)
     }
 
     // MARK: - Helpers

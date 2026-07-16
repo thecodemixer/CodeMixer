@@ -545,7 +545,7 @@ struct AgentEngineCommandTests {
         try await h.engine.send(.updateAppearancePref(key: .theme, value: .string("dark")))
         try await Task.sleep(for: .milliseconds(20))
         let state = await h.engine.prefs.state()
-        #expect(state.appearance.theme == "dark")
+        #expect(state.appearance.theme == .dark)
         await h.shutdown()
     }
 

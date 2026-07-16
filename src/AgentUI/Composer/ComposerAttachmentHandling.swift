@@ -6,8 +6,8 @@ enum ComposerAttachmentHandling {
 
     static func handleDrop(_ providers: [NSItemProvider],
                            workspace: URL?,
-                           insertFileURL: @escaping (URL) -> Void,
-                           insertImage: @escaping (NSImage) -> Void) -> Bool {
+                           insertFileURL: @escaping @MainActor @Sendable (URL) -> Void,
+                           insertImage: @escaping @MainActor @Sendable (NSImage) -> Void) -> Bool {
         var handled = false
         for provider in providers {
             if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {

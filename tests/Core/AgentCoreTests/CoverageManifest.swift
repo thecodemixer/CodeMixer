@@ -246,6 +246,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // AppearancePrefKey
 // AppearancePrefValue
 // AppearancePrefs
+// AppearanceTheme
 // AttachmentRef
 // AttachmentResolver
 // AuthGateView
@@ -301,6 +302,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // CostBadgeView
 // DaemonDefaults
 // DebugTerminalSheet
+// DensityMode
 // DesktopActions
 // DesktopMenuItem
 // DesktopMenuPresenter
@@ -326,6 +328,8 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // FileDiff
 // FileSystem
 // FileSystemError
+// FloatingCornerStyle
+// FontFamily
 // GitDiffEngine
 // HTTPSidecarServer
 // HeartbeatActivityMonitor
@@ -462,6 +466,9 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // WatcherError
 // WindowSize
 // WireAgentError
+// WireAgentErrorCode
+// WireAgentErrorContext
+// WireAgentErrorContextKey
 // WireCodec
 // WirePermissionPrompt
 // WireToolInput
@@ -535,6 +542,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // cachesRelativePath
 // canCancel
 // cancel
+// cancelCurrentTurn
 // cancelSequence
 // canvas
 // capabilities
@@ -596,8 +604,10 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // deletions
 // densityMode
 // description
+// design
 // details
 // deviceName
+// dictionary
 // diff
 // diffPanelMinWidth
 // diffSidebarIdealWidth
@@ -651,7 +661,10 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // filename
 // finished
 // flags
+// floating
+// floatingCornerStyle
 // focus
+// fontFamily
 // fontSizeScale
 // gentle
 // git
@@ -660,6 +673,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // globalPaletteWidth
 // glyph
 // hairline
+// hasEmittedAssistantText
 // headByteBudget
 // header
 // headers
@@ -849,6 +863,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // ptyChunks
 // ptyOutput
 // ptyReadQueueLabel
+// ptySpawnEnvironment
 // ptyTUIFallback
 // publish
 // pulse
@@ -857,6 +872,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // python3
 // quick
 // quiet
+// radius
 // random
 // rawValue
 // read
@@ -1082,6 +1098,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // webSocketPath
 // webSocketPort
 // windowSize
+// wireCode
 // withOverrides
 // workingDirectory
 // workingPhrase

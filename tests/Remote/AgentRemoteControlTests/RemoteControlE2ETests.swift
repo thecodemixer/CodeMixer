@@ -44,7 +44,7 @@ struct RemoteControlE2ETests {
         }
 
         let cmdID = UUID()
-        let cmd: AgentCommand = .updateAppearancePref(key: .theme, value: .string("midnight"))
+        let cmd: AgentCommand = .updateAppearancePref(key: .theme, value: .string("dark"))
         try await client.send(try encoder.encode(ClientFrame.command(id: cmdID, command: cmd)))
 
         var sawResult = false
@@ -66,7 +66,7 @@ struct RemoteControlE2ETests {
         #expect(sawEvent)
 
         let prefs = await engine.prefs.state()
-        #expect(prefs.appearance.theme == "midnight")
+        #expect(prefs.appearance.theme == .dark)
 
         await client.close()
         await server.stop()
@@ -85,7 +85,7 @@ struct RemoteControlE2ETests {
         let decoder = JSONDecoder()
 
         let cmdID = UUID()
-        let cmd: AgentCommand = .updateAppearancePref(key: .theme, value: .string("midnight"))
+        let cmd: AgentCommand = .updateAppearancePref(key: .theme, value: .string("dark"))
         try await client.send(try encoder.encode(ClientFrame.command(id: cmdID, command: cmd)))
 
         let response = try #require(try await client.receive())

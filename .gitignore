@@ -47,3 +47,5 @@ tests/AgenticCLIs/ClaudeCode/ClaudeAdapterTests/Fixtures/live/
 .idea/
 *.swp
 *~
+/ref
+/.claude/settings.local.json

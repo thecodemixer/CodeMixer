@@ -121,8 +121,10 @@ public struct RemoteSettingsActions: Sendable {
 private struct AppearanceSettingsTab: View {
     @Bindable var model: EngineViewModel
 
-    @State private var theme: String = "system"
-    @State private var density: String = "comfortable"
+    @State private var theme: Theme.AppearanceTheme = .system
+    @State private var density: Theme.DensityMode = .comfortable
+    @State private var fontFamily: Theme.FontFamily = .rounded
+    @State private var floatingCornerStyle: Theme.FloatingCornerStyle = .standard
     @State private var fontScale: Double = 1.0
     @State private var showUsage: Bool = false
     @State private var reduceMotion: Bool = false
@@ -131,21 +133,41 @@ private struct AppearanceSettingsTab: View {
     var body: some View {
         Form {
             Picker("Theme", selection: $theme) {
-                Text("System").tag("system")
-                Text("Light").tag("light")
-                Text("Dark").tag("dark")
+                Text("System").tag(Theme.AppearanceTheme.system)
+                Text("Light").tag(Theme.AppearanceTheme.light)
+                Text("Dark").tag(Theme.AppearanceTheme.dark)
             }
             .onChange(of: theme) { _, new in
-                model.send(.updateAppearancePref(key: .theme, value: .string(new)))
+                model.send(.updateAppearancePref(key: .theme, value: .string(new.rawValue)))
             }
 
             Picker("Density", selection: $density) {
-                Text("Comfortable").tag("comfortable")
-                Text("Compact").tag("compact")
+                Text("Comfortable").tag(Theme.DensityMode.comfortable)
+                Text("Compact").tag(Theme.DensityMode.compact)
             }
             .onChange(of: density) { _, new in
-                model.send(.updateAppearancePref(key: .densityMode, value: .string(new)))
+                model.send(.updateAppearancePref(key: .densityMode, value: .string(new.rawValue)))
             }
+
+            Picker("Font", selection: $fontFamily) {
+                ForEach(Theme.FontFamily.allCases) { family in
+                    Text(family.displayName).tag(family)
+                }
+            }
+            .onChange(of: fontFamily) { _, new in
+                model.send(.updateAppearancePref(key: .fontFamily, value: .string(new.rawValue)))
+            }
+            .accessibilityLabel("Font family for the sidebar, conversation, and diff panel")
+
+            Picker("Popover corners", selection: $floatingCornerStyle) {
+                ForEach(Theme.FloatingCornerStyle.allCases) { style in
+                    Text(style.displayName).tag(style)
+                }
+            }
+            .onChange(of: floatingCornerStyle) { _, new in
+                model.send(.updateAppearancePref(key: .floatingCornerStyle, value: .string(new.rawValue)))
+            }
+            .accessibilityLabel("Corner radius for popovers, palettes, and dropdown panels")
 
             HStack {
                 Text("Font scale")
@@ -175,6 +197,8 @@ private struct AppearanceSettingsTab: View {
         .task {
             theme = model.appearancePrefs.theme
             density = model.appearancePrefs.densityMode
+            fontFamily = model.appearancePrefs.fontFamily
+            floatingCornerStyle = model.appearancePrefs.floatingCornerStyle
             fontScale = model.appearancePrefs.fontSizeScale
             showUsage = model.appearancePrefs.showUsageChip
             reduceMotion = model.appearancePrefs.reduceMotion
@@ -205,6 +229,7 @@ private struct PermissionsSettingsTab: View {
                         Toggle("", isOn: $rule.enabled).labelsHidden()
                         TextField("Pattern", text: $rule.match)
                             .font(Theme.typography.monoSmall)
+                            .fontDesign(.monospaced)
                         Picker("", selection: $rule.decision) {
                             Text("Allow").tag(PermissionDecision.allow)
                             Text("Allow Always").tag(PermissionDecision.allowAlways)
@@ -225,6 +250,7 @@ private struct PermissionsSettingsTab: View {
             HStack {
                 TextField("New pattern…", text: $draftMatch)
                     .font(Theme.typography.monoSmall)
+                    .fontDesign(.monospaced)
                 Picker("", selection: $draftDecision) {
                     Text("Allow").tag(PermissionDecision.allow)
                     Text("Deny").tag(PermissionDecision.deny)
@@ -274,6 +300,7 @@ private struct RemoteSettingsTab: View {
                     Spacer()
                     Text(state.pin ?? "••••••")
                         .font(Theme.typography.monoSmall)
+                        .fontDesign(.monospaced)
                         .foregroundStyle(state.pin == nil ? Theme.text.tertiary : Theme.text.primary)
                     Button("Pair New Device") {
                         Task {
@@ -303,6 +330,7 @@ private struct RemoteSettingsTab: View {
                             if let pairingURL = state.pairingURL {
                                 Text(pairingURL)
                                     .font(Theme.typography.monoSmall)
+                                    .fontDesign(.monospaced)
                                     .foregroundStyle(Theme.text.tertiary)
                                     .textSelection(.enabled)
                                     .lineLimit(3)
@@ -316,6 +344,7 @@ private struct RemoteSettingsTab: View {
                     Spacer()
                     Text(state.certificateFingerprint ?? "—")
                         .font(Theme.typography.monoSmall)
+                        .fontDesign(.monospaced)
                         .foregroundStyle(Theme.text.tertiary)
                         .textSelection(.enabled)
                 }

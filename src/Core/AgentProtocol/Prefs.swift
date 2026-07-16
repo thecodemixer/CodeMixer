@@ -7,6 +7,8 @@ import Foundation
 public enum AppearancePrefKey: String, Sendable, Codable, Hashable {
     case theme
     case codeTheme
+    case fontFamily
+    case floatingCornerStyle
     case fontSizeScale
     case showUsageChip
     case reduceMotion

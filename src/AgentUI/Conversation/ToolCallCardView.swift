@@ -27,6 +27,7 @@ struct ToolCallCardView: View {
             if expanded, let payload = entry.input.jsonPayload {
                 Text(payload)
                     .font(Theme.typography.monoSmall)
+                    .fontDesign(.monospaced)
                     .foregroundStyle(Theme.text.secondary)
                     .padding(Theme.spacing.s8)
                     .background(Theme.surface.canvas,
@@ -43,6 +44,7 @@ struct ToolCallCardView: View {
                     ForEach(Array(entry.subagentLines.enumerated()), id: \.offset) { _, line in
                         Text(line)
                             .font(Theme.typography.monoSmall)
+                            .fontDesign(.monospaced)
                             .foregroundStyle(Theme.text.secondary)
                             .padding(.horizontal, Theme.spacing.s8)
                             .padding(.vertical, Theme.spacing.s4)
@@ -63,6 +65,7 @@ struct ToolCallCardView: View {
                 if let payload = output.jsonPayload {
                     Text(payload)
                         .font(Theme.typography.monoSmall)
+                        .fontDesign(.monospaced)
                         .foregroundStyle(Theme.text.secondary)
                         .padding(Theme.spacing.s8)
                         .background(Theme.surface.canvas,

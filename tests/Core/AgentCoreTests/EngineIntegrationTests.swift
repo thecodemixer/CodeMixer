@@ -35,7 +35,7 @@ struct EngineIntegrationTests {
         try? await engine.start(adapter: adapter,
                                 workspace: URL(fileURLWithPath: env.appSupportDirectory.path))
 
-        let cmd1: AgentCommand = .updateAppearancePref(key: .theme, value: .string("midnight"))
+        let cmd1: AgentCommand = .updateAppearancePref(key: .theme, value: .string("dark"))
         try await engine.send(cmd1)
         let cmd2: AgentCommand = .updateAutoApprovalRules([
             AutoApprovalRule(match: "Bash echo *", decision: .allow)
@@ -52,7 +52,7 @@ struct EngineIntegrationTests {
                 || events.contains { if case .prefsChanged = $0 { return true }; return false })
 
         let state = await engine.prefs.state()
-        #expect(state.appearance.theme == "midnight")
+        #expect(state.appearance.theme == .dark)
         #expect(state.autoApprovalRules.count == 1)
 
         await engine.shutdown(reason: .naturalExit)
@@ -63,7 +63,7 @@ struct EngineIntegrationTests {
         let env = FakeEnvironment()
         let prefs = PrefsStore(environment: env, fileSystem: fs)
         await prefs.load()
-        try await prefs.updateAppearance(.theme, value: .string("solarized"))
+        try await prefs.updateAppearance(.codeTheme, value: .string("solarized"))
 
         let sessions = SessionStore(environment: env, fileSystem: fs)
         await sessions.load()
@@ -71,7 +71,7 @@ struct EngineIntegrationTests {
         let service = SnapshotService(prefs: prefs, sessions: sessions)
         let data = await service.snapshot(.prefs)
         let json = String(data: data, encoding: .utf8) ?? ""
-        #expect(json.contains("\"theme\":\"solarized\""))
+        #expect(json.contains("\"codeTheme\":\"solarized\""))
     }
 
     @Test("terminal snapshot is empty before a PTY session starts")
