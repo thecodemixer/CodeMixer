@@ -52,13 +52,14 @@ public struct SessionSidebarView: View {
         .toolbar {
             ToolbarItemGroup(placement: .navigation) {
                 Button {
-                    model.newChat(in: model.workspace?.path ?? "")
+                    model.newChatInCurrentProject()
                 } label: {
                     Image(systemName: "square.and.pencil")
                         .imageScale(.medium)
                 }
-                .help("New chat")
-                .accessibilityLabel("New chat")
+                .help("New chat in current project")
+                .accessibilityLabel("New chat in current project")
+                .disabled(model.workspace == nil)
             }
         }
         .alert("Rename Project", isPresented: $showRenamePrompt) {
@@ -86,13 +87,16 @@ public struct SessionSidebarView: View {
 
     private var iconRail: some View {
         VStack(spacing: Theme.spacing.s12) {
-            Button { model.newChat(in: model.workspace?.path ?? "") } label: {
+            Button {
+                model.newChatInCurrentProject()
+            } label: {
                 Image(systemName: "square.and.pencil").imageScale(.medium)
             }
             .buttonStyle(.plain)
             .foregroundStyle(Theme.text.secondary)
-            .help("New chat")
-            .accessibilityLabel("New chat")
+            .help("New chat in current project")
+            .accessibilityLabel("New chat in current project")
+            .disabled(model.workspace == nil)
 
             Divider().overlay(Theme.surface.divider).padding(.horizontal, Theme.spacing.s8)
 
@@ -122,7 +126,7 @@ public struct SessionSidebarView: View {
 
     private func railProjectButton(_ project: WorkspaceProjectsStore.ProjectRef) -> some View {
         let isCurrent = model.workspace?.path == project.path
-        return Button { model.newChat(in: project.path) } label: {
+        return Button { model.selectProject(path: project.path) } label: {
             Image(systemName: "folder")
                 .accessibilityHidden(true)
                 .imageScale(.medium)
@@ -134,8 +138,8 @@ public struct SessionSidebarView: View {
                 )
         }
         .buttonStyle(.plain)
-        .help("New chat in \(project.displayName)")
-        .accessibilityLabel("New chat in \(project.displayName)")
+        .help("Select \(project.displayName)")
+        .accessibilityLabel("Select project \(project.displayName)")
         .accessibilityAddTraits(isCurrent ? [.isSelected] : [])
     }
 
@@ -183,11 +187,12 @@ public struct SessionSidebarView: View {
     private func projectRow(_ project: WorkspaceProjectsStore.ProjectRef,
                             isExpanded: Bool) -> some View {
         let isHovering = hoveredProjectPath == project.path
+        let isCurrent = model.workspace?.path == project.path
         return HStack(spacing: Theme.spacing.s8) {
             Text(project.displayName)
                 .font(Theme.typography.caption)
                 .fontWeight(.semibold)
-                .foregroundStyle(Theme.text.secondary)
+                .foregroundStyle(isCurrent ? Theme.text.primary : Theme.text.secondary)
                 .lineLimit(1)
             Text(project.agentMode.shortLabel)
                 .font(Theme.typography.caption)
@@ -198,17 +203,19 @@ public struct SessionSidebarView: View {
             Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                 .font(Theme.typography.iconSmall)
                 .foregroundStyle(Theme.text.tertiary)
-                .opacity(isHovering ? 1 : 0)
+                .opacity(isHovering || isCurrent ? 1 : 0)
                 .accessibilityHidden(true)
         }
         .contentShape(Rectangle())
         .padding(.top, Theme.spacing.s8)
         .padding(.bottom, Theme.spacing.s4)
         .padding(.horizontal, Theme.spacing.s8)
-        .onTapGesture { toggle(project) }
+        .background(selectionWash(isCurrent: isCurrent))
+        .onTapGesture { handleProjectTap(project) }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Project \(project.displayName)")
-        .accessibilityHint(isExpanded ? "Expanded" : "Collapsed")
+        .accessibilityHint(isCurrent ? "Current project" : "Select project")
+        .accessibilityAddTraits(isCurrent ? [.isSelected] : [])
         .onHover { hovering in
             hoveredProjectPath = hovering ? project.path : nil
         }
@@ -308,23 +315,29 @@ public struct SessionSidebarView: View {
     private func expandCurrentProject() {
         guard let path = model.workspace?.path else { return }
         expandedProjects.insert(path)
-        if model.supportsResumableSessions,
-           model.sessionsByProject[path] == nil {
+        if model.supportsResumableSessions {
             model.loadSessions(for: path)
         }
     }
 
-    private func toggle(_ project: WorkspaceProjectsStore.ProjectRef) {
+    /// Project title click: select as current project and expand. A second click
+    /// on the already-current expanded project collapses it.
+    private func handleProjectTap(_ project: WorkspaceProjectsStore.ProjectRef) {
+        let isCurrent = model.workspace?.path == project.path
+        let isExpanded = expandedProjects.contains(project.path)
         let animation = Theme.motion.resolve(Theme.motion.changing, reduceMotion: reduceMotion)
         withAnimation(animation) {
-            if expandedProjects.contains(project.path) {
+            if isCurrent && isExpanded {
                 expandedProjects.remove(project.path)
             } else {
                 expandedProjects.insert(project.path)
-                if model.sessionsByProject[project.path] == nil {
+                if model.supportsResumableSessions {
                     model.loadSessions(for: project.path)
                 }
             }
+        }
+        if !isCurrent {
+            model.selectProject(path: project.path)
         }
     }
 

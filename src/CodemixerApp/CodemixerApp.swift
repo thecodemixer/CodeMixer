@@ -25,8 +25,13 @@ struct CodemixerApp: App {
         .windowToolbarStyle(.unifiedCompact)
         .commands {
             CommandGroup(replacing: .newItem) {
+                Button("New Chat") {
+                    bootstrap.viewModel?.newChatInCurrentProject()
+                }
+                .keyboardShortcut("n", modifiers: .command)
+                .disabled(bootstrap.viewModel?.workspace == nil)
                 Button("New Workspace…") { bootstrap.presentNewWorkspaceSheet() }
-                    .keyboardShortcut("n", modifiers: .command)
+                    .keyboardShortcut("n", modifiers: [.command, .shift])
                 Button("New Project…") { bootstrap.presentNewProjectSheet() }
                     .disabled(bootstrap.workspace == nil)
                 Divider()

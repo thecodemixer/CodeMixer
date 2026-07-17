@@ -64,6 +64,15 @@ public final class EngineViewModel {
 
     // MARK: - Session navigator state
 
+    /// Display name for the active project (window title / top bar).
+    public var currentProjectDisplayName: String {
+        guard let path = workspace?.path else { return "Codemixer" }
+        if let name = projects.first(where: { $0.path == path })?.displayName {
+            return name
+        }
+        return URL(fileURLWithPath: path).lastPathComponent
+    }
+
     /// Whether the session navigator rail is shown. GUI chrome only — persisted
     /// via `AppearancePrefs`, never on the wire.
     public var sidebarVisible: Bool = true

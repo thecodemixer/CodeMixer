@@ -10,7 +10,8 @@ extension EngineViewModel {
         switch event {
         case .sessionStarted(let id, _, let cwd):
             let projectChanged = workspace?.path != cwd.path
-            let sessionChanged = sessionID != id
+            let previousSessionID = sessionID
+            let sessionChanged = previousSessionID != id
             let shouldResetConversation = projectChanged || (sessionChanged && activity == .idle)
             sessionID = id
             // First session with no explicit workspace shell: treat cwd as the root.
@@ -23,6 +24,12 @@ extension EngineViewModel {
             }
             if projectChanged {
                 onActiveProjectChanged()
+            } else if sessionChanged, !id.isEmpty {
+                // Codex (and similar adapters) record the resumable thread only
+                // after `thread/start` succeeds — after the engine's empty
+                // bootstrap `sessionStarted`. Refresh so New Chat / first open
+                // appear in the sidebar.
+                loadSessions(for: cwd.path)
             }
         case .userTurn(let id, let text):
             finishSessionSwitchIfNeeded()

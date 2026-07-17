@@ -153,7 +153,7 @@ public struct CommandPaletteView: View {
                                         title: "New Chat",
                                         subtitle: "Start a fresh session in the current project",
                                         systemImage: "square.and.pencil") {
-                model.newChat(in: model.workspace?.path ?? "")
+                model.newChatInCurrentProject()
             })
         }
 

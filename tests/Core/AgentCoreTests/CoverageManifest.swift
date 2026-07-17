@@ -640,6 +640,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // current
 // currentConfiguration
 // currentIndex
+// currentProjectDisplayName
 // currentSchemaVersion
 // currentState
 // cursorRow
@@ -856,6 +857,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // named
 // networkConnections
 // newChat
+// newChatInCurrentProject
 // newLineNumber
 // newRange
 // noEventPollInterval
@@ -1036,6 +1038,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // scenario
 // schemaVersion
 // secondary
+// selectProject
 // send
 // sendPrompt
 // serviceType

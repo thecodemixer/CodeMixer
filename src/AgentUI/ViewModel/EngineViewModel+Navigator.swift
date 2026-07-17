@@ -44,7 +44,8 @@ extension EngineViewModel {
         }
     }
 
-    /// Open a specific resumable session of a project.
+    /// Open a specific resumable session of a project. Makes that project the
+    /// current one immediately so the top bar title updates before resume finishes.
     public func openSession(projectPath: String, id: String) {
         guard !isCurrentSession(projectPath: projectPath, sessionID: id) else { return }
         beginSessionSwitch(projectPath: projectPath, sessionID: id)
@@ -52,17 +53,41 @@ extension EngineViewModel {
         send(.openProject(path: projectPath, resumeSessionID: id))
     }
 
-    /// Start a fresh chat. For the active project this is `.newSession`; for
-    /// another project it reopens that project with no resume id. Both reuse
-    /// existing wire commands, so remote clients reach the same behavior.
-    public func newChat(in projectPath: String) {
-        endSessionSwitch()
-        applyAdapterCapabilities(forProjectPath: projectPath)
-        if projectPath == workspace?.path {
-            send(.newSession)
-        } else {
-            send(.openProject(path: projectPath, resumeSessionID: nil))
+    /// Make `projectPath` the current project. Opens its most recent session when
+    /// known; otherwise starts a fresh chat in that project.
+    public func selectProject(path projectPath: String) {
+        guard !projectPath.isEmpty else { return }
+        guard projectPath != workspace?.path else { return }
+        if let recent = sessionsByProject[projectPath]?.first {
+            openSession(projectPath: projectPath, id: recent.id)
+            return
         }
+        loadSessions(for: projectPath)
+        newChat(in: projectPath)
+    }
+
+    /// Start a fresh chat in the current project (toolbar / palette New Chat).
+    public func newChatInCurrentProject() {
+        guard let path = workspace?.path, !path.isEmpty else { return }
+        newChat(in: path)
+    }
+
+    /// Start a fresh chat in `projectPath`. Always opens the project with no
+    /// resume id so both Claude and Codex get a real new session (Codex
+    /// `.newSession` encoding can no-op when session context isn't ready, and
+    /// Claude `/clear` does not reliably clear the local conversation).
+    public func newChat(in projectPath: String) {
+        guard !projectPath.isEmpty else { return }
+        endSessionSwitch()
+        let target = URL(fileURLWithPath: projectPath).standardizedFileURL
+        workspace = target
+        sessionID = nil
+        clearConversationState()
+        pendingPermission = nil
+        status = .idle
+        activity = .idle
+        applyAdapterCapabilities(forProjectPath: target.path)
+        send(.openProject(path: target.path, resumeSessionID: nil))
     }
 
     /// Create a new project (subfolder of the workspace) and switch to it.

@@ -22,7 +22,7 @@ struct RootView: View {
                                    tts: bootstrap.tts,
                                    diffPanelVisible: $diffPanelVisible)
                         .codemixerAppearance(model.appearancePrefs)
-                        .navigationTitle(model.workspace?.lastPathComponent ?? "Codemixer")
+                        .navigationTitle(model.currentProjectDisplayName)
                         .toolbar {
                             ToolbarItemGroup(placement: .primaryAction) {
                                 if model.showUsageChip {

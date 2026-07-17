@@ -164,7 +164,7 @@ struct EngineViewModelNavigatorTests {
         await bus.shutdown()
     }
 
-    @Test("newChat in the active project sends .newSession; other projects reopen via .openProject")
+    @Test("newChat always opens the project with no resume id for a fresh session")
     func newChatRoutesToWireCommands() async {
         let port = RecordingPort()
         let bus = MulticastEventBus()
@@ -176,14 +176,111 @@ struct EngineViewModelNavigatorTests {
         await bus.publish(.sessionStarted(sessionID: "s1", model: nil, cwd: ws))
         await drain()
 
+        vm.messages = [.user(bubbleID: UUID(), text: "old")]
         vm.newChat(in: ws.path)
         vm.newChat(in: "/Users/me/other")
         try? await Task.sleep(for: .milliseconds(60))
 
         let commands = port.commands
-        #expect(commands.contains { if case .newSession = $0 { return true }; return false })
+        #expect(commands.filter {
+            if case .openProject(let path, let resume) = $0 {
+                return path == ws.path && resume == nil
+            }
+            return false
+        }.count >= 1)
         #expect(commands.contains {
-            if case .openProject(let path, let resume) = $0 { return path == "/Users/me/other" && resume == nil }
+            if case .openProject(let path, let resume) = $0 {
+                return path == "/Users/me/other" && resume == nil
+            }
+            return false
+        })
+        #expect(vm.messages.isEmpty)
+        #expect(vm.workspace?.path == "/Users/me/other")
+
+        await bus.shutdown()
+    }
+
+    @Test("newChatInCurrentProject starts a session only in the active project")
+    func newChatInCurrentProjectUsesWorkspace() async {
+        let port = RecordingPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        vm.newChatInCurrentProject()
+        try? await Task.sleep(for: .milliseconds(40))
+        #expect(port.commands.isEmpty)
+
+        let project = URL(fileURLWithPath: "/Users/me/ws/api")
+        await bus.publish(.sessionStarted(sessionID: "s1", model: nil, cwd: project))
+        await drain()
+
+        vm.messages = [.user(bubbleID: UUID(), text: "old")]
+        vm.newChatInCurrentProject()
+        try? await Task.sleep(for: .milliseconds(60))
+        #expect(port.commands.contains {
+            if case .openProject(let path, let resume) = $0 {
+                return path == project.path && resume == nil
+            }
+            return false
+        })
+        #expect(vm.messages.isEmpty)
+        #expect(vm.workspace?.path == project.path)
+        #expect(vm.sessionID == nil)
+
+        await bus.shutdown()
+    }
+
+    @Test("openSession makes the session's project current for the top bar")
+    func openSessionSetsCurrentProject() async {
+        let port = RecordingPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
+        vm.projects = [
+            .init(path: "/Users/me/ws/api", displayName: "API", agentMode: .codex),
+            .init(path: "/Users/me/ws/web", displayName: "Web", agentMode: .claudeCode),
+        ]
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        await bus.publish(.sessionStarted(sessionID: "old", model: nil,
+                                          cwd: URL(fileURLWithPath: "/Users/me/ws/web")))
+        await drain()
+        #expect(vm.currentProjectDisplayName == "Web")
+
+        vm.openSession(projectPath: "/Users/me/ws/api", id: "sess-42")
+        #expect(vm.workspace?.path == "/Users/me/ws/api")
+        #expect(vm.currentProjectDisplayName == "API")
+
+        await bus.shutdown()
+    }
+
+    @Test("selectProject opens the most recent session when available")
+    func selectProjectOpensRecentSession() async {
+        let port = RecordingPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
+        let api = URL(fileURLWithPath: "/Users/me/ws/api")
+        vm.sessionsByProject[api.path] = [
+            SessionSummary(id: "recent", agentID: .codex, workspace: api,
+                           title: "Latest", lastActivity: Date(), messageCount: 3),
+        ]
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        await bus.publish(.sessionStarted(sessionID: "web-1", model: nil,
+                                          cwd: URL(fileURLWithPath: "/Users/me/ws/web")))
+        await drain()
+
+        vm.selectProject(path: api.path)
+        try? await Task.sleep(for: .milliseconds(60))
+
+        #expect(vm.workspace?.path == api.path)
+        #expect(port.commands.contains {
+            if case .openProject(let path, let resume) = $0 {
+                return path == api.path && resume == "recent"
+            }
             return false
         })
 
@@ -351,9 +448,79 @@ struct EngineViewModelNavigatorTests {
         await drain()
         #expect(listerCalls.count == 1)
 
-        await bus.publish(.sessionStarted(sessionID: "s2", model: nil, cwd: ws))
+        await bus.publish(.sessionStarted(sessionID: "s1", model: nil, cwd: ws))
         await drain()
         #expect(listerCalls.count == 1)
+
+        await bus.shutdown()
+    }
+
+    @Test("sessionStarted with a real session id after bootstrap empty id reloads sessions")
+    func sessionStartedRealIDReloadsSessions() async {
+        final class CallCounter: @unchecked Sendable {
+            var count = 0
+            var lastURL: URL?
+        }
+        let listerCalls = CallCounter()
+        let (vm, bus, _) = makeModel()
+        vm.supportsResumableSessions = true
+        vm.sessionLister = { url in
+            listerCalls.count += 1
+            listerCalls.lastURL = url
+            if listerCalls.count == 1 { return [] }
+            return [
+                SessionSummary(id: "thread-1", agentID: .codex, workspace: url,
+                               title: "First chat", lastActivity: Date(), messageCount: 1),
+            ]
+        }
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        let project = URL(fileURLWithPath: "/Users/me/ws/api")
+        // Engine bootstrap publishes an empty session id before Codex thread/start.
+        await bus.publish(.sessionStarted(sessionID: "", model: nil, cwd: project))
+        await drain()
+        #expect(listerCalls.count == 1)
+        #expect(vm.sessionsByProject[project.path] == [])
+
+        await bus.publish(.sessionStarted(sessionID: "thread-1", model: nil, cwd: project))
+        await drain()
+        #expect(listerCalls.count == 2)
+        #expect(vm.sessionsByProject[project.path]?.map(\.id) == ["thread-1"])
+        #expect(listerCalls.lastURL?.path == project.path)
+
+        await bus.shutdown()
+    }
+
+    @Test("new Codex session id on the same project reloads the sidebar session list")
+    func newSessionIDReloadsSessions() async {
+        final class CallCounter: @unchecked Sendable {
+            var count = 0
+        }
+        let listerCalls = CallCounter()
+        let (vm, bus, _) = makeModel()
+        vm.supportsResumableSessions = true
+        vm.sessionLister = { url in
+            listerCalls.count += 1
+            return [
+                SessionSummary(id: "thread-\(listerCalls.count)", agentID: .codex,
+                               workspace: url, title: "Chat \(listerCalls.count)",
+                               lastActivity: Date(), messageCount: 1),
+            ]
+        }
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        let project = URL(fileURLWithPath: "/Users/me/ws/api")
+        await bus.publish(.sessionStarted(sessionID: "thread-1", model: nil, cwd: project))
+        await drain()
+        #expect(listerCalls.count == 1)
+
+        // File → New Chat / .newSession eventually yields a new thread id.
+        await bus.publish(.sessionStarted(sessionID: "thread-2", model: nil, cwd: project))
+        await drain()
+        #expect(listerCalls.count == 2)
+        #expect(vm.sessionsByProject[project.path]?.first?.id == "thread-2")
 
         await bus.shutdown()
     }
