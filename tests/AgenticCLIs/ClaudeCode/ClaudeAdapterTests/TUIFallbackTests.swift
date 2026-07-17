@@ -16,13 +16,16 @@ struct TUIFallbackTests {
         #expect(events.contains { if case .fileTouched = $0 { return true }; return false })
     }
 
-    @Test func parsesAuthURL() async {
+    @Test func parsesAuthAsAuthenticationRequired() async {
         let fallback = ClaudeTUIFallback()
         let snapshot = TerminalSnapshot(plainText: """
         Please visit https://claude.ai/oauth/authorize?session=abc123 to authenticate.
         """)
         let events = await fallback.ingest(snapshot: snapshot)
-        #expect(events.contains { if case .authURL = $0 { return true }; return false })
+        #expect(events.contains {
+            if case .error(.authenticationRequired(let id)) = $0, id == .claudeCode { return true }
+            return false
+        })
     }
 
     @Test func parsesStatusPhrase() async {

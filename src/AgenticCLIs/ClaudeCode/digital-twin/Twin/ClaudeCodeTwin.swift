@@ -205,8 +205,8 @@ public final class ClaudeCodeTwin: AgentAdapter, @unchecked Sendable {
                                     stepDelay: stepDelay,
                                     runtime: runtime)
 
-        case .needsAuth(let url):
-            continuation.yield(.authURL(url))
+        case .needsAuth:
+            continuation.yield(.error(.authenticationRequired(agentID: .claudeCode)))
 
         case .usageOnly(let inputTokens, let outputTokens, let cost):
             continuation.yield(.usage(tokens: inputTokens + outputTokens, costUSD: cost))

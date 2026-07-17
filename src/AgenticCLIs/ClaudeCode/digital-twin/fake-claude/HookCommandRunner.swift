@@ -10,7 +10,7 @@ struct HookCommandRunner {
     init(workspace: URL) {
         self.workspace = workspace
         self.commands = ClaudeCodeTwinSettings.loadHookCommands(
-            from: ClaudeCodeTwinSettings.settingsURL(for: workspace)
+            from: Self.settingsURL(for: workspace)
         )
     }
 
@@ -22,5 +22,36 @@ struct HookCommandRunner {
                                          stdin: payload,
                                          cwd: workspace)
         }
+    }
+
+    private static func settingsURL(for workspace: URL) -> URL {
+        let candidates = workspaceVariants(for: workspace)
+            .map(ClaudeCodeTwinSettings.settingsURL(for:))
+        return candidates.first { FileManager.default.fileExists(atPath: $0.path) }
+            ?? ClaudeCodeTwinSettings.settingsURL(for: workspace)
+    }
+
+    private static func workspaceVariants(for workspace: URL) -> [URL] {
+        let candidates = [
+            workspace,
+            workspace.resolvingSymlinksInPath(),
+            privateVarAlias(for: workspace),
+            logicalVarAlias(for: workspace),
+        ].compactMap { $0 }
+
+        var seen: Set<String> = []
+        return candidates.filter { seen.insert($0.path).inserted }
+    }
+
+    private static func privateVarAlias(for workspace: URL) -> URL? {
+        let path = workspace.path
+        guard path.hasPrefix("/var/") else { return nil }
+        return URL(fileURLWithPath: "/private" + path, isDirectory: true)
+    }
+
+    private static func logicalVarAlias(for workspace: URL) -> URL? {
+        let path = workspace.path
+        guard path.hasPrefix("/private/var/") else { return nil }
+        return URL(fileURLWithPath: String(path.dropFirst("/private".count)), isDirectory: true)
     }
 }

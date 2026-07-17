@@ -5,6 +5,7 @@ import AgentUI
 import AgentProtocol
 import ClaudeCode
 import Codex
+import AgentClientProtocol
 import AgentRemoteControl
 
 @MainActor
@@ -21,13 +22,10 @@ final class Bootstrap {
     var showDebugTerminal: Bool = false
     var showEventLog: Bool = false
     var showSilentDiagnostics: Bool = false
-    var authURL: URL?
     var recents: [SessionStore.ProjectRecord] = []
     var startupError: String?
     /// False until `start()` finishes engine bootstrap and optional workspace restore.
     var isStartupComplete = false
-    /// Non-nil when the last `openWorkspace` failed with `binaryNotFound`.
-    var installHint: String?
     /// Folder chosen via Open Project that has no stored agent mode yet.
     var pendingConfigureURL: URL?
     var pendingConfigureResumeSessionID: String?
@@ -61,6 +59,7 @@ final class Bootstrap {
         let adapter = ClaudeAdapter()
         await AdapterRegistry.shared.register(adapter)
         await AdapterRegistry.shared.register(CodexAdapter())
+        await CustomAgentAdapterFactories.shared.register(ACPCustomAgentAdapterFactory())
 
         let env = Seams.live.environment.processEnvironment()
         if env["CODEMIXER_UI_BACKEND"] == "daemon" {
@@ -176,7 +175,6 @@ final class Bootstrap {
         showNewWorkspaceSheet = false
         pendingConfigureURL = nil
         pendingConfigureResumeSessionID = nil
-        installHint = nil
         startupError = nil
         try? await viewModel?.workspaceProjects?.clearActiveWorkspace()
         if let engine {
@@ -213,8 +211,6 @@ final class Bootstrap {
             let sub = await bus.subscribe()
             for await entry in sub.stream {
                 switch entry.event {
-                case .authURL(let url):
-                    self.authURL = url
                 case .speakBubbleRequested(let payload):
                     let parts = payload.split(separator: ":", maxSplits: 1)
                     let rawAction = parts.count > 1 ? String(parts[1]) : "play"
@@ -287,7 +283,6 @@ final class Bootstrap {
         showProjectPicker = false
         pendingConfigureURL = nil
         pendingConfigureResumeSessionID = nil
-        installHint = nil
         startupError = nil
         guard let engine = engine else {
             workspace = url
@@ -323,11 +318,7 @@ final class Bootstrap {
             await viewModel?.reloadProjects(rootMode: agentMode)
             try? await projectsStore?.markActiveWorkspace(url)
         } catch let err as AgentError {
-            if case .binaryNotFound(_, let hint) = err {
-                installHint = hint
-            } else {
-                startupError = err.userMessage
-            }
+            startupError = err.userMessage
             workspace = nil
             viewModel?.workspaceRoot = nil
             try? await projectsStore?.clearActiveWorkspace()

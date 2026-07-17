@@ -60,7 +60,8 @@ public actor ClaudeTUIFallback {
             return .fileTouched(URL(fileURLWithPath: path), kind: .tuiScraped)
         }
         if let url = matchAuthURL(trimmed) {
-            return .authURL(url)
+            _ = url
+            return .error(.authenticationRequired(agentID: .claudeCode))
         }
         if let phrase = matchStatusPhrase(trimmed) {
             return .statusPhraseChanged(source: .tuiScrape, phrase: phrase)

@@ -95,14 +95,22 @@ struct EngineDigitalTwinTests {
         )
     }
 
-    @Test("needsAuth scenario emits .authURL event")
+    @Test("needsAuth scenario emits authenticationRequired error")
     func needsAuthTurn() async throws {
         let authURL = URL(string: "https://auth.example.com/code?code=abc")!
         try await driveTurn(
             scenario: .needsAuth(url: authURL),
-            until: { events in events.contains(where: { if case .authURL = $0 { return true }; return false }) },
+            until: { events in events.contains(where: {
+                if case .error(.authenticationRequired) = $0 { return true }
+                return false
+            }) },
             assertion: { events in
-                #expect(events.contains(where: { if case .authURL = $0 { return true }; return false }))
+                #expect(events.contains(where: {
+                    if case .error(.authenticationRequired(let id)) = $0, id == .claudeCode {
+                        return true
+                    }
+                    return false
+                }))
             }
         )
     }

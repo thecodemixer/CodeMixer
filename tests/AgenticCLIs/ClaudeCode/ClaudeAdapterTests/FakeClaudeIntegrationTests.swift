@@ -16,13 +16,14 @@ struct FakeClaudeIntegrationTests {
             return
         }
 
-        let workspace = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("codemixer-fake-spawn-\(UUID().uuidString)", isDirectory: true)
+        let suffix = String(UUID().uuidString.prefix(8))
+        let workspace = URL(fileURLWithPath: "/tmp/cmw-\(suffix)", isDirectory: true)
         try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: workspace) }
 
-        let home = workspace.appendingPathComponent("home", isDirectory: true)
+        let home = URL(fileURLWithPath: "/tmp/cmh-\(suffix)", isDirectory: true)
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: home) }
 
         let clock = SystemClock()
         var env = FakeEnvironment(
@@ -107,13 +108,14 @@ struct FakeClaudeIntegrationTests {
 
     @Test("adapter transcript path emits assistantText through the engine bus")
     func adapterTranscriptPath() async throws {
-        let workspace = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("codemixer-fake-\(UUID().uuidString)", isDirectory: true)
+        let suffix = String(UUID().uuidString.prefix(8))
+        let workspace = URL(fileURLWithPath: "/tmp/cmw-\(suffix)", isDirectory: true)
         try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: workspace) }
 
-        let home = workspace.appendingPathComponent("home", isDirectory: true)
+        let home = URL(fileURLWithPath: "/tmp/cmh-\(suffix)", isDirectory: true)
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: home) }
 
         var env = FakeEnvironment(
             processEnv: [

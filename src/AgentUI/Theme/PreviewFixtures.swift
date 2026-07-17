@@ -19,10 +19,6 @@ enum PreviewFixtures {
               lastSessionID: nil),
     ]
 
-    static let sampleAuthURL = URL(string: "https://claude.ai/oauth/authorize?client_id=preview")!
-
-    static let installHint = "Install Claude Code with npm, then relaunch Codemixer."
-
     static func conversationMessages() -> [EngineViewModel.Message] {
         let userID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
         let asstID = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!

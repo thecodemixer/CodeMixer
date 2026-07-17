@@ -100,17 +100,6 @@ struct RootView: View {
         .sheet(isPresented: $bootstrap.showSilentDiagnostics) {
             SilentDiagnosticsView()
         }
-        .sheet(item: $bootstrap.authURL) { url in
-            AuthGateView(url: url, onDismiss: { bootstrap.authURL = nil })
-        }
-        .sheet(isPresented: Binding(
-            get: { bootstrap.installHint != nil },
-            set: { if !$0 { bootstrap.installHint = nil } }
-        )) {
-            InstallClaudeView(hint: bootstrap.installHint ?? "") {
-                bootstrap.installHint = nil
-            }
-        }
         .alert("Could not start agent",
                isPresented: Binding(
                    get: { bootstrap.startupError != nil },

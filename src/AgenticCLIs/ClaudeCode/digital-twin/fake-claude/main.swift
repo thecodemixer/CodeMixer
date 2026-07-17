@@ -14,7 +14,9 @@ if args.first == "auth" {
     }
 }
 
-let workspace = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+let workspacePath = ProcessInfo.processInfo.environment["PWD"]
+    ?? FileManager.default.currentDirectoryPath
+let workspace = URL(fileURLWithPath: workspacePath, isDirectory: true)
 let launch = FakeClaudeLaunch.parseInteractiveArgs()
 let sessionID = launch.resumeSessionID ?? ClaudeCodeTwinIdentifiers.sessionID()
 let scenario = FakeClaudeLaunch.resolveScenario()
