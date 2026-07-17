@@ -302,6 +302,67 @@ struct ACPAdapterTests {
         })
     }
 
+    @Test("consecutive session prompts finalize with distinct assistant ids")
+    func consecutiveSessionPromptsUseDistinctAssistantIDs() async throws {
+        let fs = InMemoryFileSystem()
+        let clock = FakeClock()
+        let firstID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+        let secondID = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+        let random = FakeRandomSource(uuids: [firstID, secondID])
+        let state = ACPClientState()
+        let context = LaunchContext(
+            workspace: URL(fileURLWithPath: "/tmp/acp-ws"),
+            permissionMode: .default
+        )
+        _ = ACPInputEncoding.bootstrap(
+            context: context,
+            state: state,
+            customAgentID: "x",
+            displayName: "Test Agent"
+        )
+        let decoder = ACPEventDecoder(
+            state: state,
+            sessionIndex: ACPSessionIndex(
+                environment: FakeEnvironment(),
+                fileSystem: fs,
+                clock: clock
+            ),
+            fileAccess: ACPFileAccess(
+                workspace: URL(fileURLWithPath: "/tmp/acp-ws"),
+                fileSystem: fs
+            ),
+            terminals: ACPTerminalSession(
+                workspace: URL(fileURLWithPath: "/tmp/acp-ws"),
+                random: random
+            ),
+            clock: clock,
+            random: random
+        )
+
+        let firstPromptID = state.nextRequestID(for: .sessionPrompt)
+        _ = await decoder.decode(agentMessageChunk("first response"))
+        let firstFinal = await decoder.decode(.response(
+            id: firstPromptID,
+            result: .object(["stopReason": .string("end_turn")]),
+            error: nil
+        ))
+
+        let secondPromptID = state.nextRequestID(for: .sessionPrompt)
+        _ = await decoder.decode(agentMessageChunk("second response"))
+        let secondFinal = await decoder.decode(.response(
+            id: secondPromptID,
+            result: .object(["stopReason": .string("end_turn")]),
+            error: nil
+        ))
+
+        let firstAssistant = finalizedAssistant(in: firstFinal.events)
+        let secondAssistant = finalizedAssistant(in: secondFinal.events)
+        #expect(firstAssistant?.id == firstID.uuidString)
+        #expect(firstAssistant?.text == "first response")
+        #expect(secondAssistant?.id == secondID.uuidString)
+        #expect(secondAssistant?.text == "second response")
+    }
+
     @Test("fs read rejects paths outside workspace")
     func fsSandbox() async {
         let fs = InMemoryFileSystem()
@@ -486,6 +547,31 @@ struct ACPAdapterTests {
         } else {
             Issue.record("expected writePTY delivery")
         }
+    }
+
+    private func agentMessageChunk(_ text: String) -> ACPIncoming {
+        .notification(
+            method: "session/update",
+            params: .object([
+                "sessionId": .string("s1"),
+                "update": .object([
+                    "sessionUpdate": .string("agent_message_chunk"),
+                    "content": .object([
+                        "type": .string("text"),
+                        "text": .string(text),
+                    ]),
+                ]),
+            ])
+        )
+    }
+
+    private func finalizedAssistant(in events: [AgentEvent]) -> (id: String, text: String)? {
+        for event in events {
+            if case .assistantText(let id, _, let text, true) = event {
+                return (id, text)
+            }
+        }
+        return nil
     }
 
     private func makeAdapter() -> ACPAdapter {

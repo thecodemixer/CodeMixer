@@ -273,6 +273,7 @@ public final class ACPClientState: @unchecked Sendable {
             guard let text = assistantTextByItemID[itemID], !text.isEmpty,
                   let id = itemIDs[itemID] else { return nil }
             assistantTextByItemID.removeValue(forKey: itemID)
+            itemIDs.removeValue(forKey: itemID)
             return (id, text)
         }
     }
