@@ -35,7 +35,7 @@ public enum HookError: Error, Sendable {
 public enum AgentError: Error, Codable, Sendable {
     case binaryNotFound(agentID: AgentID, hint: String)
     case spawnFailed(errno: Int32, detail: String)
-    case authenticationRequired(loginURL: URL?)
+    case authenticationRequired(agentID: AgentID)
     case staleEditTarget(targetID: UUID)
     case permissionTimeout(promptID: UUID, action: PermissionDecision)
     case internalInvariant(detail: String)

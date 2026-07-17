@@ -16,12 +16,14 @@ let package = Package(
         .library(name: "AgentCore", targets: ["AgentCore"]),
         .library(name: "ClaudeCode", targets: ["ClaudeCode"]),
         .library(name: "Codex", targets: ["Codex"]),
+        .library(name: "AgentClientProtocol", targets: ["AgentClientProtocol"]),
         .library(name: "AgentRemoteControl", targets: ["AgentRemoteControl"]),
         .library(name: "AgentUI", targets: ["AgentUI"]),
         .library(name: "AgentTestSupport", targets: ["AgentTestSupport"]),
         .executable(name: "codemixerd", targets: ["CodemixerDaemon"]),
         .executable(name: "codemixer", targets: ["CodemixerApp"]),
         .executable(name: "fake-claude", targets: ["FakeClaudeCLI"]),
+        .executable(name: "fake-acp", targets: ["FakeACPCLI"]),
     ],
     dependencies: [
         .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.2.0"),
@@ -67,6 +69,16 @@ let package = Package(
             swiftSettings: swiftSettings
         ),
         .target(
+            name: "AgentClientProtocol",
+            dependencies: ["AgentCore", "AgentProtocol"],
+            path: "src/AgenticCLIs/AgentClientProtocol",
+            exclude: [
+                "README.md",
+                "digital-twin/fake-acp",
+            ],
+            swiftSettings: swiftSettings
+        ),
+        .target(
             name: "AgentRemoteControl",
             dependencies: ["AgentCore", "AgentProtocol"],
             path: "src/Remote/AgentRemoteControl",
@@ -92,14 +104,20 @@ let package = Package(
             swiftSettings: swiftSettings
         ),
         .executableTarget(
+            name: "FakeACPCLI",
+            dependencies: ["AgentClientProtocol"],
+            path: "src/AgenticCLIs/AgentClientProtocol/digital-twin/fake-acp",
+            swiftSettings: swiftSettings
+        ),
+        .executableTarget(
             name: "CodemixerDaemon",
-            dependencies: ["AgentCore", "ClaudeCode", "Codex", "AgentRemoteControl"],
+            dependencies: ["AgentCore", "ClaudeCode", "Codex", "AgentClientProtocol", "AgentRemoteControl"],
             path: "src/Remote/CodemixerDaemon",
             swiftSettings: swiftSettings
         ),
         .executableTarget(
             name: "CodemixerApp",
-            dependencies: ["AgentCore", "AgentUI", "ClaudeCode", "Codex", "AgentRemoteControl"],
+            dependencies: ["AgentCore", "AgentUI", "ClaudeCode", "Codex", "AgentClientProtocol", "AgentRemoteControl"],
             path: "src/CodemixerApp",
             exclude: [
                 "Info.plist",
@@ -139,6 +157,12 @@ let package = Package(
             swiftSettings: swiftSettings
         ),
         .testTarget(
+            name: "ACPAdapterTests",
+            dependencies: ["AgentClientProtocol", "AgentCore", "AgentTestSupport"],
+            path: "tests/AgenticCLIs/AgentClientProtocol/ACPAdapterTests",
+            swiftSettings: swiftSettings
+        ),
+        .testTarget(
             name: "AgentRemoteControlTests",
             dependencies: ["AgentRemoteControl", "AgentTestSupport"],
             path: "tests/Remote/AgentRemoteControlTests",
@@ -166,6 +190,12 @@ let package = Package(
             name: "CodexTwinTests",
             dependencies: ["Codex", "AgentCore", "AgentProtocol", "AgentTestSupport"],
             path: "tests/AgenticCLIs/Codex/CodexTwinTests",
+            swiftSettings: swiftSettings
+        ),
+        .testTarget(
+            name: "ACPTwinTests",
+            dependencies: ["AgentClientProtocol", "AgentCore", "AgentProtocol", "AgentTestSupport"],
+            path: "tests/AgenticCLIs/AgentClientProtocol/ACPTwinTests",
             swiftSettings: swiftSettings
         ),
         .testTarget(

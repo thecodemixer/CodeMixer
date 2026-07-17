@@ -118,8 +118,8 @@ public struct AgentTransportDescriptor: Sendable, Hashable, Codable {
   invocations.
 - Codex declares `.stdioJSONRPC`; the implementation spawns
   `codex app-server --stdio` and sends JSON-RPC frames directly.
-- `.agentClientProtocol` is reserved and currently returns an explicit
-  unsupported transport error until a real ACP implementation lands.
+- Custom ACP agents declare `.agentClientProtocol`; the factory reuses
+  `StdioJSONRPCTransport` and the `AgentClientProtocol` adapter owns framing.
 
 Transport is not a capability bit. Capabilities describe optional signal
 sources and adapter features; transport describes the process/connection shape.

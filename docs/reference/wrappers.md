@@ -60,7 +60,7 @@ public actor ProcessRunner {
 **File**: `src/Core/AgentCore/External/StdioJSONRPCTransport.swift`
 **Wraps**: `Foundation.Process` for a long-lived stdin/stdout/stderr agent session.
 **Consumers**:
-- `AgentEngine` through `LiveAgentTransportFactory` when an adapter declares `.stdioJSONRPC` (Codex App Server).
+- `AgentEngine` through `LiveAgentTransportFactory` when an adapter declares `.stdioJSONRPC` (Codex App Server) or `.agentClientProtocol` (ACP client adapter).
 
 **Public API**: internal `AgentTransport` conformance.
 
@@ -81,6 +81,38 @@ public actor StdioJSONRPCTransport: AgentTransport {
 input stream; stderr is kept as a bounded diagnostic tail and never surfaced as
 agent output.
 **Threading**: actor; readability handlers bounce into actor methods.
+
+---
+
+## `ACPTerminalProcess`
+
+**File**: `src/AgenticCLIs/AgentClientProtocol/External/ACPTerminalProcess.swift`
+**Wraps**: `Foundation.Process` for a short-lived reverse-terminal subprocess.
+**Consumers**:
+- `ACPTerminalSession` when an ACP agent server calls `terminal/create`.
+
+**Public API**:
+
+```swift
+public actor ACPTerminalProcess {
+    public struct Snapshot: Sendable {
+        public let output: String
+        public let exitCode: Int32?
+        public let truncated: Bool
+    }
+
+    public func start(executable: URL, arguments: [String], cwd: URL?,
+                      environment: [String: String]?) throws
+    public func snapshot() -> Snapshot
+    public func waitForExit() async -> Int32?
+    public func kill()
+    public func release()
+}
+```
+
+**Lifetime**: one new process per `terminal/create` (not reused). Output is
+bounded; callers poll via `terminal/output` and tear down with `kill`/`release`.
+**Threading**: actor; process pipes are drained on a background queue.
 
 ---
 

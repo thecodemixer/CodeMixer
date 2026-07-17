@@ -59,6 +59,26 @@
             "target": "fake-claude",
             "configuration": "release",
             "preLaunchTask": "swift: Build Release fake-claude"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:CodeMixer}",
+            "name": "Debug fake-acp",
+            "target": "fake-acp",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug fake-acp"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:CodeMixer}",
+            "name": "Release fake-acp",
+            "target": "fake-acp",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release fake-acp"
         }
     ]
 }

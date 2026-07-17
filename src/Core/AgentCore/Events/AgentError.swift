@@ -60,7 +60,14 @@ public enum AgentError: Error, Sendable, Equatable {
         case .workspaceInvalid(let path, _):
             return "The workspace at \(path) isn't usable."
         case .authenticationRequired(let id):
-            return "\(id.rawValue) needs to be signed in."
+            switch id {
+            case .claudeCode:
+                return "Claude Code is not signed in. Run `claude` auth/login in Terminal, then open this project again."
+            case .codex:
+                return "Codex is not signed in. Run `codex login` in Terminal, then open this project again."
+            default:
+                return "This agent requires authentication. Run its login/auth command in Terminal, then open this project again."
+            }
         case .staleEditTarget:
             return "The message you tried to edit was already replaced."
         case .unsupportedCommand(let name):

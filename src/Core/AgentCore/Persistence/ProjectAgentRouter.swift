@@ -22,6 +22,12 @@ public enum ProjectAgentRouter {
                                       sessionAgentID: AgentID? = nil,
                                       preferredForNewChat: AgentID? = nil,
                                       registry: AdapterRegistry = .shared) async -> (any AgentAdapter)? {
+        if case .custom(let ref) = mode {
+            if let custom = await CustomAgentAdapterFactories.shared.makeAdapter(for: ref) {
+                return custom
+            }
+            // Fall through to registry `.other` only when no factory matched.
+        }
         guard let id = resolveAdapterID(mode: mode,
                                         sessionAgentID: sessionAgentID,
                                         preferredForNewChat: preferredForNewChat) else {

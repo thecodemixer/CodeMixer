@@ -6,6 +6,7 @@ public enum AppSupportPaths {
     public static let sessionsFileName = "sessions.json"
     public static let workspacesFileName = "workspaces.json"
     public static let codexThreadsFileName = "codex-threads.json"
+    public static let acpSessionsFileName = "acp-sessions.json"
     public static let attachmentsDirectoryName = "attachments"
     public static let remoteServerP12FileName = "remote-server.p12"
 
@@ -23,6 +24,10 @@ public enum AppSupportPaths {
 
     public static func codexThreadsURL(in appSupport: URL) -> URL {
         appSupport.appendingPathComponent(codexThreadsFileName)
+    }
+
+    public static func acpSessionsURL(in appSupport: URL) -> URL {
+        appSupport.appendingPathComponent(acpSessionsFileName)
     }
 
     public static func attachmentsDirectory(in appSupport: URL) -> URL {

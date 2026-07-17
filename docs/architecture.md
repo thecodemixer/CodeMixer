@@ -415,7 +415,7 @@ public enum AgentEvent: Sendable {
 | **Conversation** | `userTurn`, `textDelta`, `assistantText`, `thinkingChunk`, `thinkingComplete` |
 | **Tool execution** | `toolStart`, `toolProgress`, `toolEnd` |
 | **Permissions** | `permissionRequest`, `permissionAlreadyResolved` |
-| **Activity & ambient** | `statusPhraseChanged`, `activityStateChanged`, `noEventGap`, `authURL`, `bell`, `fileTouched`, `usage` |
+| **Activity & ambient** | `statusPhraseChanged`, `activityStateChanged`, `noEventGap`, `authURL` (legacy wire; adapters use `authenticationRequired` errors for setup), `bell`, `fileTouched`, `usage` |
 
 A consumer that knows nothing else can render a complete conversation by folding these events. New event cases require: (a) wire DTO in `AgentEventWire`, (b) `WireCodec` round-trip, (c) `RemoteParityTests` coverage, (d) a UI consumer or an explicit decision that none is wanted.
 
@@ -452,7 +452,8 @@ AgentTransportFactory
         │                           └─ TerminalEngine snapshots + bell stream
         ├── .stdioJSONRPC ────────► StdioJSONRPCTransport
         │                           └─ Process pipes: stdin/stdout/stderr
-        └── .agentClientProtocol ─► explicit unsupported error until implemented
+        └── .agentClientProtocol ─► StdioJSONRPCTransport
+                                    └─ same NDJSON stdio host; ACP framing in adapter
         │
         ▼
 AgentInputs(outputBytes, terminal?, hookSocket?, workspace, sessionID)
@@ -494,8 +495,8 @@ never depend on PTY-named launch types.
 - **Stdio JSON-RPC transport:** long-lived `Foundation.Process` wrapper in
   `External/StdioJSONRPCTransport.swift`; stdout is agent output, stderr is a
   bounded diagnostics tail, and cancel is a JSON-RPC frame rather than SIGINT.
-- **ACP:** reserved descriptor only. The factory returns an explicit
-  unsupported error until a real implementation exists.
+- **ACP:** uses the same `StdioJSONRPCTransport` host; the
+  `AgentClientProtocol` adapter owns JSON-RPC 2.0 framing and session mapping.
 
 ### PTYHost shape
 
@@ -1166,7 +1167,7 @@ public actor WorkspaceProjectsStore {
 }
 ```
 
-It contains **no** Claude/terminal specifics — sessions are not modelled here; they flow through `AgentAdapter.listResumableSessions`, so the navigator works for direct-API/ACP agents (which simply declare no `.resumableSessions` capability and show *New Chat only*). Navigation actions in `EngineViewModel` (`newChat`, `openSession`) route through the wire `AgentCommand`s `.newSession` / `.openProject`, so the GUI, remote clients, and CLI all reach the same behavior. Sidebar visibility is GUI chrome persisted through `AppearancePrefs` (never on the wire, never `UserDefaults`).
+It contains **no** Claude/terminal specifics — sessions are not modelled here; they flow through `AgentAdapter.listResumableSessions`, so the navigator works for Claude, Codex, and custom ACP (local `ACPSessionIndex`) alike. Adapters without `.resumableSessions` show *New Chat only*. Navigation actions in `EngineViewModel` (`newChat`, `openSession`) route through the wire `AgentCommand`s `.newSession` / `.openProject`, so the GUI, remote clients, and CLI all reach the same behavior. Sidebar visibility is GUI chrome persisted through `AppearancePrefs` (never on the wire, never `UserDefaults`).
 
 ### Atomic writes
 
@@ -1283,7 +1284,7 @@ The daemon is a thin `@main` over `AgentEngine + AgentRemoteControl + ClaudeCode
 
 When the LaunchAgent is installed or `CODEMIXER_UI_BACKEND=daemon` is set, `Bootstrap` probes the daemon via `RemoteEngineClient.connect()`. On success the GUI is a loopback WebSocket client (same wire as any remote peer). On failure it records `SilentDiagnostics.modeBFallback` and starts an in-process `AgentEngine` instead — no error toast.
 
-`Bootstrap.startAppEventBridge` subscribes to the bus and wires `authURL` → auth sheet, `bell` / hook status phrases → `UserNotificationBridge`, and TTS requests.
+`Bootstrap.startAppEventBridge` subscribes to the bus and wires `bell` / hook status phrases → `UserNotificationBridge`, and TTS requests. Agent auth and missing-binary failures surface as `startupError` / diagnostics (`authenticationRequired`, `binaryNotFound`) — there is no in-app agent login or install sheet.
 
 ---
 
@@ -1341,7 +1342,7 @@ public enum PTYError: Error, Sendable {
 public enum AgentError: Error, Codable, Sendable {
     case binaryNotFound(agentID: AgentID, hint: String)
     case spawnFailed(errno: Int32, detail: String)
-    case authenticationRequired(loginURL: URL?)
+    case authenticationRequired(agentID: AgentID)
     case staleEditTarget(targetID: UUID)
     case permissionTimeout(promptID: UUID, action: PermissionDecision)
     case internalInvariant(detail: String)

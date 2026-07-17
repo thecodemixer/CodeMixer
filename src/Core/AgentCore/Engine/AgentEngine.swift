@@ -210,7 +210,8 @@ public actor AgentEngine: AgentEngineCommandPort {
                                     permissionMode: permissionMode,
                                     extraEnv: adapter.defaultEnvOverrides())
         let argv = adapter.buildLaunchArgv(context: context)
-        let env = resolvedEnv.ptySpawnEnvironment(adapterOverrides: adapter.defaultEnvOverrides())
+        var env = resolvedEnv.ptySpawnEnvironment(adapterOverrides: adapter.defaultEnvOverrides())
+        env["PWD"] = workspace.path
 
         let launch = AgentTransportLaunchSpec(
             executable: binary,

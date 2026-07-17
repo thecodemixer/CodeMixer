@@ -116,7 +116,7 @@ public enum AgentTransportError: Error, Sendable, Equatable {
 }
 
 /// Default factory: interactive terminal wraps `PTYHost` + `TerminalEngine`;
-/// stdio JSON-RPC wraps `StdioJSONRPCTransport`; ACP is reserved.
+/// stdio JSON-RPC wraps `StdioJSONRPCTransport`; ACP also uses stdio JSON-RPC.
 enum LiveAgentTransportFactory {
     static func make(descriptor: AgentTransportDescriptor,
                      launch: AgentTransportLaunchSpec) throws -> any AgentTransport {
@@ -126,7 +126,7 @@ enum LiveAgentTransportFactory {
         case .stdioJSONRPC:
             return try StdioJSONRPCTransport(launch: launch)
         case .agentClientProtocol:
-            throw AgentTransportError.unsupportedKind(.agentClientProtocol)
+            return try StdioJSONRPCTransport(launch: launch)
         }
     }
 }

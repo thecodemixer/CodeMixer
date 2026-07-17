@@ -204,3 +204,65 @@ Static helpers for assertions without a full turn:
 - `LiveCodexHarness.launchArgvIsAppServerStdio()` — argv is `codex app-server --stdio`.
 - `LiveCodexHarness.transportIsStdioJSONRPC()` — descriptor matches the stdio JSON-RPC transport.
 
+---
+
+## Agent Client Protocol (ACP)
+
+Tests live under `tests/AgenticCLIs/AgentClientProtocol/`.
+
+| File | Role |
+| --- | --- |
+| `ACPAdapterTests/ACPAdapterTests.swift` | Adapter surface, factory, transport, permissions |
+| `ACPAdapterTests/ACPProtocolTests.swift` | Framing, JSON-RPC codec, incoming decode |
+| `ACPAdapterTests/ACPInputEncodingTests.swift` | Bootstrap, session open, prompts, cancel, auth |
+| `ACPAdapterTests/ACPEventDecoderTests.swift` | Session lifecycle, streaming, tools, permissions |
+| `ACPAdapterTests/ACPReverseRPCTests.swift` | Reverse filesystem + terminal RPC handlers |
+| `ACPAdapterTests/ACPSessionIndexTests.swift` | Resumable session persistence and listing |
+| `ACPAdapterTests/ACPAdapterStreamTests.swift` | Adapter `makeEventStream` integration |
+| `ACPAdapterTests/FakeACPIntegrationTests.swift` | Suite `AgentEngine + ACPAdapter + fake-acp` (spawned stdio path) |
+| `ACPAdapterTests/LiveACPHarness.swift` | Reusable opt-in driver against a real ACP agent server |
+| `ACPAdapterTests/LiveACPIntegrationTests.swift` | Suite `AgentEngine + ACPAdapter live harness` |
+| `ACPTwinTests/ACPTwinTests.swift` | Deterministic twin (auth + happy path) |
+
+| Kind | Needs real binary? | Network? | Suite |
+| --- | --- | --- | --- |
+| Unit / twin | No | No | `ACPAdapterTests`, `ACPTwinTests` |
+| Spawned twin | `fake-acp` (see below) | No | `FakeACPIntegrationTests` |
+| Live harness | Yes (`CODEMIXER_LIVE_ACP_BIN`) | Agent-dependent | `LiveACPIntegrationTests` |
+
+Build `fake-acp` before spawned integration tests (or run `swift build` once):
+
+```bash
+swift build --product fake-acp
+```
+
+Scenarios are selected with `CODEMIXER_TWIN_SCENARIO` (`text`, `permission`,
+`fsRead`, `auth`, `authFail`, `resume`).
+
+```bash
+# Always-on unit coverage
+swift test --no-parallel --filter ACPAdapter
+
+# Full live validation — configured ACP agent server
+CODEMIXER_LIVE_ACP=1 CODEMIXER_LIVE_ACP_BIN=/path/to/agent \
+  swift test --no-parallel --filter LiveACPIntegrationTests
+
+# Cursor Agent ACP server
+CODEMIXER_LIVE_ACP=1 \
+  CODEMIXER_LIVE_ACP_BIN=/Users/hari/.local/bin/cursor-agent \
+  CODEMIXER_LIVE_ACP_ARGS=acp \
+  swift test --no-parallel --filter LiveACPIntegrationTests
+```
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `CODEMIXER_LIVE_ACP=1` | Yes (for live turn) | Opt in to a real ACP agent process |
+| `CODEMIXER_LIVE_ACP_BIN` | Yes (for live turn) | Path to the ACP agent-server executable |
+| `CODEMIXER_LIVE_ACP_ARGS` | No | Space-separated argv after the binary |
+| `CODEMIXER_LIVE_WORKSPACE` | No | Workspace directory (defaults to process cwd) |
+
+Auth and install remain out-of-band: if the agent requires login, Codemixer surfaces
+`authenticationRequired` / `startupError` and does not open an auth sheet.
+For Cursor Agent ACP, authenticate the CLI first or provide `CURSOR_API_KEY`;
+otherwise the live harness fails fast with `authenticationRequired`.
+

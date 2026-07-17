@@ -94,7 +94,7 @@ Adding `src/AgenticCLIs/CursorCLI/` (example):
 
 1. **Library target** — `path: "src/AgenticCLIs/CursorCLI"`, `exclude: ["README.md", "digital-twin/fake-cursor"]` only if a fake binary exists.
 2. **Product** — `.library(name: "CursorCLI", targets: ["CursorCLI"])`.
-3. **Transport descriptor** — `.interactiveTerminal` for terminal/TUI agents, `.stdioJSONRPC` for App Server style agents, or a real future ACP descriptor.
+3. **Transport descriptor** — `.interactiveTerminal` for terminal/TUI agents, `.stdioJSONRPC` for App Server style agents, or `.agentClientProtocol` for ACP stdio clients.
 4. **Fake executable** (if any) — separate `executableTarget` under `digital-twin/`.
 5. **Register at startup** — `await AdapterRegistry.shared.register(CodexAdapter())` in `CodemixerApp` / `CodemixerDaemon` only; never from `AgentCore` or `AgentUI`.
 6. **Tests** — `tests/AgenticCLIs/<AgentName>/<Agent>AdapterTests/`, optional `<Agent>TwinTests/`; depend on the new library, not on other agents. See [`tests/AgenticCLIs/README.md`](../../tests/AgenticCLIs/README.md).
@@ -108,6 +108,7 @@ Adding `src/AgenticCLIs/CursorCLI/` (example):
 | --- | --- | --- | --- |
 | [`ClaudeCode/`](ClaudeCode/README.md) | `ClaudeCode` | `claude` | `fake-claude` |
 | [`Codex/`](Codex/README.md) | `Codex` | `codex` | none |
+| [`AgentClientProtocol/`](AgentClientProtocol/README.md) | `AgentClientProtocol` | user-configured ACP binary | none (digital twin) |
 
 ---
 
@@ -116,4 +117,4 @@ Adding `src/AgenticCLIs/CursorCLI/` (example):
 - Claude Code contract (v1 reference): [`ClaudeCode/README.md`](ClaudeCode/README.md)
 - Claude Code executable spec: [`ClaudeCode/CONTRACT.md`](ClaudeCode/CONTRACT.md)
 - Adapter / twin / live test catalog: [`tests/AgenticCLIs/README.md`](../../tests/AgenticCLIs/README.md)
-  (includes opt-in `CODEMIXER_LIVE_CLAUDE=1` and `CODEMIXER_LIVE_CODEX=1` harnesses)
+  (includes opt-in `CODEMIXER_LIVE_CLAUDE=1`, `CODEMIXER_LIVE_CODEX=1`, and `CODEMIXER_LIVE_ACP=1` harnesses)

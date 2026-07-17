@@ -51,6 +51,7 @@ let requiredPaths = [
     "src/Core/CPosixBridge/CPosixBridge.c",
     "src/AgenticCLIs/ClaudeCode/README.md",
     "src/AgenticCLIs/Codex/README.md",
+    "src/AgenticCLIs/AgentClientProtocol/README.md",
     "tests/AgenticCLIs/README.md",
 ]
 
@@ -64,8 +65,13 @@ let requiredDirectories = [
     "src/AgenticCLIs/Codex/Adapter",
     "src/AgenticCLIs/Codex/Common",
     "src/AgenticCLIs/Codex/digital-twin/Twin",
+    "src/AgenticCLIs/AgentClientProtocol/Adapter",
+    "src/AgenticCLIs/AgentClientProtocol/Common",
+    "src/AgenticCLIs/AgentClientProtocol/External",
+    "src/AgenticCLIs/AgentClientProtocol/digital-twin/Twin",
     "tests/AgenticCLIs/ClaudeCode",
     "tests/AgenticCLIs/Codex",
+    "tests/AgenticCLIs/AgentClientProtocol",
 ]
 
 let requiredTestSuites = [
@@ -74,11 +80,13 @@ let requiredTestSuites = [
     "tests/Core/AgentCoreTests",
     "tests/AgenticCLIs/ClaudeCode/ClaudeAdapterTests",
     "tests/AgenticCLIs/Codex/CodexAdapterTests",
+    "tests/AgenticCLIs/AgentClientProtocol/ACPAdapterTests",
     "tests/Remote/AgentRemoteControlTests",
     "tests/AgentUITests",
     "tests/Remote/RemoteParityTests",
     "tests/AgenticCLIs/ClaudeCode/ClaudeCodeTwinTests",
     "tests/AgenticCLIs/Codex/CodexTwinTests",
+    "tests/AgenticCLIs/AgentClientProtocol/ACPTwinTests",
     "tests/TestSupport/AgentTestSupportTests",
 ]
 

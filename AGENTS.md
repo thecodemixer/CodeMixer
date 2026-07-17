@@ -98,6 +98,12 @@ Codemixer/
 | Codex App Server protocol helpers | `AgenticCLIs/Codex/Common/*.swift` |
 | Codex digital twin | `AgenticCLIs/Codex/digital-twin/Twin/CodexTwin.swift` |
 | Live Codex harness (opt-in tests) | `tests/AgenticCLIs/Codex/CodexAdapterTests/LiveCodexHarness.swift` — docs in `tests/AgenticCLIs/README.md` |
+| ACP adapter top-level | `AgenticCLIs/AgentClientProtocol/Adapter/ACPAdapter.swift` |
+| ACP framing / codec / session index / reverse FS+terminal | `AgenticCLIs/AgentClientProtocol/Common/*.swift` |
+| ACP reverse-terminal process wrapper | `AgenticCLIs/AgentClientProtocol/External/ACPTerminalProcess.swift` |
+| ACP digital twin | `AgenticCLIs/AgentClientProtocol/digital-twin/Twin/ACPTwin.swift` |
+| Custom ACP factory registration | `CustomAgentAdapterFactory` + `ACPCustomAgentAdapterFactory` (Bootstrap/daemon) |
+| Live ACP harness (opt-in tests) | `tests/AgenticCLIs/AgentClientProtocol/ACPAdapterTests/LiveACPHarness.swift` — docs in `tests/AgenticCLIs/README.md` |
 | Agentic CLI layout convention | `AgenticCLIs/README.md` |
 | The wire DTOs (Foundation-only) | `Core/AgentProtocol/{AgentCommand,AgentEventWire,WireFrames,Decisions,Prefs,AttachmentRef,WireVersion}.swift` |
 | WebSocket server | `Remote/AgentRemoteControl/RemoteControlServer.swift`, `ClientConnection.swift` |
@@ -126,14 +132,14 @@ Codemixer/
 | Silent diagnostics (opt-in) | `AgentUI/Debug/SilentDiagnosticsView.swift`, `Core/AgentCore/Diagnostics/SilentDiagnostics.swift` |
 | Changed-files reconcile | `Core/AgentCore/Engine/ChangedFilesReconciler.swift` |
 | Appearance at root | `AgentUI/Theme/AppearanceModifiers.swift`, applied from `CodemixerApp/RootView.swift` |
-| Bootstrap (Mode B probe, auth, notifications) | `CodemixerApp/Bootstrap.swift`, `Bootstrap+Remote.swift` |
+| Bootstrap (Mode B probe, notifications) | `CodemixerApp/Bootstrap.swift`, `Bootstrap+Remote.swift` |
 | Diff panel | `AgentUI/Diff/DiffPanelView.swift` |
 | Settings pane | `AgentUI/Settings/SettingsView.swift` |
 | Project picker | `AgentUI/Pickers/ProjectPickerView.swift` |
 | Conversation search | `AgentUI/Search/ConversationSearchBar.swift` |
 | Session export | `AgentUI/Export/SessionExporter.swift` |
 | Voice input + TTS | `AgentUI/Voice/{VoiceInputService,TTSService}.swift` |
-| Auth gate + install-Claude flow | `AgentUI/Auth/{AuthGateView,InstallClaudeView}.swift` |
+| Auth / install errors (CLI guidance, no in-app auth sheets) | Adapters emit `authenticationRequired` / `binaryNotFound`; Bootstrap surfaces `startupError` |
 | Notifications bridge | `AgentUI/Notifications/UserNotificationBridge.swift` |
 | Cost badge + shared primitives | `AgentUI/Components/{CostBadgeView,Primitives}.swift` |
 | Debug terminal / event-log inspectors | `AgentUI/Debug/{DebugTerminalSheet,EventLogView}.swift` |
@@ -220,6 +226,9 @@ tests/
 | Claude digital twin + engine E2E | `AgenticCLIs/ClaudeCode/ClaudeCodeTwinTests/{EngineDigitalTwinTests,TwinDecoderParityTests}.swift` |
 | Codex adapter protocol + live harness | `AgenticCLIs/Codex/CodexAdapterTests/{CodexAdapterTests,LiveCodexHarness,LiveCodexIntegrationTests}.swift` — see [`tests/AgenticCLIs/README.md`](tests/AgenticCLIs/README.md) |
 | Codex digital twin | `AgenticCLIs/Codex/CodexTwinTests/CodexTwinTests.swift` |
+| ACP adapter + factory + framing | `AgenticCLIs/AgentClientProtocol/ACPAdapterTests/ACPAdapterTests.swift` |
+| Live ACP harness (opt-in) | `AgenticCLIs/AgentClientProtocol/ACPAdapterTests/{LiveACPHarness,LiveACPIntegrationTests}.swift` — see [`tests/AgenticCLIs/README.md`](tests/AgenticCLIs/README.md) |
+| ACP digital twin | `AgenticCLIs/AgentClientProtocol/ACPTwinTests/ACPTwinTests.swift` |
 | FakeClock virtual sleep | `TestSupport/AgentTestSupportTests/FakeClockTests.swift` |
 | Pairing PIN + lockout | `Remote/AgentRemoteControlTests/PairingServiceTests.swift` |
 | Paired-device store | `Remote/AgentRemoteControlTests/PairedDeviceStoreTests.swift` |

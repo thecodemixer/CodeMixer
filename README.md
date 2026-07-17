@@ -1,6 +1,6 @@
 # Codemixer
 
-> A native macOS workspace for agentic CLI coding agents — Claude Code through a hidden interactive terminal transport, Codex through App Server stdio JSON-RPC. Everything you see is SwiftUI driven by a typed event stream. No terminal pane, no Electron, and no accidental Agent Credits usage from third-party / SDK-style Claude Code invocations. The same engine also runs **headless** as `codemixerd` so a future mobile client (or your own scripts) can drive it over a typed WebSocket protocol.
+> A native macOS workspace for agentic CLI coding agents — Claude Code through a hidden interactive terminal transport, Codex through App Server stdio JSON-RPC, and custom ACP agents over the same stdio JSON-RPC host. Everything you see is SwiftUI driven by a typed event stream. No terminal pane, no Electron, and no accidental Agent Credits usage from third-party / SDK-style Claude Code invocations. The same engine also runs **headless** as `codemixerd` so a future mobile client (or your own scripts) can drive it over a typed WebSocket protocol.
 
 ---
 
@@ -31,7 +31,7 @@ The constraint set was unusual enough that none of the off-the-shelf wrappers fi
 1. **Keep Claude Code on the interactive billing path.** When third-party clients or SDK-style entrypoints invoke Claude Code, they can route usage through Agent Credits. Codemixer runs `claude` as a real interactive terminal session instead, so Claude usage stays on the interactive subscription path rather than the Agent Credits path.
 2. **Hide the transport entirely.** TUI panes with ANSI flicker, cursor jumps, and spinner artifacts are not the experience anyone wants in 2026. Terminal transports stay invisible, and stdio transports are direct protocol peers; both become typed `AgentEvent`s rendered by native SwiftUI components.
 3. **Run with or without the UI.** The same engine has to power the GUI app, a headless daemon, and (one day soon) an iOS client connecting over Wi-Fi. There can be no UI-only feature and no API-only feature.
-4. **Stay agent-agnostic.** Claude and Codex ship as sibling adapters behind a single `AgentAdapter` protocol. The engine selects an `AgentTransport` from the adapter descriptor — terminal for Claude, stdio JSON-RPC for Codex — and the UI never grows per-agent branches.
+4. **Stay agent-agnostic.** Claude, Codex, and custom ACP ship as sibling adapters behind a single `AgentAdapter` protocol. The engine selects an `AgentTransport` from the adapter descriptor — terminal for Claude, stdio JSON-RPC for Codex and ACP — and the UI never grows per-agent branches.
 5. **Mouse, keyboard, voice, and remote API are peer interaction surfaces.** Every UI affordance maps to exactly one `AgentCommand` case; a parity test refuses merges that add a button without wiring its case across the WebSocket protocol.
 
 That combination is what `Codemixer` solves.
@@ -44,9 +44,9 @@ That combination is what `Codemixer` solves.
 
 Engine + protocol spine:
 
-- ✅ Generic transport pipeline: `AgentTransport` → interactive terminal (`PTYHost` + `TerminalEngine`) or stdio JSON-RPC (`StdioJSONRPCTransport`) → adapter event stream → `MulticastEventBus` → SwiftUI.
+- ✅ Generic transport pipeline: `AgentTransport` → interactive terminal (`PTYHost` + `TerminalEngine`) or stdio JSON-RPC (`StdioJSONRPCTransport`, including ACP) → adapter event stream → `MulticastEventBus` → SwiftUI.
 - ✅ Typed `AgentCommand` ↔ `AgentEvent` alphabets with a `WireCodec` boundary and parity/dispatch tests that refuse drift.
-- ✅ `AgentAdapter` protocol with Claude and Codex adapters (binary lookup, transport descriptor, bootstrap bytes, command encoding, event decoding, session listing).
+- ✅ `AgentAdapter` protocol with Claude, Codex, and custom ACP adapters (binary lookup, transport descriptor, bootstrap bytes, command encoding, event decoding, session listing).
 - ✅ Server-side `HeartbeatActivityMonitor` + `StatusPhraseResolver` so every connected client sees identical "still working" escalation.
 - ✅ `SnapshotService`, `EngineViewModel` event reduction, and a `GitReverter` for file/hunk-level revert.
 - ✅ `SilentDiagnostics` ring buffer with opt-in UI and `GET /v1/diagnostics/silent` sidecar.
@@ -235,13 +235,14 @@ src/
 │                        # network transport, persistence, paths, DI seams
 ├── AgenticCLIs/     # one folder per agent CLI — see AgenticCLIs/README.md
 │   ├── ClaudeCode/  # Adapter/, Common/, digital-twin/, contract README
-│   └── Codex/       # App Server stdio adapter, Common/, digital-twin/, contract README
+│   ├── Codex/       # App Server stdio adapter, Common/, digital-twin/, contract README
+│   └── AgentClientProtocol/  # ACP client for custom agent servers
 ├── Remote/          # headless daemon + WebSocket remote-control library
 │   ├── AgentRemoteControl/  # WSS server, pairing, RemoteEngineClient — README.md
 │   └── CodemixerDaemon/     # headless daemon executable
 ├── AgentUI/         # SwiftUI views, Theme tokens, IntentReveal, EngineViewModel,
 │                    # conversation, composer, sidebar, palette, diff, settings,
-│                    # voice, export, search, notifications, auth, debug
+│                    # voice, export, search, notifications, debug
 ├── CodemixerApp/    # GUI app — sources + Project.swift + generated Codemixer.xcodeproj
 tests/
 ├── TestSupport/
@@ -258,9 +259,12 @@ tests/
 │   ├── ClaudeCode/
 │   │   ├── ClaudeAdapterTests/
 │   │   └── ClaudeCodeTwinTests/
-│   └── Codex/
-│       ├── CodexAdapterTests/
-│       └── CodexTwinTests/
+│   ├── Codex/
+│   │   ├── CodexAdapterTests/
+│   │   └── CodexTwinTests/
+│   └── AgentClientProtocol/
+│       ├── ACPAdapterTests/
+│       └── ACPTwinTests/
 ├── AgentUITests/
 ```
 
@@ -273,11 +277,12 @@ tests/
 | `AgentCore` | `src/Core/AgentCore/` | `AgentTransport` seam, interactive terminal transport, stdio JSON-RPC transport, PTY + reaper, terminal, hooks, FSEvents, git diff/revert, attachments, events, engine, snapshot, bus, status, activity, network transport, persistence, paths, seams. **The agent-agnostic engine.** | `CPosixBridge`, `AgentProtocol`, `SwiftTerm`. |
 | `ClaudeCode` | `src/AgenticCLIs/ClaudeCode/` (`Adapter/`, `Common/`, `digital-twin/`) | `claude` binary lookup, hooks, transcript JSONL, slash commands, TUI fallback, shared path/input helpers, and the `ClaudeCodeTwin` digital twin. | `AgentCore`, `AgentProtocol`. |
 | `Codex` | `src/AgenticCLIs/Codex/` (`Adapter/`, `Common/`, `digital-twin/`) | `codex app-server --stdio` lookup/bootstrap, JSON-RPC framing, event decoding, input encoding, thread index, model/command catalogs, and `CodexTwin`. | `AgentCore`, `AgentProtocol`. |
+| `AgentClientProtocol` | `src/AgenticCLIs/AgentClientProtocol/` (`Adapter/`, `Common/`, `External/`, `digital-twin/`) | ACP client for user-configured agent servers: initialize/session framing, reverse FS/terminal, session index, `ACPTwin`. | `AgentCore`, `AgentProtocol`. |
 | `AgentRemoteControl` | `src/Remote/AgentRemoteControl/` | WebSocket server, pairing PIN + bearer tokens, paired-device store, TLS/cert manager, HTTP sidecar, Bonjour, remote engine client. | `AgentCore`, `AgentProtocol`. |
-| `AgentUI` | `src/AgentUI/` | SwiftUI views, theme tokens, `EngineViewModel`, `IntentReveal`, conversation/composer/sidebar/palette/diff/settings/voice/export/search/notifications/auth/debug surfaces. **Agent-agnostic.** | `AgentCore`. |
+| `AgentUI` | `src/AgentUI/` | SwiftUI views, theme tokens, `EngineViewModel`, `IntentReveal`, conversation/composer/sidebar/palette/diff/settings/voice/export/search/notifications/debug surfaces. **Agent-agnostic.** | `AgentCore`. |
 | `AgentTestSupport` | `tests/TestSupport/AgentTestSupport/` | Deterministic fakes for all four seams + `MockAdapter`. | `AgentCore`, `AgentProtocol`. |
-| `CodemixerApp` | `src/CodemixerApp/` | `@main`, root scene, bootstrap, adapter registration. Tiny. | `AgentCore`, `AgentUI`, `ClaudeCode`, `Codex`, `AgentRemoteControl`. |
-| `CodemixerDaemon` | `src/Remote/CodemixerDaemon/` | `@main`, signal handling, server wiring. Tinier. | `AgentCore`, `ClaudeCode`, `Codex`, `AgentRemoteControl`. |
+| `CodemixerApp` | `src/CodemixerApp/` | `@main`, root scene, bootstrap, adapter registration. Tiny. | `AgentCore`, `AgentUI`, `ClaudeCode`, `Codex`, `AgentClientProtocol`, `AgentRemoteControl`. |
+| `CodemixerDaemon` | `src/Remote/CodemixerDaemon/` | `@main`, signal handling, server wiring. Tinier. | `AgentCore`, `ClaudeCode`, `Codex`, `AgentClientProtocol`, `AgentRemoteControl`. |
 
 The arrows go strictly downward — `AgentUI` never imports `ClaudeCode`, `AgentCore` never imports SwiftUI, `AgentProtocol` imports only Foundation. This is what keeps the headless daemon truly headless and a future iOS client truly portable.
 
@@ -474,6 +479,9 @@ Full per-suite index: [`AGENTS.md`](AGENTS.md) (Inside `tests/` → suites).
 | `CodexAdapterTests / CodexAdapterTests` | Codex App Server framing, RPC, input encoding, policy mapping, catalog/index surfaces, and no-silent-failure behavior. |
 | `CodexAdapterTests / LiveCodexIntegrationTests` | Opt-in live App Server stdio path (`CODEMIXER_LIVE_CODEX=1`): one `assistantText` through `CodexAdapter`. See [`tests/AgenticCLIs/README.md`](tests/AgenticCLIs/README.md). |
 | `CodexTwinTests / CodexTwinTests` | `CodexTwin` drives fixture-backed App Server events without a live Codex login. |
+| `ACPAdapterTests / ACPAdapterTests` | ACP framing, auth-required gate, custom factory, FS sandbox, session index, transport factory. |
+| `ACPAdapterTests / LiveACPIntegrationTests` | Opt-in live ACP stdio path (`CODEMIXER_LIVE_ACP=1` + `CODEMIXER_LIVE_ACP_BIN`): one `assistantText` through `ACPAdapter`. See [`tests/AgenticCLIs/README.md`](tests/AgenticCLIs/README.md). |
+| `ACPTwinTests / ACPTwinTests` | `ACPTwin` emits session + assistant text, or `authenticationRequired` when auth is required. |
 | `AgentRemoteControlTests / PairingServiceTests` | Correct PIN yields a token; five wrong PINs trigger lockout. |
 | `AgentRemoteControlTests / PairedDeviceStoreTests` | Paired-device persistence survives reload. |
 | `AgentRemoteControlTests / RemoteControlE2ETests` | In-memory WebSocket clients receive replay, command results, and PTY write failures consistently; `sendPrompt` publishes `.userTurn` before a failing command result. |
