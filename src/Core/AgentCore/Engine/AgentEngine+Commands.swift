@@ -28,10 +28,26 @@ extension AgentEngine {
             // the turn instantly rather than after the write + bus fan-out. If
             // the write then fails, `send` still throws so the caller surfaces
             // the error. Ordering is otherwise unchanged.
+            //
+            // The resume-startup gate still runs inside `writePromptBytes` — do
+            // not hold this echo on that gate. Holding it made first prompts
+            // look dead when Claude's ready-prompt scrape lagged, and the stall
+            // toast is already filtered by turn-id matching in the view model.
             await bus.publish(.userTurn(id: bubbleID.uuidString, text: prompt))
             currentTurnID = bubbleID
+            currentTurnPromptText = prompt
+            currentTurnAwaitingAcceptance = true
             await heartbeat?.startTurn(bubbleID, baseline: .awaitingFirstChunk)
-            try await writePromptBytes(bytes)
+            do {
+                try await writePromptBytes(bytes)
+            } catch {
+                currentTurnAwaitingAcceptance = false
+                currentTurnPromptText = nil
+                currentTurnID = nil
+                cancelStartupSubmitRecovery()
+                await heartbeat?.endTurn()
+                throw error
+            }
 
         case .cancelCurrentTurn:
             let cancelBytes = adapter.cancelSequence()
@@ -39,6 +55,11 @@ extension AgentEngine {
             if adapter.transportDescriptor.supportsOutOfBandInterrupt {
                 await transport?.interrupt()
             }
+            currentTurnAwaitingAcceptance = false
+            currentTurnPromptText = nil
+            cancelStartupSubmitRecovery()
+            currentTurnID = nil
+            await heartbeat?.endTurn()
 
         case .editAndResubmitLast(let target, let text, let attachments):
             guard target == lastUserBubbleID else {
@@ -90,6 +111,10 @@ extension AgentEngine {
             permissionTimeouts.removeValue(forKey: id)?.cancel()
             guard let prompt = pendingPermissions.removeValue(forKey: id) else { return }
             try await deliverPermissionResponse(decision, for: prompt, id: id)
+            // Trust screens can outlive the first resume-startup watchdog tick.
+            // Once the dialog is gone, make sure a ready-poll / watchdog is alive
+            // so a held sendPrompt can still flush.
+            resumePollingAfterPermissionIfNeeded()
 
         case .newSession,
              .compact,
@@ -212,16 +237,18 @@ extension AgentEngine {
 
     private func writePromptBytes(_ bytes: Data) async throws {
         await waitForResumeStartupIfNeeded()
-        try await transport?.write(bytes)
+        guard let transport else {
+            throw AgentError.internalInvariant(detail: "transport closed before prompt write")
+        }
+        try await transport.write(bytes)
         // Independent safety net for the very first real prompt of a freshly
         // started TUI session: if the readiness heuristic was fooled and the
-        // submit key was swallowed, the prompt text keeps sitting in the input
-        // row with no `UserPromptSubmit`. After a short delay we re-send a
-        // single Enter — but only if the terminal still shows the unsubmitted
-        // prompt, so an already-accepted turn never receives a stray newline.
+        // submit key or whole write was swallowed, recover based on the visible
+        // input row. Hook/user echoes and assistant activity cancel this before
+        // it can duplicate an accepted prompt.
         if startupSubmitRecoveryArmed, let turnID = currentTurnID {
             startupSubmitRecoveryArmed = false
-            scheduleStartupSubmitRecovery(turnID: turnID)
+            armStartupSubmitRecovery(turnID: turnID, promptBytes: bytes)
         }
     }
 }

@@ -53,4 +53,27 @@ struct LiveClaudeIntegrationTests {
             Issue.record("transcript exists but billing markers were not parsed: \(transcriptURL.path)")
         }
     }
+
+    @Test("resumed interactive session still emits assistantText on the next prompt")
+    func resumedInteractivePTYTurn() async throws {
+        guard LiveClaudeHarness.isEnabled() else { return }
+        if let reason = LiveClaudeHarness.prerequisiteFailure() {
+            Issue.record("\(reason)")
+            return
+        }
+
+        let harness = LiveClaudeHarness()
+        let configuration = LiveClaudeHarness.defaultConfiguration()
+
+        let result: LiveClaudeHarness.TurnResult
+        do {
+            result = try await harness.runResumedTurn(configuration)
+        } catch {
+            Issue.record("\(error)")
+            return
+        }
+
+        #expect(result.finalAssistantText?.localizedCaseInsensitiveContains("resume-pong") == true)
+        #expect(result.sessionID?.isEmpty == false)
+    }
 }

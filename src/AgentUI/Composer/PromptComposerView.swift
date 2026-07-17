@@ -66,7 +66,7 @@ public struct PromptComposerView: View {
 
             VStack(spacing: Theme.spacing.s8) {
                 // File-picker popover is anchored to the text field.
-                TextField(isEditMode ? "Edit your message…" : "Ask Claude…",
+                TextField(promptPlaceholder,
                           text: $draft, axis: .vertical)
                     .textFieldStyle(.plain)
                     .font(Theme.typography.body)
@@ -113,6 +113,7 @@ public struct PromptComposerView: View {
                         )
                     }
                     .layoutPriority(1)
+                    .disabled(model.isComposerLockedForSessionResume)
 
                 HStack(alignment: .bottom, spacing: Theme.spacing.s8) {
                     ComposerModeModelMenus(model: model,
@@ -137,6 +138,7 @@ public struct PromptComposerView: View {
                 }
                 .padding(.horizontal, Theme.spacing.s12)
                 .padding(.bottom, Theme.spacing.s8)
+                .disabled(model.isComposerLockedForSessionResume)
             }
             .background(
                 RoundedRectangle(cornerRadius: Theme.corner.medium)
@@ -187,9 +189,17 @@ public struct PromptComposerView: View {
     private var actionButton: some View {
         ComposerActionButton(canCancel: model.canCancel,
                              isEditMode: isEditMode,
-                             isSendDisabled: draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                             isSendDisabled: model.isComposerLockedForSessionResume
+                                 || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                              submit: submit,
                              cancel: cancel)
+    }
+
+    private var promptPlaceholder: String {
+        if model.isComposerLockedForSessionResume {
+            return "Finishing session resume…"
+        }
+        return isEditMode ? "Edit your message…" : "Ask…"
     }
 
     private func handleDraftChange(_: String, _ new: String) {
@@ -238,6 +248,7 @@ public struct PromptComposerView: View {
     // MARK: - Actions
 
     private func submit() {
+        guard !model.isComposerLockedForSessionResume else { return }
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         draft = ""

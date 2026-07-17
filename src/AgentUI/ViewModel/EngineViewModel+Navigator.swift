@@ -2,8 +2,26 @@ import Foundation
 import AgentCore
 import AgentProtocol
 
-private enum SessionSwitchingTiming {
+enum SessionSwitchingTiming {
     static let emptySessionFallback: Duration = .seconds(2)
+
+    /// Non-Claude agents can unlock as soon as replayed content proves the UI
+    /// is showing the selected session. The engine remains the source of truth
+    /// for whether a command can be written to the transport.
+    static let composerHardUnlock: Duration = .seconds(3)
+
+    /// Claude Code history is replayed from JSONL, not from the live
+    /// `claude --resume` process. Keep the composer locked until the engine's
+    /// longer "no live SessionStart arrived" gate would also have released a
+    /// held write.
+    static let claudeCodeComposerHardUnlock: Duration = ActivityTiming.resumedSessionStartupStallTimeout
+
+    /// Once Claude Code's live hook SessionStart arrives, keep the composer
+    /// locked for the same settle/fallback window the engine uses before
+    /// writing a held prompt. This aligns GUI sends with API/remote sends while
+    /// avoiding the JSONL-history false-ready state.
+    static let claudeCodeComposerHookUnlock: Duration = ActivityTiming.resumedSessionPostSessionStartFallback
+        + ActivityTiming.resumePromptReadySettleDelay
 }
 
 extension EngineViewModel {
@@ -51,7 +69,14 @@ extension EngineViewModel {
     /// current one immediately so the top bar title updates before resume finishes.
     public func openSession(projectPath: String, id: String) {
         guard !isCurrentSession(projectPath: projectPath, sessionID: id) else { return }
-        beginSessionSwitch(projectPath: projectPath, sessionID: id)
+        // The session list carries the concrete agent for mixed projects. Use it
+        // to decide whether history replay is enough to unlock the composer.
+        // Claude Code is special because replayed history comes from JSONL,
+        // while the live `claude --resume` PTY can still be restoring.
+        beginSessionSwitch(projectPath: projectPath,
+                           sessionID: id,
+                           waitsForClaudeCodeResume: sessionResumeNeedsClaudeCodeReadiness(projectPath: projectPath,
+                                                                                           sessionID: id))
         applyAdapterCapabilities(forProjectPath: projectPath)
         send(.openProject(path: projectPath, resumeSessionID: id))
     }
@@ -240,11 +265,14 @@ extension EngineViewModel {
         }
     }
 
-    func beginSessionSwitch(projectPath: String, sessionID id: String) {
+    func beginSessionSwitch(projectPath: String,
+                            sessionID id: String,
+                            waitsForClaudeCodeResume: Bool = false) {
         workspace = URL(fileURLWithPath: projectPath)
         sessionID = id
         clearConversationState()
         isSwitchingSession = true
+        lockComposerForSessionResume(waitsForClaudeCodeResume: waitsForClaudeCodeResume)
         sessionSwitchingTask?.cancel()
         sessionSwitchingTask = Task { [weak self] in
             try? await self?.clock.sleep(for: SessionSwitchingTiming.emptySessionFallback)
@@ -268,6 +296,59 @@ extension EngineViewModel {
         if isSwitchingSession {
             endSessionSwitch()
         }
+        // This is called when conversation content arrives. For Codex and other
+        // non-Claude agents, that content means the selected session is ready
+        // enough for the composer because command delivery is not racing a TUI
+        // resume screen. For Claude Code, the same content may be JSONL replay
+        // only; live input readiness is handled by SessionStart below.
+        if isComposerLockedForSessionResume, !isComposerWaitingForClaudeCodeResume {
+            unlockComposerForSessionResume()
+        }
+    }
+
+    func lockComposerForSessionResume(waitsForClaudeCodeResume: Bool = false) {
+        isComposerLockedForSessionResume = true
+        isComposerWaitingForClaudeCodeResume = waitsForClaudeCodeResume
+        scheduleComposerResumeUnlock(after: waitsForClaudeCodeResume
+            ? SessionSwitchingTiming.claudeCodeComposerHardUnlock
+            : SessionSwitchingTiming.composerHardUnlock)
+    }
+
+    func scheduleComposerResumeUnlock(after delay: Duration) {
+        composerResumeUnlockTask?.cancel()
+        let clock = clock
+        composerResumeUnlockTask = Task { [weak self, clock] in
+            do {
+                try await clock.sleep(for: delay)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                self?.isComposerLockedForSessionResume = false
+                self?.composerResumeUnlockTask = nil
+            }
+        }
+    }
+
+    func unlockComposerForSessionResume() {
+        isComposerLockedForSessionResume = false
+        isComposerWaitingForClaudeCodeResume = false
+        composerResumeUnlockTask?.cancel()
+        composerResumeUnlockTask = nil
+    }
+
+    func sessionResumeNeedsClaudeCodeReadiness(projectPath: String, sessionID id: String) -> Bool {
+        // Prefer the session row because mixed projects can contain both Claude
+        // and Codex sessions. If the row is not loaded yet, fall back to the
+        // project mode; this is still correct for dedicated Claude projects.
+        if let session = sessionsByProject[projectPath]?.first(where: { $0.id == id }) {
+            return session.agentID == .claudeCode
+        }
+        if let project = projects.first(where: { $0.path == projectPath }) {
+            return project.agentMode == .claudeCode
+        }
+        return false
     }
 
     func recordProjectError(_ error: any Error) {
@@ -305,6 +386,7 @@ extension EngineViewModel {
         removedProjectUndo = nil
         removedProjectUndoTask?.cancel()
         removedProjectUndoTask = nil
+        unlockComposerForSessionResume()
         clearConversationState()
         changedFiles = []
         pendingPermission = nil
@@ -329,6 +411,7 @@ extension EngineViewModel {
         removedProjectUndo = nil
         removedProjectUndoTask?.cancel()
         removedProjectUndoTask = nil
+        unlockComposerForSessionResume()
         clearConversationState()
         changedFiles = []
         pendingPermission = nil

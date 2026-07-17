@@ -23,7 +23,7 @@ import ClaudeCode
 /// The harness waits for hook `SessionStart`, auto-approves workspace-trust
 /// prompts, pauses for the TUI prompt row, sends one turn, and can verify
 /// transcript billing markers (`entrypoint: cli`, not `sdk-cli`).
-struct LiveClaudeHarness: Sendable {
+struct LiveClaudeHarness {
 
     struct Configuration: Sendable {
         var workspace: URL
@@ -66,14 +66,11 @@ struct LiveClaudeHarness: Sendable {
         }
     }
 
-    private let seams: Seams
     private let environment: any AgentEnvironment
     private let fileSystem: any FileSystem
 
-    init(seams: Seams = .live,
-         environment: any AgentEnvironment = SystemEnvironment(),
+    init(environment: any AgentEnvironment = SystemEnvironment(),
          fileSystem: any FileSystem = SystemFileSystem()) {
-        self.seams = seams
         self.environment = environment
         self.fileSystem = fileSystem
     }
@@ -128,7 +125,7 @@ struct LiveClaudeHarness: Sendable {
     // MARK: - Drive
 
     func runTurn(_ configuration: Configuration) async throws -> TurnResult {
-        let engine = AgentEngine(seams: seams)
+        let engine = AgentEngine(seams: .live)
         await engine.bootstrap()
 
         let adapter = ClaudeAdapter(environment: environment, fileSystem: fileSystem)
@@ -194,6 +191,77 @@ struct LiveClaudeHarness: Sendable {
                           sessionID: sessionID,
                           transcriptURL: transcriptURL,
                           billingMarkers: billingMarkers,
+                          finalAssistantText: finalAssistantText,
+                          finalAssistantTextCount: await sink.finalAssistantTextCount())
+    }
+
+    /// Fresh turn, then `--resume` the same session and send again — mirrors
+    /// opening an existing Claude session in the sidebar.
+    func runResumedTurn(_ configuration: Configuration) async throws -> TurnResult {
+        let first = try await runTurn(configuration)
+        guard let sessionID = first.sessionID, !sessionID.isEmpty else {
+            throw LiveClaudeHarnessError.hookSessionTimedOut
+        }
+
+        let engine = AgentEngine(seams: .live)
+        await engine.bootstrap()
+        let adapter = ClaudeAdapter(environment: environment, fileSystem: fileSystem)
+        let sink = LiveClaudeEventSink()
+        let sub = await engine.bus.subscribe()
+        let ingest = Task { await sink.ingest(sub.stream) }
+        var respondedPermissions: Set<UUID> = []
+        let approver = Task {
+            while !Task.isCancelled {
+                if let permissionID = await sink.pendingPermissionID(excluding: respondedPermissions) {
+                    respondedPermissions.insert(permissionID)
+                    try? await engine.send(.respondToPermission(id: permissionID, decision: .allow))
+                }
+                try? await Task.sleep(for: .milliseconds(400))
+            }
+        }
+        defer {
+            approver.cancel()
+            ingest.cancel()
+            Task { await engine.bus.unsubscribe(sub.id) }
+        }
+
+        try await engine.start(adapter: adapter,
+                               workspace: configuration.workspace,
+                               resumeSessionID: sessionID)
+
+        let sawHookSession = await livePollUntil(timeout: configuration.hookSessionTimeout) {
+            await sink.hasSessionStarted(sessionID: sessionID)
+        }
+        guard sawHookSession else {
+            await engine.shutdown(reason: .naturalExit)
+            throw LiveClaudeHarnessError.hookSessionTimedOut
+        }
+
+        let resumePrompt = "Reply with exactly: resume-pong"
+        try await engine.send(.sendPrompt(text: resumePrompt, attachments: []))
+
+        let sawAssistantText = await livePollUntil(timeout: configuration.assistantTextTimeout) {
+            await sink.containsFinalAssistantText(matching: "resume-pong")
+        }
+
+        let events = await sink.snapshot()
+        let transcriptURL = ClaudeProjectPaths.transcriptURL(
+            sessionID: sessionID,
+            workspace: configuration.workspace,
+            claudeDirectory: environment.claudeDirectory
+        )
+        let finalAssistantText = await sink.latestFinalAssistantText()
+        await engine.shutdown(reason: .naturalExit)
+
+        guard sawAssistantText else {
+            throw LiveClaudeHarnessError.assistantTextTimedOut(events: events,
+                                                               transcriptURL: transcriptURL)
+        }
+
+        return TurnResult(events: events,
+                          sessionID: sessionID,
+                          transcriptURL: transcriptURL,
+                          billingMarkers: nil,
                           finalAssistantText: finalAssistantText,
                           finalAssistantTextCount: await sink.finalAssistantTextCount())
     }
@@ -273,6 +341,15 @@ actor LiveClaudeEventSink {
         events.contains {
             if case .sessionStarted(let id, let model, _) = $0 {
                 return !id.isEmpty && model != nil
+            }
+            return false
+        }
+    }
+
+    func hasSessionStarted(sessionID expected: String) -> Bool {
+        events.contains {
+            if case .sessionStarted(let id, _, _) = $0 {
+                return id == expected
             }
             return false
         }

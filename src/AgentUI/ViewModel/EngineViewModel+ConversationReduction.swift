@@ -8,7 +8,7 @@ extension EngineViewModel {
 
     func apply(_ event: AgentEvent) {
         switch event {
-        case .sessionStarted(let id, _, let cwd):
+        case .sessionStarted(let id, let model, let cwd):
             let projectChanged = workspace?.path != cwd.path
             let previousSessionID = sessionID
             let sessionChanged = previousSessionID != id
@@ -21,6 +21,19 @@ extension EngineViewModel {
             workspace = cwd
             if shouldResetConversation {
                 clearConversationState()
+            }
+            // SessionStart with a model is the first live signal from the
+            // resumed agent process. For Claude Code, that matters because the
+            // visible history may already be on screen from JSONL replay; wait
+            // one engine-aligned settle window before enabling GUI sends. Other
+            // agents do not have this JSONL-vs-live-PTY split, so they can
+            // unlock immediately on their real SessionStart.
+            if isComposerLockedForSessionResume, id == previousSessionID, model != nil {
+                if isComposerWaitingForClaudeCodeResume {
+                    scheduleComposerResumeUnlock(after: SessionSwitchingTiming.claudeCodeComposerHookUnlock)
+                } else {
+                    unlockComposerForSessionResume()
+                }
             }
             if projectChanged {
                 onActiveProjectChanged()
@@ -119,8 +132,14 @@ extension EngineViewModel {
         case .activityStateChanged(let substate):
             activity = substate
             if substate == .idle { settleTurnIdle() }
-        case .noEventGap(_, let elapsed):
-            if activity != .idle {
+        case .noEventGap(let turnID, let elapsed):
+            // Only escalate from gaps that belong to the in-flight send. Resume
+            // startup publishes a synthetic >90s gap with its own watchdog id —
+            // matching here prevents that from looking like a stalled turn the
+            // moment the user sends into a still-gating resume.
+            let gapBelongsToCurrentTurn = turnID == lastUserBubbleID
+                || turnID == pendingOptimisticBubbleID
+            if activity != .idle, gapBelongsToCurrentTurn {
                 if elapsed > ActivityTiming.stillWorkingThreshold,
                    isAwaitingFirstReplyForPrompt {
                     status = .working(phrase: ActivityTiming.stillWorkingPhrase)

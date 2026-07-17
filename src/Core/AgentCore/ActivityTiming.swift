@@ -11,10 +11,20 @@ public enum ActivityTiming {
     public static let stillWorkingThreshold: Duration = .seconds(10)
     public static let probablyStuckThreshold: Duration = .seconds(90)
     public static let stalledToastDuration: Duration = .seconds(8)
-    /// Resume should fire `SessionStart:resume` almost immediately. If it does
-    /// not, reuse the stalled-turn affordance instead of leaving old sessions
-    /// looking idle and empty.
+    /// Fresh TUI sessions should reach an empty prompt quickly. If they do not,
+    /// release the send gate rather than leaving the first prompt blocked.
     public static let resumeStartupStallTimeout: Duration = .seconds(8)
+    /// Resumed Claude sessions paint history before the prompt row. Prefer
+    /// prompt-ready detection, but fall back quickly enough that missed TUI
+    /// scrapes do not make the first resumed prompt feel stuck.
+    public static let resumedSessionStartupStallTimeout: Duration = .seconds(12)
+    /// Once Claude has confirmed the resumed session via hook `SessionStart`,
+    /// missing a ready-prompt scrape should only cost a short delay before we
+    /// write the user's queued prompt.
+    public static let resumedSessionPostSessionStartFallback: Duration = .seconds(2)
+    /// After hook `SessionStart`, ignore ready-prompt scrapes briefly so
+    /// history paint / chrome cannot false-open the send gate.
+    public static let resumePromptReadySettleDelay: Duration = .milliseconds(250)
     /// Short because this sits on the send path after Claude has visually
     /// reached the prompt. It runs only during resumed-session startup.
     public static let resumePromptReadyPollInterval: Duration = .milliseconds(25)
@@ -22,6 +32,13 @@ public enum ActivityTiming {
     /// Claude's `UserPromptSubmit` hook time to arrive before sending one
     /// extra Enter if the prompt is still visibly sitting in the input row.
     public static let startupSubmitRecoveryDelay: Duration = .milliseconds(750)
+    /// How many recovery polls to keep confirming delivery of the first resumed
+    /// prompt. `claude --resume` paints JSONL history and chrome for seconds
+    /// after the UI already shows it, so recovery must persist (re-pressing
+    /// Enter or re-sending the prompt) until Claude's live `UserPromptSubmit`
+    /// hook confirms acceptance. At `startupSubmitRecoveryDelay` per tick this
+    /// spans ~9s, comfortably past a cold resume, without waiting forever.
+    public static let startupSubmitRecoveryMaxAttempts = 12
     public static let stillWorkingPhrase = "Still working…"
     /// Shown the instant a prompt is sent, before the engine emits its first
     /// real status phrase. Keeps the optimistic-send path free of literals.

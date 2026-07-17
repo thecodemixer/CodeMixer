@@ -53,10 +53,21 @@ public actor AgentEngine: AgentEngineCommandPort {
     private var resumeStartupWatchdogTurnID: UUID?
     private var resumePromptReadyTask: Task<Void, Never>?
     private var resumePromptReadySampleCount = 0
+    private var resumePromptReadyEarliest: ContinuousClock.Instant?
     private var resumeStartupSessionID: String?
     private var resumeStartupWaiters: [CheckedContinuation<Void, Never>] = []
+    /// True when `start` was called with a concrete `--resume` id. Those
+    /// sessions must not arm the ready-prompt gate until hook SessionStart.
+    private var resumeStartupRequiresHookSession = false
     var startupSubmitRecoveryArmed = false
     private var startupSubmitRecoveryTask: Task<Void, Never>?
+    private var startupSubmitRecoveryBytes: Data?
+    private var startupSubmitRecoveryAttempt = 0
+    /// Set when `sendPrompt` starts a turn; cleared only by a matching live
+    /// `UserPromptSubmit` (or shutdown). While set, historical transcript
+    /// replay must not end the turn or cancel submit recovery.
+    var currentTurnAwaitingAcceptance = false
+    var currentTurnPromptText: String?
     private var fsWatcher: FSEventsWatcher?
     private var fsWatcherTask: Task<Void, Never>?
     private var diffRefreshTask: Task<Void, Never>?
@@ -144,8 +155,10 @@ public actor AgentEngine: AgentEngineCommandPort {
         let usesTerminal = adapter.transportDescriptor.requiresTerminalEmulation
             && adapter.capabilities.contains(.ptyTUIFallback)
         resumeStartupSessionID = usesTerminal ? (resumeSessionID ?? "") : nil
+        resumeStartupRequiresHookSession = usesTerminal && resumeSessionID != nil
         startupSubmitRecoveryArmed = resumeStartupSessionID != nil
         resumePromptReadySampleCount = 0
+        resumePromptReadyEarliest = nil
         resumeStartupWaiters.removeAll()
 
         do {
@@ -276,8 +289,17 @@ public actor AgentEngine: AgentEngineCommandPort {
         }
 
         if let startupGateID = resumeStartupSessionID {
-            startResumePromptReadyWait(sessionID: startupGateID)
-            startResumeStartupWatchdog(sessionID: startupGateID)
+            if resumeStartupRequiresHookSession {
+                // Hold writes, but do not scrape the TUI yet — resume paints
+                // history first and a premature ready match swallows prompts.
+                startResumeStartupWatchdog(
+                    sessionID: startupGateID,
+                    timeout: ActivityTiming.resumedSessionStartupStallTimeout
+                )
+            } else {
+                startResumePromptReadyWait(sessionID: startupGateID)
+                startResumeStartupWatchdog(sessionID: startupGateID)
+            }
         }
 
         await startFSWatcher(workspace: workspace)
@@ -299,6 +321,9 @@ public actor AgentEngine: AgentEngineCommandPort {
         startupSubmitRecoveryTask?.cancel()
         startupSubmitRecoveryTask = nil
         startupSubmitRecoveryArmed = false
+        startupSubmitRecoveryBytes = nil
+        resumeStartupRequiresHookSession = false
+        resumePromptReadyEarliest = nil
         finishResumeStartupGate()
         await transport?.close()
         transport = nil
@@ -314,6 +339,8 @@ public actor AgentEngine: AgentEngineCommandPort {
         currentTurnID = nil
         pendingPermissions.removeAll()
         lastUserBubbleID = nil
+        currentTurnAwaitingAcceptance = false
+        currentTurnPromptText = nil
         for task in permissionTimeouts.values { task.cancel() }
         permissionTimeouts.removeAll()
         await phraseResolver.reset()
@@ -336,6 +363,9 @@ public actor AgentEngine: AgentEngineCommandPort {
         startupSubmitRecoveryTask?.cancel()
         startupSubmitRecoveryTask = nil
         startupSubmitRecoveryArmed = false
+        startupSubmitRecoveryBytes = nil
+        resumeStartupRequiresHookSession = false
+        resumePromptReadyEarliest = nil
         finishResumeStartupGate()
         await transport?.close()
         transport = nil
@@ -352,6 +382,8 @@ public actor AgentEngine: AgentEngineCommandPort {
         currentTurnID = nil
         pendingPermissions.removeAll()
         lastUserBubbleID = nil
+        currentTurnAwaitingAcceptance = false
+        currentTurnPromptText = nil
         for task in permissionTimeouts.values { task.cancel() }
         permissionTimeouts.removeAll()
         transcript = []
@@ -383,10 +415,20 @@ public actor AgentEngine: AgentEngineCommandPort {
             if resumeStartupSessionID != nil {
                 if resumeStartupSessionID?.isEmpty == true {
                     resumeStartupSessionID = id
-                    startResumePromptReadyWait(sessionID: id)
-                    startResumeStartupWatchdog(sessionID: id)
-                }
-                if resumePromptReadyTask == nil {
+                    armResumeStartupGate(sessionID: id)
+                } else if resumeStartupRequiresHookSession,
+                          resumeStartupSessionID == id {
+                    // Claude confirmed the resumed session. Arm ready-prompt
+                    // detection now; if scraping misses, release the queued
+                    // prompt shortly after SessionStart rather than waiting on
+                    // the longer "no SessionStart arrived" fallback.
+                    resumeStartupRequiresHookSession = false
+                    armResumeStartupGate(
+                        sessionID: id,
+                        timeout: ActivityTiming.resumedSessionPostSessionStartFallback,
+                        restartWatchdog: true
+                    )
+                } else if resumePromptReadyTask == nil {
                     startResumePromptReadyWait(sessionID: id)
                 }
             } else {
@@ -398,12 +440,22 @@ public actor AgentEngine: AgentEngineCommandPort {
             currentSessionID = id
             sessionIDContinuation?.yield(id)
             state = .running(sessionID: id)
+        case .userTurn(let id, let text):
+            // Only the live UserPromptSubmit echo for *this* prompt confirms
+            // acceptance. Historical transcript replay also emits `.userTurn`
+            // and must not cancel recovery or clear the awaiting flag.
+            if notesLivePromptAcceptance(id: id, text: text) {
+                currentTurnAwaitingAcceptance = false
+                currentTurnPromptText = nil
+                cancelStartupSubmitRecovery()
+            }
         case .permissionRequest(let prompt):
             if let rule = await prefs.matchingRule(toolName: prompt.toolName,
                                                    summary: prompt.summary) {
                 do {
                     try await deliverPermissionResponse(rule.decision, for: prompt, id: prompt.id)
                     await bus.publish(.permissionAlreadyResolved(id: prompt.id, byDevice: "auto-approval"))
+                    resumePollingAfterPermissionIfNeeded()
                 } catch {
                     await SilentDiagnostics.shared.record(kind: .permissionDeliveryFailed,
                                                           owner: "AgentEngine",
@@ -423,27 +475,49 @@ public actor AgentEngine: AgentEngineCommandPort {
             requestShutdown(reason: reason)
             return
         case .toolEnd:
-            await heartbeat?.bump(baseline: .awaitingFirstChunk)
+            if !currentTurnAwaitingAcceptance {
+                cancelStartupSubmitRecovery()
+                await heartbeat?.bump(baseline: .awaitingFirstChunk)
+            }
         case .assistantText:
+            if currentTurnAwaitingAcceptance {
+                // History (or chrome) still painting — keep the live turn alive.
+                break
+            }
+            cancelStartupSubmitRecovery()
             if case .assistantText(let id, _, _, let isFinal) = event {
                 log.debug("ingested assistantText id=\(id, privacy: .public) final=\(isFinal, privacy: .public)")
                 if isFinal {
                     await heartbeat?.endTurn()
                     currentTurnID = nil
+                    currentTurnPromptText = nil
                     publishIdleAfterEvent = true
                 } else {
                     await heartbeat?.bump(baseline: .awaitingFirstChunk)
                 }
             }
         case .activityStateChanged(.idle):
-            await heartbeat?.endTurn()
-            currentTurnID = nil
+            if !currentTurnAwaitingAcceptance {
+                cancelStartupSubmitRecovery()
+                await heartbeat?.endTurn()
+                currentTurnID = nil
+                currentTurnPromptText = nil
+            }
         case .textDelta:
-            await heartbeat?.bump(baseline: .streamingText)
+            if !currentTurnAwaitingAcceptance {
+                cancelStartupSubmitRecovery()
+                await heartbeat?.bump(baseline: .streamingText)
+            }
         case .toolStart:
-            await heartbeat?.bump(baseline: .runningTool)
+            if !currentTurnAwaitingAcceptance {
+                cancelStartupSubmitRecovery()
+                await heartbeat?.bump(baseline: .runningTool)
+            }
         case .thinkingChunk:
-            await heartbeat?.bump(baseline: .thinking)
+            if !currentTurnAwaitingAcceptance {
+                cancelStartupSubmitRecovery()
+                await heartbeat?.bump(baseline: .thinking)
+            }
         case .statusPhraseChanged(let source, let phrase):
             if let (winnerSource, winnerPhrase) = await phraseResolver.update(source, phrase: phrase) {
                 await record(event)
@@ -480,13 +554,14 @@ public actor AgentEngine: AgentEngineCommandPort {
         await bus.publish(.activityStateChanged(tick.substate))
     }
 
-    private func startResumeStartupWatchdog(sessionID: String) {
+    private func startResumeStartupWatchdog(sessionID: String,
+                                            timeout: Duration = ActivityTiming.resumeStartupStallTimeout) {
         cancelResumeStartupWatchdog()
         let turnID = seams.random.uuid()
         resumeStartupWatchdogTurnID = turnID
         resumeStartupWatchdogTask = Task { [weak self, clock = seams.clock] in
             do {
-                try await clock.sleep(for: ActivityTiming.resumeStartupStallTimeout)
+                try await clock.sleep(for: timeout)
             } catch {
                 return
             }
@@ -500,17 +575,50 @@ public actor AgentEngine: AgentEngineCommandPort {
         resumeStartupWatchdogTurnID = nil
     }
 
+    private func armResumeStartupGate(sessionID: String,
+                                      timeout: Duration = ActivityTiming.resumeStartupStallTimeout,
+                                      restartWatchdog: Bool = false) {
+        resumePromptReadyEarliest = seams.clock.monotonic()
+            .advanced(by: ActivityTiming.resumePromptReadySettleDelay)
+        if restartWatchdog || resumeStartupWatchdogTask == nil {
+            startResumeStartupWatchdog(sessionID: sessionID, timeout: timeout)
+        }
+        startResumePromptReadyWait(sessionID: sessionID)
+    }
+
     private func markResumeStartupStalled(sessionID: String, turnID: UUID) async {
         guard resumeStartupSessionID == sessionID,
               resumeStartupWatchdogTurnID == turnID else { return }
         resumeStartupWatchdogTask = nil
         resumeStartupWatchdogTurnID = nil
-        guard pendingPermissions.isEmpty else { return }
+        // Trust / permission UI: keep the send gate closed, but never leave it
+        // without a live release path. Clearing the watchdog id above would
+        // otherwise permanently hang every subsequent prompt.
+        if !pendingPermissions.isEmpty {
+            if resumePromptReadyTask == nil {
+                startResumePromptReadyWait(sessionID: sessionID)
+            }
+            startResumeStartupWatchdog(
+                sessionID: sessionID,
+                timeout: resumeStartupRequiresHookSession
+                    ? ActivityTiming.resumedSessionStartupStallTimeout
+                    : ActivityTiming.resumeStartupStallTimeout
+            )
+            return
+        }
         cancelResumePromptReadyWait()
         log.warning("resume startup stalled session=\(sessionID, privacy: .public)")
-        await bus.publish(.activityStateChanged(.probablyStuck))
-        await bus.publish(.noEventGap(turnID: turnID,
-                                      elapsed: ActivityTiming.probablyStuckThreshold + .seconds(1)))
+        // Always release the send gate. Only surface stalled-turn events when
+        // nothing is waiting on that gate and no real turn has started — a user
+        // who already sent into a still-booting resume must not get a fake >90s
+        // gap / probablyStuck that lights the stall toast.
+        let shouldSurfaceStall = currentTurnID == nil && resumeStartupWaiters.isEmpty
+        if shouldSurfaceStall {
+            await bus.publish(.activityStateChanged(.probablyStuck))
+            await bus.publish(.noEventGap(turnID: turnID,
+                                          elapsed: ActivityTiming.probablyStuckThreshold + .seconds(1)))
+        }
+        resumeStartupRequiresHookSession = false
         finishResumeStartupGate()
     }
 
@@ -520,8 +628,12 @@ public actor AgentEngine: AgentEngineCommandPort {
         resumePromptReadyTask = Task { [weak self, clock = seams.clock] in
             while !Task.isCancelled {
                 if await self?.hasStableResumePromptReadySample(sessionID: sessionID) == true {
-                    await self?.markResumePromptReady(sessionID: sessionID)
-                    return
+                    // Only exit when the gate actually finished. A session-id
+                    // race can make mark a no-op; abandoning the loop then left
+                    // sendPrompt blocked forever.
+                    if await self?.markResumePromptReady(sessionID: sessionID) == true {
+                        return
+                    }
                 }
                 do {
                     try await clock.sleep(for: ActivityTiming.resumePromptReadyPollInterval)
@@ -541,6 +653,10 @@ public actor AgentEngine: AgentEngineCommandPort {
     private func hasStableResumePromptReadySample(sessionID: String) async -> Bool {
         guard resumeStartupSessionID == sessionID,
               let terminal else { return false }
+        if let earliest = resumePromptReadyEarliest,
+           seams.clock.monotonic() < earliest {
+            return false
+        }
         if Self.rowsContainClaudeReadyPrompt(await terminal.snapshotRows()) {
             resumePromptReadySampleCount += 1
         } else {
@@ -549,16 +665,27 @@ public actor AgentEngine: AgentEngineCommandPort {
         return resumePromptReadySampleCount >= Self.resumePromptReadyRequiredSamples
     }
 
-    private func markResumePromptReady(sessionID: String) {
-        guard resumeStartupSessionID == sessionID else { return }
+    /// - Returns: `true` when the resume-startup gate was released.
+    @discardableResult
+    private func markResumePromptReady(sessionID: String) -> Bool {
+        guard resumeStartupSessionID == sessionID else { return false }
         resumePromptReadyTask = nil
+        resumePromptReadyEarliest = nil
+        resumeStartupRequiresHookSession = false
         cancelResumeStartupWatchdog()
         log.debug("resume prompt ready session=\(sessionID, privacy: .public)")
         finishResumeStartupGate()
+        return true
     }
 
-    func scheduleStartupSubmitRecovery(turnID: UUID) {
+    func armStartupSubmitRecovery(turnID: UUID, promptBytes: Data) {
+        startupSubmitRecoveryAttempt = 0
+        scheduleStartupSubmitRecovery(turnID: turnID, promptBytes: promptBytes)
+    }
+
+    func scheduleStartupSubmitRecovery(turnID: UUID, promptBytes: Data) {
         startupSubmitRecoveryTask?.cancel()
+        startupSubmitRecoveryBytes = promptBytes
         startupSubmitRecoveryTask = Task { [weak self, clock = seams.clock] in
             do {
                 try await clock.sleep(for: ActivityTiming.startupSubmitRecoveryDelay)
@@ -572,13 +699,82 @@ public actor AgentEngine: AgentEngineCommandPort {
     private func recoverStartupSubmitIfNeeded(turnID: UUID) async {
         startupSubmitRecoveryTask = nil
         // The turn already progressed (response arrived / went idle) — nothing to do.
-        guard currentTurnID == turnID else { return }
+        guard currentTurnID == turnID else {
+            cancelStartupSubmitRecovery()
+            return
+        }
+        // Claude accepted the prompt (live `UserPromptSubmit` cleared the flag) —
+        // stop retrying so we never inject a duplicate submit.
+        guard currentTurnAwaitingAcceptance else {
+            cancelStartupSubmitRecovery()
+            return
+        }
         // Never inject Enter while a trust/permission screen is awaiting the user.
-        guard pendingPermissions.isEmpty else { return }
-        guard let terminal,
-              Self.rowsShowUnsubmittedPrompt(await terminal.snapshotRows()) else { return }
-        log.warning("startup submit recovery: re-sending Enter turn=\(turnID, privacy: .public)")
-        try? await transport?.write(Data("\r".utf8))
+        // Keep polling so recovery still runs after the dialog clears.
+        guard pendingPermissions.isEmpty else {
+            rescheduleStartupSubmitRecovery(turnID: turnID)
+            return
+        }
+        guard let terminal else { return }
+
+        // The resumed `claude --resume` process paints JSONL history and chrome
+        // long after the UI already shows it, so a single post-write nudge is
+        // not enough. Keep confirming delivery every tick until Claude's live
+        // `UserPromptSubmit` hook clears `currentTurnAwaitingAcceptance` (which
+        // cancels this loop) or the attempt budget is exhausted. We only ever
+        // act on an unambiguous TUI state so an already-accepted prompt is not
+        // re-submitted.
+        let rows = await terminal.snapshotRows()
+        if Self.rowsShowUnsubmittedPrompt(rows) {
+            // Prompt text is sitting in the input row unsubmitted — press Enter.
+            log.warning("startup submit recovery: re-sending Enter turn=\(turnID, privacy: .public)")
+            try? await transport?.write(Data("\r".utf8))
+        } else if Self.rowsContainClaudeReadyPrompt(rows),
+                  let promptBytes = startupSubmitRecoveryBytes {
+            // Input row is the empty ready prompt and Claude has not accepted a
+            // turn (awaiting flag still set), so the earlier write was swallowed
+            // during resume repaint — re-send the whole prompt.
+            log.warning("startup submit recovery: re-sending prompt turn=\(turnID, privacy: .public)")
+            try? await transport?.write(promptBytes)
+        }
+        // else: TUI still painting / working — do nothing this tick.
+
+        startupSubmitRecoveryAttempt += 1
+        if startupSubmitRecoveryAttempt < ActivityTiming.startupSubmitRecoveryMaxAttempts {
+            rescheduleStartupSubmitRecovery(turnID: turnID)
+        } else {
+            log.warning("startup submit recovery: giving up after \(self.startupSubmitRecoveryAttempt, privacy: .public) attempts turn=\(turnID, privacy: .public)")
+            // Stop gating turn completion so a late assistant reply / idle can
+            // still finish the turn normally instead of wedging it open.
+            currentTurnAwaitingAcceptance = false
+            currentTurnPromptText = nil
+            cancelStartupSubmitRecovery()
+        }
+    }
+
+    private func rescheduleStartupSubmitRecovery(turnID: UUID) {
+        guard let promptBytes = startupSubmitRecoveryBytes else { return }
+        scheduleStartupSubmitRecovery(turnID: turnID, promptBytes: promptBytes)
+    }
+
+    func cancelStartupSubmitRecovery() {
+        startupSubmitRecoveryTask?.cancel()
+        startupSubmitRecoveryTask = nil
+        startupSubmitRecoveryBytes = nil
+        startupSubmitRecoveryAttempt = 0
+    }
+
+    /// True when `text` is the live prompt we just submitted (hook echo), not
+    /// an unrelated historical transcript turn.
+    private func notesLivePromptAcceptance(id: String, text: String) -> Bool {
+        guard id == currentSessionID else { return false }
+        if let expected = currentTurnPromptText { return text == expected }
+        guard let bytes = startupSubmitRecoveryBytes,
+              var expected = String(data: bytes, encoding: .utf8) else { return false }
+        while expected.hasSuffix("\r") || expected.hasSuffix("\n") {
+            expected.removeLast()
+        }
+        return text == expected
     }
 
     static func rowsContainClaudeReadyPrompt(_ rows: [String]) -> Bool {
@@ -625,6 +821,19 @@ public actor AgentEngine: AgentEngineCommandPort {
         }
     }
 
+    /// After a trust/permission dialog clears, ensure the resume-startup gate
+    /// still has a path to open (ready poll + watchdog). Without this, a
+    /// watchdog tick that saw pending permissions can leave sends blocked.
+    func resumePollingAfterPermissionIfNeeded() {
+        guard let sessionID = resumeStartupSessionID, pendingPermissions.isEmpty else { return }
+        if resumePromptReadyTask == nil {
+            startResumePromptReadyWait(sessionID: sessionID)
+        }
+        if resumeStartupWatchdogTask == nil {
+            startResumeStartupWatchdog(sessionID: sessionID)
+        }
+    }
+
     private func finishResumeStartupGate() {
         resumeStartupSessionID = nil
         let waiters = resumeStartupWaiters
@@ -653,6 +862,7 @@ public actor AgentEngine: AgentEngineCommandPort {
             try await deliverPermissionResponse(.deny, for: prompt, id: id)
             await bus.publish(.permissionAlreadyResolved(id: id, byDevice: "timeout"))
             await bus.publish(.error(.permissionTimeout(promptID: id, action: .deny)))
+            resumePollingAfterPermissionIfNeeded()
         } catch {
             await SilentDiagnostics.shared.record(kind: .permissionDeliveryFailed,
                                                   owner: "AgentEngine",

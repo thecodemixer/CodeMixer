@@ -643,7 +643,7 @@ struct AgentEngineCommandTests {
                                              resumeSessionID: "old-session")
 
         try await spinUntil(clock: clock, target: 1, timeout: .seconds(2))
-        clock.advance(by: ActivityTiming.resumeStartupStallTimeout + .milliseconds(1))
+        clock.advance(by: ActivityTiming.resumedSessionStartupStallTimeout + .milliseconds(1))
         try await Task.sleep(for: .milliseconds(40))
 
         let events = await h.collectedSoFar()
@@ -675,6 +675,8 @@ struct AgentEngineCommandTests {
         #expect(h.adapter.emit(.sessionStarted(sessionID: "old-session",
                                               model: nil,
                                               cwd: h.workspace)))
+        try await spinUntil(clock: clock, target: 2, timeout: .seconds(2))
+        clock.advance(by: ActivityTiming.resumePromptReadySettleDelay)
         let sendTask = Task {
             try await h.engine.send(.sendPrompt(text: "ready", attachments: []))
         }
@@ -684,7 +686,7 @@ struct AgentEngineCommandTests {
         }
         try await sendTask.value
         #expect(await transport.writtenTexts() == ["ready"])
-        clock.advance(by: ActivityTiming.resumeStartupStallTimeout + .milliseconds(1))
+        clock.advance(by: ActivityTiming.resumedSessionStartupStallTimeout + .milliseconds(1))
         try await Task.sleep(for: .milliseconds(40))
 
         let events = await h.collectedSoFar()
@@ -703,15 +705,19 @@ struct AgentEngineCommandTests {
 
     @Test("resumed prompt waits for Claude's ready prompt before writing PTY bytes")
     func resumedPromptWaitsForClaudeReadyPrompt() async throws {
+        let clock = FakeClock()
         let transport = ScriptedTransport()
         let adapter = RecordingMockAdapter(capabilities: .ptyTUIFallback)
-        let h = try await EngineHarness.make(adapter: adapter,
+        let h = try await EngineHarness.make(clock: clock,
+                                             adapter: adapter,
                                              resumeSessionID: "old-session",
                                              transport: transport)
 
         let sendTask = Task {
             try await h.engine.send(.sendPrompt(text: "held", attachments: []))
         }
+        defer { sendTask.cancel() }
+        try await spinUntil(clock: clock, target: 1, timeout: .seconds(2))
         try await Task.sleep(for: .milliseconds(40))
 
         #expect(await transport.writtenData().isEmpty)
@@ -723,12 +729,15 @@ struct AgentEngineCommandTests {
         #expect(h.adapter.emit(.sessionStarted(sessionID: "old-session",
                                               model: nil,
                                               cwd: h.workspace)))
-        try await Task.sleep(for: .milliseconds(150))
+        try await spinUntil(clock: clock, target: 2, timeout: .seconds(2))
+        try await Task.sleep(for: .milliseconds(40))
         #expect(await transport.writtenData().isEmpty)
 
         await transport.emit("❯\u{00A0}\n? for shortcuts\n")
-        try await waitUntil(timeout: .seconds(2)) {
-            await transport.writtenTexts() == ["held"]
+        clock.advance(by: ActivityTiming.resumePromptReadySettleDelay)
+        for _ in 0..<6 {
+            clock.advance(by: ActivityTiming.resumePromptReadyPollInterval)
+            try await Task.sleep(for: .milliseconds(20))
         }
 
         #expect(await transport.writtenTexts() == ["held"])
@@ -736,15 +745,48 @@ struct AgentEngineCommandTests {
         await h.shutdown()
     }
 
-    @Test("new TUI session first prompt waits for Claude's ready prompt")
-    func newTUISessionPromptWaitsForClaudeReadyPrompt() async throws {
+    @Test("resumed prompt releases shortly after SessionStart when prompt scrape misses")
+    func resumedPromptReleasesAfterSessionStartFallback() async throws {
+        let clock = FakeClock()
         let transport = ScriptedTransport()
         let adapter = RecordingMockAdapter(capabilities: .ptyTUIFallback)
-        let h = try await EngineHarness.make(adapter: adapter, transport: transport)
+        let h = try await EngineHarness.make(clock: clock,
+                                             adapter: adapter,
+                                             resumeSessionID: "old-session",
+                                             transport: transport)
+
+        let sendTask = Task {
+            try await h.engine.send(.sendPrompt(text: "released after hook", attachments: []))
+        }
+        defer { sendTask.cancel() }
+        try await spinUntil(clock: clock, target: 1, timeout: .seconds(2))
+
+        #expect(h.adapter.emit(.sessionStarted(sessionID: "old-session",
+                                              model: nil,
+                                              cwd: h.workspace)))
+        try await spinUntil(clock: clock, target: 2, timeout: .seconds(2))
+        #expect(await transport.writtenData().isEmpty)
+
+        clock.advance(by: ActivityTiming.resumedSessionPostSessionStartFallback + .milliseconds(1))
+        try await Task.sleep(for: .milliseconds(40))
+        try await sendTask.value
+
+        #expect(await transport.writtenTexts() == ["released after hook"])
+        await h.shutdown()
+    }
+
+    @Test("new TUI session first prompt waits for Claude's ready prompt")
+    func newTUISessionPromptWaitsForClaudeReadyPrompt() async throws {
+        let clock = FakeClock()
+        let transport = ScriptedTransport()
+        let adapter = RecordingMockAdapter(capabilities: .ptyTUIFallback)
+        let h = try await EngineHarness.make(clock: clock, adapter: adapter, transport: transport)
 
         let sendTask = Task {
             try await h.engine.send(.sendPrompt(text: "fresh held", attachments: []))
         }
+        defer { sendTask.cancel() }
+        try await spinUntil(clock: clock, target: 1, timeout: .seconds(2))
         try await Task.sleep(for: .milliseconds(40))
 
         #expect(await transport.writtenData().isEmpty)
@@ -752,9 +794,12 @@ struct AgentEngineCommandTests {
         #expect(h.adapter.emit(.sessionStarted(sessionID: "new-session",
                                               model: nil,
                                               cwd: h.workspace)))
+        try await spinUntil(clock: clock, target: 2, timeout: .seconds(2))
         await transport.emit("❯\u{00A0}\n? for shortcuts\n")
-        try await waitUntil(timeout: .seconds(2)) {
-            await transport.writtenTexts() == ["fresh held"]
+        clock.advance(by: ActivityTiming.resumePromptReadySettleDelay)
+        for _ in 0..<6 {
+            clock.advance(by: ActivityTiming.resumePromptReadyPollInterval)
+            try await Task.sleep(for: .milliseconds(20))
         }
 
         #expect(await transport.writtenTexts() == ["fresh held"])
@@ -809,15 +854,29 @@ struct AgentEngineCommandTests {
         let sendTask = Task {
             try await h.engine.send(.sendPrompt(text: "released", attachments: []))
         }
+        defer { sendTask.cancel() }
         try await spinUntil(clock: clock, target: 1, timeout: .seconds(2))
         try await Task.sleep(for: .milliseconds(40))
 
         #expect(await transport.writtenData().isEmpty)
-        clock.advance(by: ActivityTiming.resumeStartupStallTimeout + .milliseconds(1))
+        clock.advance(by: ActivityTiming.resumedSessionStartupStallTimeout + .milliseconds(1))
         try await Task.sleep(for: .milliseconds(40))
         try await sendTask.value
 
         #expect(await transport.writtenTexts() == ["released"])
+        let events = await h.collectedSoFar()
+        // A prompt already waiting on the gate must not get the empty-session
+        // stall affordance — that was lighting "Agent may be stalled" on send.
+        #expect(!events.contains {
+            if case .activityStateChanged(.probablyStuck) = $0 { return true }
+            return false
+        })
+        #expect(!events.contains {
+            if case .noEventGap(_, let elapsed) = $0 {
+                return elapsed > ActivityTiming.probablyStuckThreshold
+            }
+            return false
+        })
         await h.shutdown()
     }
 
@@ -887,6 +946,8 @@ struct AgentEngineCommandTests {
         #expect(h.adapter.emit(.sessionStarted(sessionID: "old-session",
                                               model: nil,
                                               cwd: h.workspace)))
+        try await spinUntil(clock: clock, target: 2, timeout: .seconds(2))
+        clock.advance(by: ActivityTiming.resumePromptReadySettleDelay)
         let sendTask = Task {
             try await h.engine.send(.sendPrompt(text: "stuck", attachments: []))
         }
@@ -924,6 +985,8 @@ struct AgentEngineCommandTests {
         #expect(h.adapter.emit(.sessionStarted(sessionID: "old-session",
                                               model: nil,
                                               cwd: h.workspace)))
+        try await spinUntil(clock: clock, target: 2, timeout: .seconds(2))
+        clock.advance(by: ActivityTiming.resumePromptReadySettleDelay)
         let sendTask = Task {
             try await h.engine.send(.sendPrompt(text: "accepted", attachments: []))
         }
@@ -934,13 +997,194 @@ struct AgentEngineCommandTests {
         try await sendTask.value
         #expect(await transport.writtenTexts() == ["accepted"])
 
-        // Input row is empty again: Claude accepted the prompt.
+        // Hook echo confirms Claude accepted the prompt, so recovery cancels.
+        #expect(h.adapter.emit(.userTurn(id: "old-session", text: "accepted")))
         await transport.emit("❯\u{00A0}\n? for shortcuts\n")
         try await Task.sleep(for: .milliseconds(40))
         clock.advance(by: ActivityTiming.startupSubmitRecoveryDelay + .milliseconds(1))
         try await Task.sleep(for: .milliseconds(80))
 
         #expect(await transport.writtenTexts() == ["accepted"])
+        await h.shutdown()
+    }
+
+    @Test("startup submit recovery re-sends prompt when first write was swallowed")
+    func startupSubmitRecoveryResendsPromptWhenSwallowed() async throws {
+        let clock = FakeClock()
+        let transport = ScriptedTransport()
+        let adapter = RecordingMockAdapter(capabilities: .ptyTUIFallback)
+        let h = try await EngineHarness.make(clock: clock,
+                                             adapter: adapter,
+                                             resumeSessionID: "old-session",
+                                             transport: transport)
+
+        try await spinUntil(clock: clock, target: 1, timeout: .seconds(2))
+        await transport.emit("❯\u{00A0}\n? for shortcuts\n")
+        #expect(h.adapter.emit(.sessionStarted(sessionID: "old-session",
+                                              model: nil,
+                                              cwd: h.workspace)))
+        try await spinUntil(clock: clock, target: 2, timeout: .seconds(2))
+        clock.advance(by: ActivityTiming.resumePromptReadySettleDelay)
+        let sendTask = Task {
+            try await h.engine.send(.sendPrompt(text: "swallowed", attachments: []))
+        }
+        defer { sendTask.cancel() }
+        for _ in 0..<3 {
+            clock.advance(by: ActivityTiming.resumePromptReadyPollInterval)
+            try await Task.sleep(for: .milliseconds(40))
+        }
+        try await sendTask.value
+        #expect(await transport.writtenTexts() == ["swallowed"])
+
+        // Claude dropped the first write and returned to an empty prompt without
+        // emitting UserPromptSubmit / assistant activity.
+        await transport.emit("❯\u{00A0}\n? for shortcuts\n")
+        try await Task.sleep(for: .milliseconds(40))
+        clock.advance(by: ActivityTiming.startupSubmitRecoveryDelay + .milliseconds(1))
+        try await waitUntil(timeout: .seconds(2)) {
+            await transport.writtenTexts() == ["swallowed", "swallowed"]
+        }
+
+        #expect(await transport.writtenTexts() == ["swallowed", "swallowed"])
+        await h.shutdown()
+    }
+
+    @Test("startup submit recovery ignores historical userTurn replay")
+    func startupSubmitRecoveryIgnoresHistoricalUserTurns() async throws {
+        let clock = FakeClock()
+        let transport = ScriptedTransport()
+        let adapter = RecordingMockAdapter(capabilities: .ptyTUIFallback)
+        let h = try await EngineHarness.make(clock: clock,
+                                             adapter: adapter,
+                                             resumeSessionID: "old-session",
+                                             transport: transport)
+
+        try await spinUntil(clock: clock, target: 1, timeout: .seconds(2))
+        await transport.emit("❯\u{00A0}\n? for shortcuts\n")
+        #expect(h.adapter.emit(.sessionStarted(sessionID: "old-session",
+                                              model: nil,
+                                              cwd: h.workspace)))
+        try await spinUntil(clock: clock, target: 2, timeout: .seconds(2))
+        clock.advance(by: ActivityTiming.resumePromptReadySettleDelay)
+        let sendTask = Task {
+            try await h.engine.send(.sendPrompt(text: "live prompt", attachments: []))
+        }
+        defer { sendTask.cancel() }
+        for _ in 0..<3 {
+            clock.advance(by: ActivityTiming.resumePromptReadyPollInterval)
+            try await Task.sleep(for: .milliseconds(40))
+        }
+        try await sendTask.value
+        #expect(await transport.writtenTexts() == ["live prompt"])
+
+        // Late transcript replay must not cancel recovery for the live send,
+        // even if a historical turn has the same text as the prompt.
+        #expect(h.adapter.emit(.userTurn(id: "hist-1", text: "old message from history")))
+        #expect(h.adapter.emit(.userTurn(id: "hist-2", text: "live prompt")))
+        await transport.emit("❯\u{00A0}\n? for shortcuts\n")
+        try await Task.sleep(for: .milliseconds(40))
+        clock.advance(by: ActivityTiming.startupSubmitRecoveryDelay + .milliseconds(1))
+        try await waitUntil(timeout: .seconds(2)) {
+            await transport.writtenTexts() == ["live prompt", "live prompt"]
+        }
+
+        #expect(await transport.writtenTexts() == ["live prompt", "live prompt"])
+        await h.shutdown()
+    }
+
+    @Test("startup submit recovery keeps resending until Claude accepts")
+    func startupSubmitRecoveryPersistsUntilAccepted() async throws {
+        let clock = FakeClock()
+        let transport = ScriptedTransport()
+        let adapter = RecordingMockAdapter(capabilities: .ptyTUIFallback)
+        let h = try await EngineHarness.make(clock: clock,
+                                             adapter: adapter,
+                                             resumeSessionID: "old-session",
+                                             transport: transport)
+
+        try await spinUntil(clock: clock, target: 1, timeout: .seconds(2))
+        await transport.emit("❯\u{00A0}\n? for shortcuts\n")
+        #expect(h.adapter.emit(.sessionStarted(sessionID: "old-session",
+                                              model: nil,
+                                              cwd: h.workspace)))
+        try await spinUntil(clock: clock, target: 2, timeout: .seconds(2))
+        clock.advance(by: ActivityTiming.resumePromptReadySettleDelay)
+        let sendTask = Task {
+            try await h.engine.send(.sendPrompt(text: "persist", attachments: []))
+        }
+        defer { sendTask.cancel() }
+        for _ in 0..<3 {
+            clock.advance(by: ActivityTiming.resumePromptReadyPollInterval)
+            try await Task.sleep(for: .milliseconds(40))
+        }
+        try await sendTask.value
+        #expect(await transport.writtenTexts() == ["persist"])
+
+        // Claude keeps swallowing writes during resume repaint: each recovery
+        // tick that sees the empty ready prompt without acceptance re-sends.
+        await transport.emit("❯\u{00A0}\n? for shortcuts\n")
+        try await Task.sleep(for: .milliseconds(40))
+        clock.advance(by: ActivityTiming.startupSubmitRecoveryDelay + .milliseconds(1))
+        try await waitUntil(timeout: .seconds(2)) {
+            await transport.writtenTexts() == ["persist", "persist"]
+        }
+        clock.advance(by: ActivityTiming.startupSubmitRecoveryDelay + .milliseconds(1))
+        try await waitUntil(timeout: .seconds(2)) {
+            await transport.writtenTexts() == ["persist", "persist", "persist"]
+        }
+
+        // Once Claude accepts (live UserPromptSubmit hook), recovery stops.
+        #expect(h.adapter.emit(.userTurn(id: "old-session", text: "persist")))
+        try await Task.sleep(for: .milliseconds(40))
+        clock.advance(by: ActivityTiming.startupSubmitRecoveryDelay + .milliseconds(1))
+        try await Task.sleep(for: .milliseconds(80))
+
+        #expect(await transport.writtenTexts() == ["persist", "persist", "persist"])
+        await h.shutdown()
+    }
+
+    @Test("startup submit recovery retries while TUI is still painting")
+    func startupSubmitRecoveryRetriesWhilePainting() async throws {
+        let clock = FakeClock()
+        let transport = ScriptedTransport()
+        let adapter = RecordingMockAdapter(capabilities: .ptyTUIFallback)
+        let h = try await EngineHarness.make(clock: clock,
+                                             adapter: adapter,
+                                             resumeSessionID: "old-session",
+                                             transport: transport)
+
+        try await spinUntil(clock: clock, target: 1, timeout: .seconds(2))
+        #expect(h.adapter.emit(.sessionStarted(sessionID: "old-session",
+                                              model: nil,
+                                              cwd: h.workspace)))
+        try await spinUntil(clock: clock, target: 2, timeout: .seconds(2))
+
+        let sendTask = Task {
+            try await h.engine.send(.sendPrompt(text: "paint wait", attachments: []))
+        }
+        defer { sendTask.cancel() }
+        // Release via post-SessionStart fallback — no ready-prompt scrape yet.
+        clock.advance(by: ActivityTiming.resumedSessionPostSessionStartFallback + .milliseconds(1))
+        try await Task.sleep(for: .milliseconds(40))
+        try await sendTask.value
+        #expect(await transport.writtenTexts() == ["paint wait"])
+
+        // First recovery tick sees neither ready nor unsubmitted — keep waiting.
+        await transport.emit("Loading history…\n")
+        try await Task.sleep(for: .milliseconds(40))
+        clock.advance(by: ActivityTiming.startupSubmitRecoveryDelay + .milliseconds(1))
+        try await Task.sleep(for: .milliseconds(40))
+        #expect(await transport.writtenTexts() == ["paint wait"])
+
+        // Later the empty prompt appears; recovery should still resend.
+        await transport.emit("❯\u{00A0}\n? for shortcuts\n")
+        try await Task.sleep(for: .milliseconds(40))
+        clock.advance(by: ActivityTiming.startupSubmitRecoveryDelay + .milliseconds(1))
+        try await waitUntil(timeout: .seconds(2)) {
+            await transport.writtenTexts() == ["paint wait", "paint wait"]
+        }
+
+        #expect(await transport.writtenTexts() == ["paint wait", "paint wait"])
         await h.shutdown()
     }
 

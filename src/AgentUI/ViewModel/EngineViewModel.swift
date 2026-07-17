@@ -35,6 +35,14 @@ public final class EngineViewModel {
     /// See `docs/architecture.md` §4.1 and `Remote/AgentRemoteControl/README.md`.
     public internal(set) var connectedRemoteClients: Int = 0
     public internal(set) var isSwitchingSession: Bool = false
+    /// Holds the composer closed briefly after opening a saved session so the
+    /// first prompt cannot race Claude's resume/startup TUI.
+    public internal(set) var isComposerLockedForSessionResume: Bool = false
+    /// Claude Code resume has two clocks: the UI can replay JSONL history
+    /// quickly, while the live `claude --resume` PTY may still be painting
+    /// history and not yet accepting input. While true, replayed content may
+    /// end the visual switch state but must not unlock the composer.
+    internal var isComposerWaitingForClaudeCodeResume: Bool = false
     public internal(set) var sessionTokens: Int = 0
     public internal(set) var sessionCostUSD: Double?
     public internal(set) var appearancePrefs: AppearancePrefs = .init()
@@ -135,6 +143,7 @@ public final class EngineViewModel {
     var stalledToastTask: Task<Void, Never>?
     var removedProjectUndoTask: Task<Void, Never>?
     var sessionSwitchingTask: Task<Void, Never>?
+    var composerResumeUnlockTask: Task<Void, Never>?
     var stalledToastFiredThisTurn = false
     var isAwaitingFirstReplyForPrompt = false
     var pendingOptimisticBubbleID: UUID?

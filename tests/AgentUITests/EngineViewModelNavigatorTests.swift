@@ -333,6 +333,115 @@ struct EngineViewModelNavigatorTests {
         await bus.shutdown()
     }
 
+    @Test("openSession locks composer until history appears")
+    func openSessionLocksComposerUntilResumeReady() async {
+        let port = RecordingPort()
+        let bus = MulticastEventBus()
+        let clock = FakeClock()
+        let vm = EngineViewModel(engine: port, bus: bus, clock: clock, random: FakeRandomSource())
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        vm.openSession(projectPath: "/Users/me/ws", id: "sess-42")
+        #expect(vm.isComposerLockedForSessionResume)
+
+        vm.sendPrompt("too early")
+        #expect(vm.messages.isEmpty)
+
+        await bus.publish(.userTurn(id: UUID().uuidString, text: "historical"))
+        await drain()
+        #expect(!vm.isSwitchingSession)
+        #expect(!vm.isComposerLockedForSessionResume)
+
+        vm.sendPrompt("now allowed")
+        #expect(vm.messages.count == 2)
+
+        await bus.shutdown()
+    }
+
+    @Test("Claude openSession keeps composer locked past JSONL history until live resume settles")
+    func claudeOpenSessionWaitsForLiveResumeBeforeUnlockingComposer() async {
+        let port = RecordingPort()
+        let bus = MulticastEventBus()
+        let clock = FakeClock()
+        let vm = EngineViewModel(engine: port, bus: bus, clock: clock, random: FakeRandomSource())
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        let workspace = URL(fileURLWithPath: "/Users/me/ws")
+        vm.sessionsByProject[workspace.path] = [
+            SessionSummary(id: "sess-42",
+                           agentID: .claudeCode,
+                           workspace: workspace,
+                           title: "Claude",
+                           lastActivity: Date(),
+                           messageCount: 2)
+        ]
+
+        vm.openSession(projectPath: workspace.path, id: "sess-42")
+        #expect(vm.isComposerLockedForSessionResume)
+
+        await bus.publish(.userTurn(id: UUID().uuidString, text: "historical"))
+        await drain()
+        #expect(!vm.isSwitchingSession)
+        #expect(vm.isComposerLockedForSessionResume)
+
+        await bus.publish(.sessionStarted(sessionID: "sess-42",
+                                          model: "sonnet",
+                                          cwd: workspace))
+        await drain()
+        #expect(vm.isComposerLockedForSessionResume)
+
+        clock.advance(by: SessionSwitchingTiming.claudeCodeComposerHookUnlock + .milliseconds(1))
+        try? await Task.sleep(for: .milliseconds(40))
+
+        #expect(!vm.isComposerLockedForSessionResume)
+
+        await bus.shutdown()
+    }
+
+    @Test("openSession unlocks composer on hook SessionStart with model")
+    func openSessionUnlocksComposerOnHookSessionStart() async {
+        let port = RecordingPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        vm.openSession(projectPath: "/Users/me/ws", id: "sess-42")
+        #expect(vm.isComposerLockedForSessionResume)
+
+        await bus.publish(.sessionStarted(sessionID: "sess-42",
+                                          model: "sonnet",
+                                          cwd: URL(fileURLWithPath: "/Users/me/ws")))
+        await drain()
+
+        #expect(!vm.isComposerLockedForSessionResume)
+
+        await bus.shutdown()
+    }
+
+    @Test("openSession composer lock has a hard fallback")
+    func openSessionComposerLockHardFallback() async {
+        let port = RecordingPort()
+        let bus = MulticastEventBus()
+        let clock = FakeClock()
+        let vm = EngineViewModel(engine: port, bus: bus, clock: clock, random: FakeRandomSource())
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        vm.openSession(projectPath: "/Users/me/ws", id: "sess-42")
+        #expect(vm.isComposerLockedForSessionResume)
+
+        await waitForPendingSleeps(clock, count: 2)
+        clock.advance(by: SessionSwitchingTiming.composerHardUnlock + .milliseconds(1))
+        try? await Task.sleep(for: .milliseconds(40))
+
+        #expect(!vm.isComposerLockedForSessionResume)
+
+        await bus.shutdown()
+    }
+
     @Test("openSession keeps switching state across restart stop event")
     func openSessionKeepsSwitchingAcrossStop() async {
         let port = RecordingPort()
@@ -539,6 +648,13 @@ private func makeModel() -> (EngineViewModel, MulticastEventBus, FakeClock) {
 @MainActor
 private func drain() async {
     try? await Task.sleep(for: .milliseconds(40))
+}
+
+private func waitForPendingSleeps(_ clock: FakeClock, count: Int) async {
+    let start = ContinuousClock.now
+    while clock.pendingSleepCount < count, start.duration(to: .now) < .seconds(2) {
+        try? await Task.sleep(for: .milliseconds(10))
+    }
 }
 
 private final class NoThrowPort: AgentEngineCommandPort, @unchecked Sendable {

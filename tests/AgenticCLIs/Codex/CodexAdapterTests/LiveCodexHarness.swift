@@ -19,7 +19,7 @@ import Codex
 /// - `CODEMIXER_LIVE_WORKSPACE` — workspace directory (defaults to the process
 ///   current working directory, usually the repo root under `swift test`).
 /// - `CODEX_BIN` — override the `codex` executable path.
-struct LiveCodexHarness: Sendable {
+struct LiveCodexHarness {
 
     struct Configuration: Sendable {
         var workspace: URL
@@ -48,14 +48,11 @@ struct LiveCodexHarness: Sendable {
         let finalAssistantTextCount: Int
     }
 
-    private let seams: Seams
     private let environment: any AgentEnvironment
     private let fileSystem: any FileSystem
 
-    init(seams: Seams = .live,
-         environment: any AgentEnvironment = SystemEnvironment(),
+    init(environment: any AgentEnvironment = SystemEnvironment(),
          fileSystem: any FileSystem = SystemFileSystem()) {
-        self.seams = seams
         self.environment = environment
         self.fileSystem = fileSystem
     }
@@ -105,7 +102,7 @@ struct LiveCodexHarness: Sendable {
     // MARK: - Drive
 
     func runTurn(_ configuration: Configuration) async throws -> TurnResult {
-        let engine = AgentEngine(seams: seams)
+        let engine = AgentEngine(seams: .live)
         await engine.bootstrap()
 
         let adapter = CodexAdapter(environment: environment, fileSystem: fileSystem)

@@ -14,6 +14,7 @@ extension EngineViewModel {
     /// Prefer this over `send(.sendPrompt(...))` from the UI so sending never
     /// waits on the PTY write + bus fan-out (visual-style §1.6).
     public func sendPrompt(_ text: String, attachments: [AttachmentRef] = []) {
+        guard !isComposerLockedForSessionResume else { return }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
@@ -41,6 +42,7 @@ extension EngineViewModel {
     public func editAndResubmit(targetBubbleID: UUID,
                                 text: String,
                                 attachments: [AttachmentRef] = []) {
+        guard !isComposerLockedForSessionResume else { return }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         enterWorkingState()

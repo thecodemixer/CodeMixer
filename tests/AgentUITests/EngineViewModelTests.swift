@@ -136,7 +136,11 @@ struct EngineViewModelTests {
         defer { vm.unsubscribe() }
 
         vm.sendPrompt("hello")
-        await bus.publish(.noEventGap(turnID: UUID(), elapsed: .seconds(91)))
+        guard let turnID = vm.lastUserBubbleID else {
+            Issue.record("expected lastUserBubbleID after sendPrompt")
+            return
+        }
+        await bus.publish(.noEventGap(turnID: turnID, elapsed: .seconds(91)))
         await drain()
 
         #expect(vm.stalledToastVisible)
@@ -155,6 +159,27 @@ struct EngineViewModelTests {
         await drain()
 
         #expect(!vm.stalledToastVisible)
+
+        await bus.shutdown()
+    }
+
+    @Test("resume startup gap for a foreign turn id does not stall a just-sent prompt")
+    func resumeStartupGapDoesNotStallJustSentPrompt() async {
+        let (vm, bus) = makeModel()
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        vm.sendPrompt("hello")
+        await bus.publish(.activityStateChanged(.probablyStuck))
+        await bus.publish(.noEventGap(turnID: UUID(), elapsed: .seconds(91)))
+        await drain()
+
+        #expect(!vm.stalledToastVisible)
+        if case .working(let phrase) = vm.status {
+            #expect(phrase == ActivityTiming.workingPhrase)
+        } else {
+            #expect(Bool(false), "status should stay on the optimistic working phrase")
+        }
 
         await bus.shutdown()
     }
@@ -183,8 +208,12 @@ struct EngineViewModelTests {
         defer { vm.unsubscribe() }
 
         vm.sendPrompt("hello")
+        guard let turnID = vm.lastUserBubbleID else {
+            Issue.record("expected lastUserBubbleID after sendPrompt")
+            return
+        }
         await bus.publish(.textDelta(messageID: UUID(), delta: "Working"))
-        await bus.publish(.noEventGap(turnID: UUID(), elapsed: .seconds(91)))
+        await bus.publish(.noEventGap(turnID: turnID, elapsed: .seconds(91)))
         await drain()
 
         #expect(!vm.stalledToastVisible)
@@ -199,7 +228,11 @@ struct EngineViewModelTests {
         defer { vm.unsubscribe() }
 
         vm.sendPrompt("hello")
-        await bus.publish(.noEventGap(turnID: UUID(), elapsed: .seconds(11)))
+        guard let turnID = vm.lastUserBubbleID else {
+            Issue.record("expected lastUserBubbleID after sendPrompt")
+            return
+        }
+        await bus.publish(.noEventGap(turnID: turnID, elapsed: .seconds(11)))
         await drain()
 
         if case .working(let phrase) = vm.status {
@@ -219,12 +252,16 @@ struct EngineViewModelTests {
         defer { vm.unsubscribe() }
 
         vm.sendPrompt("hello")
-        await bus.publish(.noEventGap(turnID: UUID(), elapsed: .seconds(91)))
+        guard let turnID = vm.lastUserBubbleID else {
+            Issue.record("expected lastUserBubbleID after sendPrompt")
+            return
+        }
+        await bus.publish(.noEventGap(turnID: turnID, elapsed: .seconds(91)))
         await drain()
         #expect(vm.stalledToastVisible)
 
         // Second 91-second event — flag prevents a reset that re-fires auto-dismiss.
-        await bus.publish(.noEventGap(turnID: UUID(), elapsed: .seconds(95)))
+        await bus.publish(.noEventGap(turnID: turnID, elapsed: .seconds(95)))
         await drain()
         #expect(vm.stalledToastVisible)
 
@@ -238,7 +275,11 @@ struct EngineViewModelTests {
         defer { vm.unsubscribe() }
 
         vm.sendPrompt("hello")
-        await bus.publish(.noEventGap(turnID: UUID(), elapsed: .seconds(91)))
+        guard let turnID = vm.lastUserBubbleID else {
+            Issue.record("expected lastUserBubbleID after sendPrompt")
+            return
+        }
+        await bus.publish(.noEventGap(turnID: turnID, elapsed: .seconds(91)))
         await drain()
         #expect(vm.stalledToastVisible)
 
@@ -260,7 +301,11 @@ struct EngineViewModelTests {
         defer { vm.unsubscribe() }
 
         vm.sendPrompt("hello")
-        await bus.publish(.noEventGap(turnID: UUID(), elapsed: .seconds(91)))
+        guard let turnID = vm.lastUserBubbleID else {
+            Issue.record("expected lastUserBubbleID after sendPrompt")
+            return
+        }
+        await bus.publish(.noEventGap(turnID: turnID, elapsed: .seconds(91)))
         await drain()
         #expect(vm.stalledToastVisible)
 
@@ -285,7 +330,11 @@ struct EngineViewModelTests {
         defer { vm.unsubscribe() }
 
         vm.sendPrompt("hello")
-        await bus.publish(.noEventGap(turnID: UUID(), elapsed: .seconds(91)))
+        guard let turnID = vm.lastUserBubbleID else {
+            Issue.record("expected lastUserBubbleID after sendPrompt")
+            return
+        }
+        await bus.publish(.noEventGap(turnID: turnID, elapsed: .seconds(91)))
         await drain()
         #expect(vm.stalledToastVisible)
 

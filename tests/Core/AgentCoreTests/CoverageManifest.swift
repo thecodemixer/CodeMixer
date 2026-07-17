@@ -1014,6 +1014,9 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // resumePromptReadyPollInterval
 // resumeSessionID
 // resumeStartupStallTimeout
+// resumedSessionStartupStallTimeout
+// resumedSessionPostSessionStartFallback
+// resumePromptReadySettleDelay
 // revealInFinder
 // review
 // revoke
