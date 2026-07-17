@@ -121,10 +121,8 @@ struct ComposerDropdownPanel: View {
     }
 
     private func rowBackground(isHighlighted: Bool) -> Color {
-        if opaqueItemBackgrounds {
-            return isHighlighted ? Theme.surface.sunken : Theme.surface.card
-        }
-        return isHighlighted ? Theme.surface.bubbleUser : .clear
+        if isHighlighted { return Theme.surface.bubbleUser }
+        return opaqueItemBackgrounds ? Theme.surface.card : .clear
     }
 
     private func activate(_ option: ComposerDropdownOption) {

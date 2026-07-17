@@ -22,15 +22,21 @@ public final class CursorACPAdapter: AgentAdapter {
     private let environment: any AgentEnvironment
     private let fileSystem: any FileSystem
     private let locator: CursorBinaryLocator
+    private let processRunner: ProcessRunner
+    private let modelCache: CursorModelCache
     private let inner: ACPAdapter
 
     public init(environment: any AgentEnvironment = SystemEnvironment(),
                 fileSystem: any FileSystem = SystemFileSystem(),
                 clock: any AgentClock = SystemClock(),
-                random: any RandomSource = SystemRandomSource()) {
+                random: any RandomSource = SystemRandomSource(),
+                processRunner: ProcessRunner = ProcessRunner(),
+                initialModels: [AgentModelOption] = []) {
         self.environment = environment
         self.fileSystem = fileSystem
         self.locator = CursorBinaryLocator(environment: environment, fileSystem: fileSystem)
+        self.processRunner = processRunner
+        self.modelCache = CursorModelCache(models: initialModels)
         self.inner = ACPAdapter(
             ref: CustomAgentRef(
                 id: "cursor",
@@ -48,7 +54,19 @@ public final class CursorACPAdapter: AgentAdapter {
 
     public func locateBinary(env: ResolvedEnvironment) async throws -> URL {
         do {
-            return try locator.locate(env: env)
+            let binary = try locator.locate(env: env)
+            // Do not block session start on `cursor-agent models` (often many
+            // seconds). A late catalog fill must not delay / race project switches.
+            Task { [processRunner, modelCache] in
+                await Self.refreshModelCatalog(
+                    executable: binary,
+                    env: env,
+                    processRunner: processRunner,
+                    modelCache: modelCache,
+                    envOverrides: ["NO_COLOR": "1"]
+                )
+            }
+            return binary
         } catch let error as CursorBinaryLocator.LocateError {
             switch error {
             case .notFound(let checked):
@@ -112,6 +130,8 @@ public final class CursorACPAdapter: AgentAdapter {
         case .toggleReviewMode(let enabled):
             // Second half of the composer Agent selection — no-op write.
             return enabled ? nil : Data()
+        case .selectModel(let id):
+            return inner.encodeCommand(.selectModel(id: id))
         default:
             return inner.encodeCommand(command)
         }
@@ -128,6 +148,11 @@ public final class CursorACPAdapter: AgentAdapter {
 
     public func availableAgentModes() -> [AgentModeOption] {
         CursorModeCommand.agentModes
+    }
+
+    public func availableModels() -> [AgentModelOption] {
+        let live = inner.availableModels()
+        return live.isEmpty ? modelCache.snapshot() : live
     }
 
     public func enumerateProjectCommands(workspace: URL) async -> [SlashCommand] { [] }
@@ -147,4 +172,53 @@ public final class CursorACPAdapter: AgentAdapter {
     }
 
     public func resumeArgvAddition(sessionID: String) -> [String] { [] }
+
+    private static func refreshModelCatalog(executable: URL,
+                                            env: ResolvedEnvironment,
+                                            processRunner: ProcessRunner,
+                                            modelCache: CursorModelCache,
+                                            envOverrides: [String: String]) async {
+        let environment = env.withOverrides(envOverrides)
+        let stdout: Data?
+        do {
+            let result = try await processRunner.run(
+                executable: executable,
+                arguments: ["models"],
+                env: environment
+            )
+            stdout = result.stdout
+        } catch {
+            stdout = try? await processRunner.run(
+                executable: executable,
+                arguments: ["--list-models"],
+                env: environment
+            ).stdout
+        }
+        guard let stdout else { return }
+        let models = CursorModelCatalog.parse(stdout)
+        if !models.isEmpty {
+            modelCache.replace(with: models)
+        }
+    }
+}
+
+private final class CursorModelCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private var models: [AgentModelOption]
+
+    init(models: [AgentModelOption]) {
+        self.models = models
+    }
+
+    func snapshot() -> [AgentModelOption] {
+        lock.lock()
+        defer { lock.unlock() }
+        return models
+    }
+
+    func replace(with models: [AgentModelOption]) {
+        lock.lock()
+        self.models = models
+        lock.unlock()
+    }
 }

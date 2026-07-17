@@ -144,7 +144,7 @@ struct RootView: View {
             systemImage: "folder",
             prominentName: bootstrap.workspace?.lastPathComponent,
             title: "Add your first project",
-            subtitle: "Projects live inside this workspace. Choose an agent and name when you create one.",
+            subtitle: "Projects live inside this workspace. Choose a project type and name when you create one.",
             primaryButtonTitle: "New Project…",
             primaryAction: { bootstrap.presentNewProjectSheet() }
         )

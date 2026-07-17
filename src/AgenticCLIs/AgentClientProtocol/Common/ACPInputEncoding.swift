@@ -141,6 +141,20 @@ public enum ACPInputEncoding {
         )
     }
 
+    /// ACP `session/set_model` — switches the model advertised on session open.
+    public static func setModel(modelID: String, state: ACPClientState) -> Data? {
+        guard let sessionID = state.sessionID() else { return nil }
+        let id = state.nextRequestID(for: .sessionSetModel)
+        return ACPRPCCodec.request(
+            id: id,
+            method: "session/set_model",
+            params: .object([
+                "sessionId": .string(sessionID),
+                "modelId": .string(modelID),
+            ])
+        )
+    }
+
     public static func listSessions(state: ACPClientState) -> Data? {
         guard state.supportsListSessions(),
               let context = state.currentContext() else { return nil }

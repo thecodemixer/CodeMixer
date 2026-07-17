@@ -47,6 +47,87 @@ struct ACPEventDecoderTests {
         #expect(summaries.contains { $0.id == "abc-123" })
     }
 
+    @Test("session new response records advertised models for the composer")
+    func sessionNewModels() async {
+        let fixture = ACPDecoderFixture(customAgentID: "cursor")
+        _ = await fixture.decode(.response(
+            id: .number(1),
+            result: .object([
+                "protocolVersion": .number(1),
+                "agentCapabilities": .object([:]),
+                "authMethods": .array([]),
+            ]),
+            error: nil
+        ))
+        let batch = await fixture.decode(.response(
+            id: .number(2),
+            result: .object([
+                "sessionId": .string("abc-123"),
+                "models": .object([
+                    "currentModelId": .string("auto"),
+                    "availableModels": .array([
+                        .object([
+                            "modelId": .string("auto"),
+                            "name": .string("Auto"),
+                        ]),
+                        .object([
+                            "modelId": .string("gpt-5.4"),
+                            "name": .string("GPT-5.4"),
+                        ]),
+                    ]),
+                ]),
+            ]),
+            error: nil
+        ))
+        #expect(batch.events.contains {
+            if case .sessionStarted(let id, let model, _) = $0 {
+                return id == "abc-123" && model == "auto"
+            }
+            return false
+        })
+        #expect(fixture.state.availableModels().map(\.id) == ["auto", "gpt-5.4"])
+    }
+
+    @Test("session new falls back to model configOptions when models object is empty")
+    func sessionNewModelConfigOptions() async {
+        let fixture = ACPDecoderFixture(customAgentID: "cursor")
+        _ = await fixture.decode(.response(
+            id: .number(1),
+            result: .object([
+                "protocolVersion": .number(1),
+                "agentCapabilities": .object([:]),
+                "authMethods": .array([]),
+            ]),
+            error: nil
+        ))
+        _ = await fixture.decode(.response(
+            id: .number(2),
+            result: .object([
+                "sessionId": .string("abc-123"),
+                "configOptions": .array([
+                    .object([
+                        "id": .string("model"),
+                        "category": .string("model"),
+                        "currentValue": .string("sonnet-4.6"),
+                        "options": .array([
+                            .object([
+                                "value": .string("auto"),
+                                "name": .string("Auto"),
+                            ]),
+                            .object([
+                                "value": .string("sonnet-4.6"),
+                                "name": .string("Sonnet 4.6"),
+                            ]),
+                        ]),
+                    ]),
+                ]),
+            ]),
+            error: nil
+        ))
+        #expect(fixture.state.availableModels().map(\.label) == ["Auto", "Sonnet 4.6"])
+        #expect(fixture.state.currentModelID() == "sonnet-4.6")
+    }
+
     @Test("session load falls back to resume id when result omits sessionId")
     func sessionLoadFallback() async {
         let fixture = ACPDecoderFixture(

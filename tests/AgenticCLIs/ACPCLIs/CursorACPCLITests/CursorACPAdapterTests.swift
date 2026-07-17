@@ -110,6 +110,40 @@ struct CursorACPAdapterTests {
         })
     }
 
+    @Test("model catalog parses cursor-agent models output")
+    func modelCatalogParsing() {
+        let output = """
+        \u{001B}[2K\u{001B}[GAvailable models
+
+        auto - Auto  (default)
+        gpt-5.3-codex-high - Codex 5.3 High
+        claude-4.6-sonnet-medium - Sonnet 4.6 1M  (current)
+        claude-fable-5-high - Fable 5 1M (NO ZDR)
+        """
+        let models = CursorModelCatalog.parse(output)
+        #expect(models.map(\.id) == [
+            "auto",
+            "gpt-5.3-codex-high",
+            "claude-4.6-sonnet-medium",
+            "claude-fable-5-high",
+        ])
+        #expect(models.map(\.label) == [
+            "Auto",
+            "Codex 5.3 High",
+            "Sonnet 4.6 1M",
+            "Fable 5 1M (NO ZDR)",
+        ])
+    }
+
+    @Test("availableModels falls back to cached cursor model catalog")
+    func availableModelsFallback() {
+        let adapter = CursorACPAdapter(initialModels: [
+            AgentModelOption(id: "auto", label: "Auto"),
+            AgentModelOption(id: "gpt-5.3-codex-high", label: "Codex 5.3 High"),
+        ])
+        #expect(adapter.availableModels().map(\.id) == ["auto", "gpt-5.3-codex-high"])
+    }
+
     @Test("AgentID.shipping includes cursorCLI")
     func shipping() {
         #expect(AgentID.shipping.contains(.cursorCLI))

@@ -144,6 +144,27 @@ struct EngineViewModelNavigatorTests {
         await bus.shutdown()
     }
 
+    @Test("loadSessions uses project-specific support when the current adapter is non-resumable")
+    func loadSessionsUsesProjectSpecificSupport() async {
+        let (vm, bus, _) = makeModel()
+        let path = "/Users/me/ws/claude"
+        vm.supportsResumableSessions = false
+        vm.projectResumableSessionSupport[path] = true
+        vm.sessionLister = { url in
+            [SessionSummary(id: "s1", agentID: .claudeCode,
+                            workspace: url, title: "Claude chat",
+                            lastActivity: Date(), messageCount: 1)]
+        }
+
+        vm.loadSessions(for: path)
+        try? await Task.sleep(for: .milliseconds(60))
+
+        #expect(vm.sessionsByProject[path]?.map(\.title) == ["Claude chat"])
+        #expect(vm.hasResumableSessionProjects)
+
+        await bus.shutdown()
+    }
+
     @Test("loadSessions populates sessions from the injected lister")
     func loadSessionsPopulates() async {
         let (vm, bus, _) = makeModel()

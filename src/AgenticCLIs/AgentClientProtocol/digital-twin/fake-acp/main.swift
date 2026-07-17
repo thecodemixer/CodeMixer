@@ -95,6 +95,7 @@ private struct FakeACPServer {
                 result: .object([
                     "sessionId": .string(sessionID),
                     "modes": modesPayload(),
+                    "models": modelsPayload(),
                 ])
             )]
         case "session/load", "session/resume":
@@ -104,6 +105,7 @@ private struct FakeACPServer {
             }
             return [ACPRPCCodec.response(id: id, result: .object([
                 "modes": modesPayload(),
+                "models": modelsPayload(),
             ]))]
         case "session/set_mode":
             if let mode = params["modeId"]?.stringValue {
@@ -179,6 +181,22 @@ private struct FakeACPServer {
                     "id": .string("ask"),
                     "name": .string("Ask"),
                     "description": .string("Q&A mode"),
+                ]),
+            ]),
+        ])
+    }
+
+    private func modelsPayload() -> JSONValue {
+        .object([
+            "currentModelId": .string("auto"),
+            "availableModels": .array([
+                .object([
+                    "modelId": .string("auto"),
+                    "name": .string("Auto"),
+                ]),
+                .object([
+                    "modelId": .string("gpt-5.4"),
+                    "name": .string("GPT-5.4"),
                 ]),
             ]),
         ])

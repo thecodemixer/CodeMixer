@@ -411,6 +411,22 @@ struct ACPAdapterTests {
         #expect(text.contains("\"method\":\"session/new\""))
     }
 
+    @Test("encodeCommand selectModel emits session/set_model")
+    func encodeSelectModel() {
+        let state = ACPClientState()
+        let workspace = URL(fileURLWithPath: "/tmp/acp-ws")
+        _ = ACPInputEncoding.bootstrap(
+            context: LaunchContext(workspace: workspace, permissionMode: .default),
+            state: state,
+            customAgentID: "cursor",
+            displayName: "Cursor"
+        )
+        state.setSessionID("sess-1")
+        let text = String(decoding: ACPInputEncoding.setModel(modelID: "gpt-5.4", state: state)!, as: UTF8.self)
+        #expect(text.contains("\"method\":\"session/set_model\""))
+        #expect(text.contains("\"modelId\":\"gpt-5.4\""))
+    }
+
     @Test("buildLaunchArgv prefixes executable name and appends configured args")
     func buildLaunchArgv() {
         let adapter = ACPAdapter(ref: CustomAgentRef(

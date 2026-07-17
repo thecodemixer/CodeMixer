@@ -42,7 +42,6 @@ struct ComposerModelMenu: View {
                         }
                     },
                     minWidth: Theme.layout.composerModelPickerMinWidth,
-                    opaqueItemBackgrounds: true,
                     onDismiss: { isOpen = false }
                 )
                 .positionedAboveAnchor(height: $menuHeight, gap: Self.dropdownGap)

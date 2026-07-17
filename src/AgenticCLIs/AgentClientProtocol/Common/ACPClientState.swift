@@ -24,6 +24,7 @@ public final class ACPClientState: @unchecked Sendable {
         case sessionPrompt
         case sessionList
         case sessionSetMode
+        case sessionSetModel
         case other(String)
     }
 
@@ -58,6 +59,8 @@ public final class ACPClientState: @unchecked Sendable {
     private var agentCapabilities: JSONValue?
     private var availableModeIDs: [String] = []
     private var currentModeIDStorage: String?
+    private var availableModelOptions: [AgentModelOption] = []
+    private var currentModelIDStorage: String?
 
     public init() {}
 
@@ -88,6 +91,8 @@ public final class ACPClientState: @unchecked Sendable {
             agentCapabilities = nil
             availableModeIDs = []
             currentModeIDStorage = nil
+            availableModelOptions = []
+            currentModelIDStorage = nil
         }
     }
 
@@ -139,6 +144,8 @@ public final class ACPClientState: @unchecked Sendable {
             phaseStorage = .awaitingSession
             availableModeIDs = []
             currentModeIDStorage = nil
+            availableModelOptions = []
+            currentModelIDStorage = nil
         }
     }
 
@@ -185,6 +192,29 @@ public final class ACPClientState: @unchecked Sendable {
 
     func supportsMode(_ modeID: String) -> Bool {
         withLock { availableModeIDs.contains(modeID) }
+    }
+
+    func setSessionModels(currentModelID: String?, available: [AgentModelOption]) {
+        withLock {
+            currentModelIDStorage = currentModelID
+            availableModelOptions = available
+        }
+    }
+
+    func setCurrentModelID(_ modelID: String) {
+        withLock { currentModelIDStorage = modelID }
+    }
+
+    func currentModelID() -> String? {
+        withLock { currentModelIDStorage }
+    }
+
+    func availableModels() -> [AgentModelOption] {
+        withLock { availableModelOptions }
+    }
+
+    func supportsModel(_ modelID: String) -> Bool {
+        withLock { availableModelOptions.contains { $0.id == modelID } }
     }
 
     func enqueuePrompt(_ text: String) {

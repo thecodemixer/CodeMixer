@@ -79,6 +79,12 @@ public actor ACPEventDecoder {
             return Batch()
         case .sessionSetMode:
             return Batch()
+        case .sessionSetModel:
+            if let modelID = result?["modelId"]?.stringValue
+                ?? result?["currentModelId"]?.stringValue {
+                state.setCurrentModelID(modelID)
+            }
+            return Batch()
         case .other:
             return Batch()
         }
@@ -119,6 +125,14 @@ public actor ACPEventDecoder {
             currentModeID: modes?["currentModeId"]?.stringValue,
             availableModeIDs: available
         )
+        let modelCatalog = ACPModelCatalog.parse(
+            models: result?["models"],
+            configOptions: result?["configOptions"]?.arrayValue ?? []
+        )
+        state.setSessionModels(
+            currentModelID: modelCatalog.currentModelID,
+            available: modelCatalog.available
+        )
         await sessionIndex.recordSession(
             id: sessionID,
             customAgentID: context.customAgentID,
@@ -130,7 +144,11 @@ public actor ACPEventDecoder {
             replies.append(list)
         }
         return Batch(
-            events: [.sessionStarted(sessionID: sessionID, model: nil, cwd: context.workspace)],
+            events: [.sessionStarted(
+                sessionID: sessionID,
+                model: modelCatalog.currentModelID,
+                cwd: context.workspace
+            )],
             replies: replies.filter { !$0.isEmpty }
         )
     }
@@ -189,6 +207,12 @@ public actor ACPEventDecoder {
                 return Batch(events: [
                     .statusPhraseChanged(source: .adapterPinned, phrase: "Mode: \(modeID)"),
                 ])
+            }
+            return Batch()
+        case "current_model_update":
+            if let modelID = update["currentModelId"]?.stringValue
+                ?? update["modelId"]?.stringValue {
+                state.setCurrentModelID(modelID)
             }
             return Batch()
         case "available_commands_update":

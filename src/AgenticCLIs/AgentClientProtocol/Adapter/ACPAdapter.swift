@@ -157,6 +157,8 @@ public final class ACPAdapter: AgentAdapter {
                 ([path] + args).joined(separator: " "),
                 state: state
             )
+        case .selectModel(let id):
+            return ACPInputEncoding.setModel(modelID: id, state: state)
         default:
             return nil
         }
@@ -193,6 +195,10 @@ public final class ACPAdapter: AgentAdapter {
 
     public func listResumableSessions(workspace: URL) async -> [SessionSummary] {
         await sessionIndex.summaries(workspace: workspace, customAgentID: ref.id)
+    }
+
+    public func availableModels() -> [AgentModelOption] {
+        state.availableModels()
     }
 
     public func resumeArgvAddition(sessionID: String) -> [String] { [] }
