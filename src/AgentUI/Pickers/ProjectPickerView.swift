@@ -2,11 +2,11 @@ import SwiftUI
 import AgentCore
 import AgentProtocol
 
-/// Project picker shown when the workspace isn't set yet.
+/// Project picker shown when the workspace isn't set yet, or via File → Open Project.
 ///
-/// Renders a searchable recent-projects list (read from `SessionStore`) plus a
-/// "Choose folder…" button. A CLAUDE.md / AGENTS.md
-/// presence chip appears on each project row when the file is detected.
+/// Recents only — agent mode is resolved from `<project>/.codemixer/project.json`
+/// (or the workspace index). Folders without a stored mode are handed back to
+/// the caller so they can present a configuration sheet.
 public struct ProjectPickerView: View {
     public let recent: [SessionStore.ProjectRecord]
     public let onOpen: (URL, _ resumeSessionID: String?) -> Void
@@ -38,7 +38,7 @@ public struct ProjectPickerView: View {
                     .foregroundStyle(Theme.text.tertiary)
                 Text("Open a project")
                     .font(Theme.typography.title)
-                Text("Codemixer wraps your Claude Code session in this folder.")
+                Text("Pick a recent folder, or choose one from disk.")
                     .font(Theme.typography.caption)
                     .foregroundStyle(Theme.text.secondary)
             }
@@ -48,7 +48,6 @@ public struct ProjectPickerView: View {
                 Text("No recent projects yet.")
                     .foregroundStyle(Theme.text.secondary)
             } else {
-                // Search field above the list.
                 HStack {
                     Image(systemName: "magnifyingglass")
                         .accessibilityLabel("Search")
@@ -80,7 +79,6 @@ public struct ProjectPickerView: View {
                                 VStack(alignment: .leading) {
                                     HStack(spacing: Theme.spacing.s8) {
                                         Text(project.displayName).font(Theme.typography.body)
-                                        // CLAUDE.md / AGENTS.md presence chip.
                                         if let badge = memoryFileBadge(at: project.path) {
                                             Text(badge)
                                                 .font(Theme.typography.caption)
@@ -104,12 +102,12 @@ public struct ProjectPickerView: View {
                             .tag(project)
                             .accessibilityLabel("\(project.displayName), \(project.path)")
                             .contextMenu {
-                                Button("Open in new window") {
-                                    onOpen(URL(fileURLWithPath: project.path), nil)
+                                Button("Open") {
+                                    open(URL(fileURLWithPath: project.path), resumeSessionID: nil)
                                 }
                                 if let last = project.lastSessionID {
                                     Button("Resume last session") {
-                                        onOpen(URL(fileURLWithPath: project.path), last)
+                                        open(URL(fileURLWithPath: project.path), resumeSessionID: last)
                                     }
                                 }
                                 Divider()
@@ -129,13 +127,13 @@ public struct ProjectPickerView: View {
                     .buttonStyle(.bordered)
                 if let sel = selection {
                     Button("Open") {
-                        onOpen(URL(fileURLWithPath: sel.path), nil)
+                        open(URL(fileURLWithPath: sel.path), resumeSessionID: nil)
                     }
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.return)
                     if let last = sel.lastSessionID {
                         Button("Resume Last Session") {
-                            onOpen(URL(fileURLWithPath: sel.path), last)
+                            open(URL(fileURLWithPath: sel.path), resumeSessionID: last)
                         }
                     }
                 }
@@ -150,8 +148,12 @@ public struct ProjectPickerView: View {
 
     private func chooseFolder() {
         if let url = DesktopActions.chooseDirectoryPanel() {
-            onOpen(url, nil)
+            open(url, resumeSessionID: nil)
         }
+    }
+
+    private func open(_ url: URL, resumeSessionID: String?) {
+        onOpen(url, resumeSessionID)
     }
 
     /// Returns `"CLAUDE.md"` or `"AGENTS.md"` if either file is present

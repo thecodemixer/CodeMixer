@@ -13,9 +13,9 @@ extension EngineViewModel {
     /// Reload the projects for the current workspace. Pass `rootMode` only when
     /// seeding a brand-new workspace that has no stored projects yet.
     public func refreshProjects(rootMode: ProjectAgentMode? = nil) {
-        guard let workspace, let store = workspaceProjects else { return }
+        guard let workspaceRoot, let store = workspaceProjects else { return }
         Task { [weak self] in
-            let refs = await store.projects(for: workspace, rootMode: rootMode)
+            let refs = await store.projects(for: workspaceRoot, rootMode: rootMode)
             await MainActor.run { self?.projects = refs }
         }
     }
@@ -48,6 +48,7 @@ extension EngineViewModel {
     public func openSession(projectPath: String, id: String) {
         guard !isCurrentSession(projectPath: projectPath, sessionID: id) else { return }
         beginSessionSwitch(projectPath: projectPath, sessionID: id)
+        applyAdapterCapabilities(forProjectPath: projectPath)
         send(.openProject(path: projectPath, resumeSessionID: id))
     }
 
@@ -56,6 +57,7 @@ extension EngineViewModel {
     /// existing wire commands, so remote clients reach the same behavior.
     public func newChat(in projectPath: String) {
         endSessionSwitch()
+        applyAdapterCapabilities(forProjectPath: projectPath)
         if projectPath == workspace?.path {
             send(.newSession)
         } else {
@@ -65,13 +67,14 @@ extension EngineViewModel {
 
     /// Create a new project (subfolder of the workspace) and switch to it.
     public func createProject(name: String, agentMode: ProjectAgentMode) {
-        guard let workspace, let store = workspaceProjects else { return }
+        guard let workspaceRoot, let store = workspaceProjects else { return }
         Task { [weak self] in
             do {
-                let ref = try await store.createProject(name: name, agentMode: agentMode, in: workspace)
-                let refs = await store.projects(for: workspace, rootMode: agentMode)
+                let ref = try await store.createProject(name: name, agentMode: agentMode, in: workspaceRoot)
+                let refs = await store.projects(for: workspaceRoot, rootMode: agentMode)
                 await MainActor.run {
                     self?.projects = refs
+                    self?.applyAdapterCapabilities(for: agentMode, projectURL: URL(fileURLWithPath: ref.path))
                     self?.newChat(in: ref.path)
                 }
             } catch {
@@ -82,13 +85,14 @@ extension EngineViewModel {
 
     /// Register an existing folder as a project of the workspace.
     public func addExistingProject(url: URL, agentMode: ProjectAgentMode) {
-        guard let workspace, let store = workspaceProjects else { return }
+        guard let workspaceRoot, let store = workspaceProjects else { return }
         Task { [weak self] in
             do {
-                let ref = try await store.addExistingProject(url: url, agentMode: agentMode, in: workspace)
-                let refs = await store.projects(for: workspace, rootMode: agentMode)
+                let ref = try await store.addExistingProject(url: url, agentMode: agentMode, in: workspaceRoot)
+                let refs = await store.projects(for: workspaceRoot, rootMode: agentMode)
                 await MainActor.run {
                     self?.projects = refs
+                    self?.applyAdapterCapabilities(for: agentMode, projectURL: URL(fileURLWithPath: ref.path))
                     self?.newChat(in: ref.path)
                 }
             } catch {
@@ -99,11 +103,11 @@ extension EngineViewModel {
 
     /// Rename a project's display label (folder on disk is untouched).
     public func renameProject(path: String, newName: String) {
-        guard let workspace, let store = workspaceProjects else { return }
+        guard let workspaceRoot, let store = workspaceProjects else { return }
         Task { [weak self] in
             do {
-                try await store.renameProject(path: path, to: newName, in: workspace)
-                let refs = await store.projects(for: workspace)
+                try await store.renameProject(path: path, to: newName, in: workspaceRoot)
+                let refs = await store.projects(for: workspaceRoot)
                 await MainActor.run { self?.projects = refs }
             } catch {
                 await MainActor.run { self?.recordProjectError(error) }
@@ -114,11 +118,11 @@ extension EngineViewModel {
     /// Remove a project from the navigator (never deletes the folder) and arm an
     /// undo toast. The seeded root cannot be removed.
     public func removeProject(path: String) {
-        guard let workspace, let store = workspaceProjects else { return }
+        guard let workspaceRoot, let store = workspaceProjects else { return }
         Task { [weak self] in
             do {
-                let removed = try await store.removeProject(path: path, in: workspace)
-                let refs = await store.projects(for: workspace)
+                let removed = try await store.removeProject(path: path, in: workspaceRoot)
+                let refs = await store.projects(for: workspaceRoot)
                 await MainActor.run {
                     self?.projects = refs
                     if let removed { self?.armRemovedProjectUndo(removed) }
@@ -131,15 +135,15 @@ extension EngineViewModel {
 
     /// Restore the most recently removed project at its former position.
     public func undoRemoveProject() {
-        guard let workspace, let store = workspaceProjects,
+        guard let workspaceRoot, let store = workspaceProjects,
               let removed = removedProjectUndo else { return }
         removedProjectUndoTask?.cancel()
         removedProjectUndoTask = nil
         removedProjectUndo = nil
         Task { [weak self] in
             do {
-                try await store.restoreProject(removed, in: workspace)
-                let refs = await store.projects(for: workspace)
+                try await store.restoreProject(removed, in: workspaceRoot)
+                let refs = await store.projects(for: workspaceRoot)
                 await MainActor.run { self?.projects = refs }
             } catch {
                 await MainActor.run { self?.recordProjectError(error) }
@@ -150,6 +154,53 @@ extension EngineViewModel {
     /// True when `session` is the one currently displayed in the conversation.
     public func isCurrentSession(projectPath: String, sessionID id: String) -> Bool {
         workspace?.path == projectPath && sessionID == id
+    }
+
+    /// Resolves the adapter for `mode` and refreshes model / slash / resumable
+    /// capabilities used by the composer and sidebar.
+    public func applyAdapterCapabilities(for mode: ProjectAgentMode, projectURL: URL? = nil) {
+        let url = projectURL ?? workspace
+        Task { [weak self] in
+            guard let adapter = await ProjectAgentRouter.resolveAdapter(mode: mode) else {
+                await MainActor.run {
+                    self?.availableModels = []
+                    self?.supportsResumableSessions = false
+                    self?.slashCommands = []
+                }
+                return
+            }
+            let models = adapter.availableModels()
+            let resumable = adapter.capabilities.contains(.resumableSessions)
+            let builtIn = adapter.slashCommandCatalog
+            let projectCommands: [SlashCommand]
+            if let url {
+                projectCommands = await adapter.enumerateProjectCommands(workspace: url)
+            } else {
+                projectCommands = []
+            }
+            await MainActor.run {
+                self?.availableModels = models
+                self?.supportsResumableSessions = resumable
+                self?.slashCommands = builtIn + projectCommands
+            }
+        }
+    }
+
+    func applyAdapterCapabilities(forProjectPath path: String) {
+        Task { [weak self] in
+            guard let self, let store = workspaceProjects else { return }
+            let url = URL(fileURLWithPath: path)
+            let mode: ProjectAgentMode?
+            if let project = await store.project(path: path) {
+                mode = project.agentMode
+            } else {
+                mode = await store.resolveAgentMode(for: url)
+            }
+            guard let mode else { return }
+            await MainActor.run {
+                self.applyAdapterCapabilities(for: mode, projectURL: url)
+            }
+        }
     }
 
     func armRemovedProjectUndo(_ removed: WorkspaceProjectsStore.RemovedProject) {
@@ -196,6 +247,16 @@ extension EngineViewModel {
         diagnostics.append(diagnostic(level: .error, message: message))
     }
 
+    /// Active project cwd changed: keep the workspace project list, reload
+    /// sessions for the new project, and refresh adapter-facing catalogs.
+    func onActiveProjectChanged() {
+        refreshProjects()
+        if let workspace {
+            loadSessions(for: workspace.path)
+            applyAdapterCapabilities(forProjectPath: workspace.path)
+        }
+    }
+
     /// Called when the active workspace changes: refresh projects + load the
     /// active project's sessions so the navigator reflects the new state.
     func onWorkspaceChanged() {
@@ -203,9 +264,35 @@ extension EngineViewModel {
         if let workspace { loadSessions(for: workspace.path) }
     }
 
+    /// Opens a freshly created workspace folder without starting an agent.
+    /// Agent mode is chosen later via File → New Project…
+    public func adoptEmptyWorkspace(_ url: URL) {
+        endSessionSwitch()
+        workspaceRoot = url
+        workspace = nil
+        sessionID = nil
+        projects = []
+        sessionsByProject = [:]
+        loadingProjectPaths = []
+        removedProjectUndo = nil
+        removedProjectUndoTask?.cancel()
+        removedProjectUndoTask = nil
+        clearConversationState()
+        changedFiles = []
+        pendingPermission = nil
+        status = .idle
+        activity = .idle
+        sessionTokens = 0
+        sessionCostUSD = nil
+        availableModels = []
+        slashCommands = []
+        refreshProjects()
+    }
+
     /// Clears navigator + conversation chrome after File → Close Workspace.
     public func resetForClosedWorkspace() {
         endSessionSwitch()
+        workspaceRoot = nil
         workspace = nil
         sessionID = nil
         projects = []

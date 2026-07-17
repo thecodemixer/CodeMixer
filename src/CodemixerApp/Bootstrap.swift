@@ -16,6 +16,7 @@ final class Bootstrap {
     var remoteHost: RemoteControlServer.BindHost = .loopback
     var showProjectPicker: Bool = false
     var showNewProjectSheet: Bool = false
+    var showNewWorkspaceSheet: Bool = false
     var showSettings: Bool = false
     var showDebugTerminal: Bool = false
     var showEventLog: Bool = false
@@ -97,11 +98,9 @@ final class Bootstrap {
         startAppEventBridge(bus: engine.bus)
 
         // Restore the last open workspace when the user did not Close Workspace.
-        // Otherwise show the Open Project picker.
+        // Otherwise show the blank landing (File → Open Project remains available).
         if let active = await projectsStore.activeWorkspaceURL() {
             await openWorkspace(active, resumeSessionID: nil)
-        } else {
-            presentProjectPicker()
         }
 
         // Remote control is opt-in for the GUI. Starting it eagerly touches the
@@ -118,13 +117,41 @@ final class Bootstrap {
         showProjectPicker = true
     }
 
-    /// File → New Workspace: close the current workspace (if any) and pick a folder.
-    func presentNewWorkspace() async {
-        if workspace != nil {
-            await closeWorkspace()
-        } else {
-            presentProjectPicker()
+    /// File → New Workspace: dedicated sheet for name + parent folder + agent mode.
+    func presentNewWorkspaceSheet() {
+        showNewWorkspaceSheet = true
+    }
+
+    /// Creates `<parent>/<name>/`, tears down any open workspace without
+    /// bouncing through the Open Project picker, then adopts the folder as an
+    /// empty workspace shell. Agent mode is chosen later via New Project.
+    func createWorkspace(name: String, parentDirectory: URL) async {
+        showNewWorkspaceSheet = false
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              trimmed != ".",
+              trimmed != "..",
+              !trimmed.contains("/"),
+              !trimmed.contains("\\") else {
+            startupError = "Enter a valid workspace name."
+            return
         }
+        let folder = parentDirectory.appendingPathComponent(trimmed, isDirectory: true)
+        let fs = Seams.live.fileSystem
+        if fs.isDirectory(at: folder) || fs.fileExists(at: folder) {
+            startupError = "A folder named “\(trimmed)” already exists in that location."
+            return
+        }
+        do {
+            try fs.createDirectory(at: folder, withIntermediates: true)
+        } catch {
+            startupError = error.localizedDescription
+            return
+        }
+        await leaveWorkspaceWithoutPicker()
+        try? await viewModel?.workspaceProjects?.markActiveWorkspace(folder)
+        workspace = folder
+        viewModel?.adoptEmptyWorkspace(folder)
     }
 
     /// File → New Project: create a subfolder project in the open workspace.
@@ -134,10 +161,16 @@ final class Bootstrap {
     }
 
     /// File → Close Workspace: clear the active-workspace restore flag, shut
-    /// down the agent, and return to the project picker.
+    /// down the agent, and return to the landing screen.
     func closeWorkspace() async {
+        await leaveWorkspaceWithoutPicker()
+    }
+
+    /// Tears down the open workspace without presenting the Open Project picker.
+    private func leaveWorkspaceWithoutPicker() async {
         showProjectPicker = false
         showNewProjectSheet = false
+        showNewWorkspaceSheet = false
         pendingConfigureURL = nil
         pendingConfigureResumeSessionID = nil
         installHint = nil
@@ -149,7 +182,6 @@ final class Bootstrap {
         }
         workspace = nil
         viewModel?.resetForClosedWorkspace()
-        presentProjectPicker()
     }
 
     func connectDaemonBackedUI(adapter: ClaudeAdapter) async -> Bool {
@@ -166,7 +198,6 @@ final class Bootstrap {
         let model = EngineViewModel(engine: client, bus: client.bus)
         model.availableModels = adapter.availableModels()
         viewModel = model
-        presentProjectPicker()
         startAppEventBridge(bus: client.bus)
         return true
     }
@@ -222,6 +253,16 @@ final class Bootstrap {
             await openWorkspace(url, resumeSessionID: resumeSessionID, agentMode: mode)
             return
         }
+        // Empty workspace shell: adopted via New Workspace with no projects yet.
+        if let store = viewModel?.workspaceProjects {
+            let existing = await store.projects(for: url)
+            if existing.isEmpty {
+                try? await store.markActiveWorkspace(url)
+                workspace = url
+                viewModel?.adoptEmptyWorkspace(url)
+                return
+            }
+        }
         pendingConfigureURL = url
         pendingConfigureResumeSessionID = resumeSessionID
     }
@@ -237,9 +278,6 @@ final class Bootstrap {
     func cancelPendingProjectConfiguration() {
         pendingConfigureURL = nil
         pendingConfigureResumeSessionID = nil
-        if workspace == nil {
-            presentProjectPicker()
-        }
     }
 
     func openWorkspace(_ url: URL, resumeSessionID: String?, agentMode: ProjectAgentMode) async {
@@ -250,6 +288,7 @@ final class Bootstrap {
         startupError = nil
         guard let engine = engine else {
             workspace = url
+            viewModel?.workspaceRoot = url
             viewModel?.send(.openProject(path: url.path, resumeSessionID: resumeSessionID))
             try? await viewModel?.workspaceProjects?.markActiveWorkspace(url)
             Task { await configureSlashCommands(for: url, mode: agentMode) }
@@ -257,6 +296,7 @@ final class Bootstrap {
         }
         await engine.shutdown(reason: .userCancel)
         let projectsStore = viewModel?.workspaceProjects
+        viewModel?.workspaceRoot = url
         _ = await projectsStore?.projects(for: url, rootMode: agentMode)
         if let store = projectsStore {
             _ = try? await store.setAgentMode(path: url.path, mode: agentMode, in: url)
@@ -265,8 +305,8 @@ final class Bootstrap {
         guard let adapter = await Self.adapter(for: agentMode) else {
             startupError = "Select a concrete agent for this mixed or custom project before starting a session."
             workspace = nil
+            viewModel?.workspaceRoot = nil
             try? await projectsStore?.clearActiveWorkspace()
-            presentProjectPicker()
             return
         }
         do {
@@ -274,6 +314,7 @@ final class Bootstrap {
                                    workspace: url,
                                    resumeSessionID: resumeSessionID)
             workspace = url
+            viewModel?.workspaceRoot = url
             viewModel?.availableModels = adapter.availableModels()
             viewModel?.supportsResumableSessions = adapter.capabilities.contains(.resumableSessions)
             viewModel?.refreshProjects(rootMode: agentMode)
@@ -285,13 +326,13 @@ final class Bootstrap {
                 startupError = err.userMessage
             }
             workspace = nil
+            viewModel?.workspaceRoot = nil
             try? await projectsStore?.clearActiveWorkspace()
-            presentProjectPicker()
         } catch {
             startupError = error.localizedDescription
             workspace = nil
+            viewModel?.workspaceRoot = nil
             try? await projectsStore?.clearActiveWorkspace()
-            presentProjectPicker()
         }
         recents = await engine.sessions.recents()
         if workspace != nil {

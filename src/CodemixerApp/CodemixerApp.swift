@@ -25,8 +25,18 @@ struct CodemixerApp: App {
         .windowToolbarStyle(.unifiedCompact)
         .commands {
             CommandGroup(replacing: .newItem) {
-                Button("Open Project…") { bootstrap.showProjectPicker = true }
+                Button("New Workspace…") { bootstrap.presentNewWorkspaceSheet() }
+                    .keyboardShortcut("n", modifiers: .command)
+                Button("New Project…") { bootstrap.presentNewProjectSheet() }
+                    .disabled(bootstrap.workspace == nil)
+                Divider()
+                Button("Open Project…") { bootstrap.presentProjectPicker() }
                     .keyboardShortcut("o", modifiers: .command)
+                Button("Close Workspace") {
+                    Task { await bootstrap.closeWorkspace() }
+                }
+                .keyboardShortcut("w", modifiers: [.command, .shift])
+                .disabled(bootstrap.workspace == nil)
                 Button("Cancel Turn") { bootstrap.viewModel?.send(.cancelCurrentTurn) }
                     .keyboardShortcut(".", modifiers: .command)
                     .disabled(bootstrap.viewModel?.canCancel != true)

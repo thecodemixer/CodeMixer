@@ -17,7 +17,12 @@ public final class EngineViewModel {
     // MARK: - Public state (read-only)
 
     public internal(set) var sessionID: String?
+    /// Active project cwd from the agent session (conversation / diff / composer).
     public internal(set) var workspace: URL?
+    /// Loaded workspace folder (one per window). Owns the projects list in the
+    /// sidebar; distinct from `workspace`, which tracks the active project cwd.
+    /// Set by the app shell when adopting / opening / closing a workspace.
+    public var workspaceRoot: URL?
     public internal(set) var messages: [Message] = []
     public internal(set) var activeToolCalls: [ToolCallEntry] = []
     public internal(set) var pendingPermission: PermissionPrompt?
@@ -185,6 +190,7 @@ public final class EngineViewModel {
     func applyPreviewState(workspace: URL,
                            projects: [WorkspaceProjectsStore.ProjectRef],
                            sessions: [String: [SessionSummary]]) {
+        self.workspaceRoot = workspace
         self.workspace = workspace
         self.projects = projects
         self.sessionsByProject = sessions

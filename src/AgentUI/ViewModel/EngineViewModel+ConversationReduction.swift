@@ -9,16 +9,20 @@ extension EngineViewModel {
     func apply(_ event: AgentEvent) {
         switch event {
         case .sessionStarted(let id, _, let cwd):
-            let workspaceChanged = workspace?.path != cwd.path
+            let projectChanged = workspace?.path != cwd.path
             let sessionChanged = sessionID != id
-            let shouldResetConversation = workspaceChanged || (sessionChanged && activity == .idle)
+            let shouldResetConversation = projectChanged || (sessionChanged && activity == .idle)
             sessionID = id
+            // First session with no explicit workspace shell: treat cwd as the root.
+            if workspaceRoot == nil {
+                workspaceRoot = cwd
+            }
             workspace = cwd
             if shouldResetConversation {
                 clearConversationState()
             }
-            if workspaceChanged {
-                onWorkspaceChanged()
+            if projectChanged {
+                onActiveProjectChanged()
             }
         case .userTurn(let id, let text):
             finishSessionSwitchIfNeeded()

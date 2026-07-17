@@ -20,15 +20,15 @@ struct WorkspaceProjectsStoreTests {
         #expect(projects.first?.displayName == "ws")
     }
 
-    @Test("createProject creates a subfolder and registers it after the root")
+    @Test("createProject creates a subfolder and registers it without seeding the workspace root")
     func createProjectRegisters() async throws {
         let store = makeStore()
         let ref = try await store.createProject(name: "api", agentMode: .claudeCode, in: workspace)
         #expect(ref.path == workspace.appendingPathComponent("api").path)
         #expect(ref.displayName == "api")
 
-        let projects = await store.projects(for: workspace, rootMode: .claudeCode)
-        #expect(projects.map(\.path) == [workspace.path, ref.path])
+        let projects = await store.projects(for: workspace)
+        #expect(projects.map(\.path) == [ref.path])
     }
 
     @Test("createProject rejects empty, dot, dot-dot, and separator names")
@@ -126,17 +126,17 @@ struct WorkspaceProjectsStoreTests {
         let store = makeStore()
         let a = try await store.createProject(name: "a", agentMode: .claudeCode, in: workspace)
         let b = try await store.createProject(name: "b", agentMode: .codex, in: workspace)
-        // Order is [root, a, b]; remove `a` at index 1.
+        // Order is [a, b]; remove `a` at index 0.
         let removed = try await store.removeProject(path: a.path, in: workspace)
         #expect(removed?.ref == a)
-        #expect(removed?.index == 1)
+        #expect(removed?.index == 0)
 
-        var projects = await store.projects(for: workspace, rootMode: .claudeCode)
-        #expect(projects.map(\.path) == [workspace.path, b.path])
+        var projects = await store.projects(for: workspace)
+        #expect(projects.map(\.path) == [b.path])
 
         try await store.restoreProject(removed!, in: workspace)
-        projects = await store.projects(for: workspace, rootMode: .claudeCode)
-        #expect(projects.map(\.path) == [workspace.path, a.path, b.path])
+        projects = await store.projects(for: workspace)
+        #expect(projects.map(\.path) == [a.path, b.path])
     }
 
     @Test("removeProject on the root returns nil and keeps the root")
@@ -158,8 +158,8 @@ struct WorkspaceProjectsStoreTests {
 
         let fresh = WorkspaceProjectsStore(environment: env, fileSystem: fs)
         await fresh.load()
-        let projects = await fresh.projects(for: workspace, rootMode: .claudeCode)
-        #expect(projects.map(\.displayName) == ["ws", "api"])
+        let projects = await fresh.projects(for: workspace)
+        #expect(projects.map(\.displayName) == ["api"])
     }
 
     @Test("createProject writes agent mode into the project folder")
@@ -209,7 +209,7 @@ struct WorkspaceProjectsStoreTests {
         let store = makeStore(fs: fs)
         let ref = try await store.createProject(name: "api", agentMode: .codex, in: workspace)
         let local = WorkspaceLocalStateStore.load(from: workspace, fileSystem: fs)
-        #expect(local?.projects.map(\.path) == [workspace.path, ref.path])
+        #expect(local?.projects.map(\.path) == [ref.path])
         #expect(fs.fileExists(at: ProjectPaths.workspaceStateURL(in: workspace)))
     }
 

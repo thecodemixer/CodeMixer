@@ -11,50 +11,38 @@ struct RootView: View {
 
     var body: some View {
         ZStack {
-            if let model = bootstrap.viewModel, bootstrap.workspace != nil {
-                WorkspaceScene(model: model,
-                               voice: bootstrap.voice,
-                               tts: bootstrap.tts,
-                               diffPanelVisible: $diffPanelVisible)
-                    .codemixerAppearance(model.appearancePrefs)
-                    .navigationTitle(model.workspace?.lastPathComponent ?? "Codemixer")
-                    .toolbar {
-                        ToolbarItemGroup(placement: .primaryAction) {
-                            if model.showUsageChip {
-                                CostBadgeView(tokens: model.sessionTokens,
-                                              costUSD: model.sessionCostUSD)
+            if let model = bootstrap.viewModel {
+                if bootstrap.workspace == nil {
+                    noWorkspaceLanding
+                } else if model.projects.isEmpty {
+                    emptyWorkspaceLanding
+                } else {
+                    WorkspaceScene(model: model,
+                                   voice: bootstrap.voice,
+                                   tts: bootstrap.tts,
+                                   diffPanelVisible: $diffPanelVisible)
+                        .codemixerAppearance(model.appearancePrefs)
+                        .navigationTitle(model.workspace?.lastPathComponent ?? "Codemixer")
+                        .toolbar {
+                            ToolbarItemGroup(placement: .primaryAction) {
+                                if model.showUsageChip {
+                                    CostBadgeView(tokens: model.sessionTokens,
+                                                  costUSD: model.sessionCostUSD)
+                                }
+                                changesPanelToggle(for: model)
+                                ConnectedClientsChip(count: model.connectedRemoteClients,
+                                                     onTap: { bootstrap.showSettings = true })
+                                toolbarOverflow(for: model)
                             }
-                            changesPanelToggle(for: model)
-                            ConnectedClientsChip(count: model.connectedRemoteClients,
-                                                 onTap: { bootstrap.showSettings = true })
-                            toolbarOverflow(for: model)
                         }
-                    }
-                    .onChange(of: model.changedFiles.isEmpty) { _, isEmpty in
-                        if !isEmpty { diffPanelVisible = true }
-                    }
-            } else {
-                // No workspace yet: landing surface instead of a stuck spinner when
-                // the picker sheet is dismissed.
-                VStack(spacing: Theme.spacing.s16) {
-                    if bootstrap.viewModel == nil {
-                        ProgressView("Starting agent…")
-                    } else {
-                        Image(systemName: "folder.badge.gearshape")
-                            .accessibilityHidden(true)
-                            .font(Theme.typography.heroIcon)
-                            .foregroundStyle(Theme.text.tertiary)
-                        Text("Open a project to begin")
-                            .font(Theme.typography.title)
-                        Button("Open Project…") {
-                            bootstrap.presentProjectPicker()
+                        .onChange(of: model.changedFiles.isEmpty) { _, isEmpty in
+                            if !isEmpty { diffPanelVisible = true }
                         }
-                        .buttonStyle(.borderedProminent)
-                        .keyboardShortcut("o", modifiers: .command)
-                    }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Theme.surface.canvas)
+            } else {
+                ProgressView("Starting agent…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Theme.surface.canvas)
             }
         }
         .codemixerAppearance(bootstrap.viewModel?.appearancePrefs ?? AppearancePrefs())
@@ -73,6 +61,16 @@ struct RootView: View {
                     }
                 )
             }
+        }
+        .sheet(isPresented: $bootstrap.showNewWorkspaceSheet) {
+            NewWorkspaceSheet(
+                onCancel: { bootstrap.showNewWorkspaceSheet = false },
+                onCreate: { name, parent in
+                    Task {
+                        await bootstrap.createWorkspace(name: name, parentDirectory: parent)
+                    }
+                }
+            )
         }
         .sheet(isPresented: Binding(
             get: { bootstrap.pendingConfigureURL != nil },
@@ -131,6 +129,28 @@ struct RootView: View {
                 presentSavePanel(for: export)
             }
         }
+    }
+
+    private var noWorkspaceLanding: some View {
+        WorkspaceLandingView(
+            systemImage: "folder.badge.plus",
+            title: "Create a workspace",
+            subtitle: "A workspace is a folder that holds your projects and sessions.",
+            primaryButtonTitle: "New Workspace…",
+            primaryAction: { bootstrap.presentNewWorkspaceSheet() },
+            primaryKeyboardShortcut: "n"
+        )
+    }
+
+    private var emptyWorkspaceLanding: some View {
+        WorkspaceLandingView(
+            systemImage: "folder",
+            prominentName: bootstrap.workspace?.lastPathComponent,
+            title: "Add your first project",
+            subtitle: "Projects live inside this workspace. Choose an agent and name when you create one.",
+            primaryButtonTitle: "New Project…",
+            primaryAction: { bootstrap.presentNewProjectSheet() }
+        )
     }
 
     @ViewBuilder

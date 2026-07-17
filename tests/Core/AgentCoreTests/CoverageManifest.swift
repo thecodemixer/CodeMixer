@@ -392,6 +392,8 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // NetworkOptions
 // NetworkTransport
 // NetworkTransportError
+// NewProjectSheet
+// NewWorkspaceSheet
 // PTYError
 // PTYHost
 // PairFailureReason
@@ -510,6 +512,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // WireToolProgress
 // WireVersion
 // WorkspaceChip
+// WorkspaceLandingView
 // WorkspaceLocalState
 // WorkspaceLocalStateStore
 // WorkspaceProjectsStore
@@ -525,6 +528,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // addition
 // additions
 // address
+// adoptEmptyWorkspace
 // agentClientProtocol
 // agentError
 // agentID
@@ -538,6 +542,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // appearance
 // append
 // appendLines
+// applyAdapterCapabilities
 // approval
 // arguments
 // argumentsSummary
@@ -867,6 +872,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // onCancel
 // onClose
 // onConfirm
+// onCreate
 // onDismiss
 // onNext
 // onOpen
@@ -914,9 +920,14 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // prefsFileName
 // prefsURL
 // primary
+// primaryAction
 // primaryAgentID
+// primaryButtonTitle
+// primaryKeyboardModifiers
+// primaryKeyboardShortcut
 // probablyStuckThreshold
 // processEnvironment
+// prominentName
 // progress
 // project
 // projectCommands
@@ -1202,6 +1213,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // workspace
 // workspaceFileName
 // workspaceProjects
+// workspaceRoot
 // workspaceSidebarMinWidth
 // workspaceStateURL
 // workspaceTrust

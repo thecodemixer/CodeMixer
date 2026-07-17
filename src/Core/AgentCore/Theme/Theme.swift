@@ -113,6 +113,8 @@ public enum Theme {
 
     public enum layout {
         public static let compactControlMinWidth: CGFloat = 200
+        /// Model picker in the composer bottom bar.
+        public static let composerModelPickerMinWidth: CGFloat = compactControlMinWidth * 1.4
         public static let commandPaletteMinWidth: CGFloat = 220
         public static let commandPaletteMaxWidth: CGFloat = 380
         public static let slashPaletteMinWidth: CGFloat = 280

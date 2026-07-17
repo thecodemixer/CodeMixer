@@ -278,20 +278,55 @@ struct EngineViewModelNavigatorTests {
         defer { vm.unsubscribe() }
 
         let workspace = URL(fileURLWithPath: "/Users/me/ws")
-        await bus.publish(.sessionStarted(sessionID: "s1", model: nil, cwd: workspace))
-        await drain()
+        vm.adoptEmptyWorkspace(workspace)
+        try? await Task.sleep(for: .milliseconds(40))
 
         vm.createProject(name: "mixed", agentMode: .mixed(defaultAgent: .claudeCode))
         try? await Task.sleep(for: .milliseconds(80))
 
         let project = await store.project(path: workspace.appendingPathComponent("mixed").path)
         #expect(project?.agentMode == .mixed(defaultAgent: .claudeCode))
+        #expect(vm.projects.contains { $0.path == project?.path })
+        #expect(vm.workspaceRoot?.path == workspace.path)
         #expect(port.commands.contains {
             if case .openProject(let path, let resume) = $0 {
                 return path == project?.path && resume == nil
             }
             return false
         })
+
+        await bus.shutdown()
+    }
+
+    @Test("sessionStarted for a subproject keeps workspaceRoot and project sections")
+    func sessionStartedSubprojectKeepsWorkspaceProjects() async {
+        let port = RecordingPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
+        let fileSystem = InMemoryFileSystem()
+        let environment = FakeEnvironment(home: URL(fileURLWithPath: "/Users/me"))
+        let store = WorkspaceProjectsStore(environment: environment, fileSystem: fileSystem)
+        vm.workspaceProjects = store
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        let workspace = URL(fileURLWithPath: "/Users/me/ws")
+        try? fileSystem.createDirectory(at: workspace, withIntermediates: true)
+        vm.adoptEmptyWorkspace(workspace)
+        try? await Task.sleep(for: .milliseconds(40))
+
+        let ref = try! await store.createProject(name: "api", agentMode: .claudeCode, in: workspace)
+        let refs = await store.projects(for: workspace)
+        vm.projects = refs
+
+        await bus.publish(.sessionStarted(sessionID: "s1", model: nil,
+                                          cwd: URL(fileURLWithPath: ref.path)))
+        await drain()
+
+        #expect(vm.workspaceRoot?.path == workspace.path)
+        #expect(vm.workspace?.path == ref.path)
+        #expect(vm.projects.count == 1)
+        #expect(vm.projects.first?.path == ref.path)
 
         await bus.shutdown()
     }
