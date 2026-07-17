@@ -17,19 +17,143 @@ extension EngineViewModel {
     public func activateSlashCommand(_ command: SlashCommand) {
         guard !isComposerLockedForSessionResume else { return }
         if let mode = agentMode(matchingSlashName: command.name) {
-            selectedAgentModeID = mode.id
-            for cmd in mode.selectCommands { send(cmd) }
+            selectAgentMode(mode)
             return
         }
         if !command.sendsAsPrompt {
-            if command.isProjectDefined {
-                send(.runCustomCommand(path: command.name, args: []))
-            } else {
-                send(.runSlashCommand(name: command.name, args: []))
-            }
+            recordAndSend(
+                ClientAction(
+                    id: random.uuid(),
+                    kind: .slashCommand,
+                    title: "Slash command",
+                    detail: command.name
+                ),
+                commands: [
+                    command.isProjectDefined
+                        ? .runCustomCommand(path: command.name, args: [])
+                        : .runSlashCommand(name: command.name, args: []),
+                ]
+            )
             return
         }
         sendPrompt(command.name)
+    }
+
+    /// Select a composer agent mode: one history row, then the adapter's
+    /// internal select commands in order.
+    public func selectAgentMode(_ mode: AgentModeOption) {
+        guard !isComposerLockedForSessionResume else { return }
+        selectedAgentModeID = mode.id
+        recordAndSend(
+            ClientAction(
+                id: random.uuid(),
+                kind: .mode,
+                title: "Mode",
+                detail: mode.label
+            ),
+            commands: mode.selectCommands
+        )
+    }
+
+    /// Set a session permission mode with a visible history marker.
+    public func setPermissionMode(_ mode: PermissionMode) {
+        let label: String
+        switch mode {
+        case .default: label = "Default"
+        case .acceptEdits: label = "Accept Edits"
+        case .plan: label = "Plan"
+        case .bypassPermissions: label = "Bypass Permissions"
+        }
+        recordAndSend(
+            ClientAction(
+                id: random.uuid(),
+                kind: .permissionMode,
+                title: "Permission mode",
+                detail: label
+            ),
+            commands: [.setPermissionMode(mode)]
+        )
+    }
+
+    /// Respond to a pending permission prompt and record the decision.
+    public func respondToPermission(id: UUID, decision: PermissionDecision) {
+        let label: String
+        switch decision {
+        case .allow: label = "Allow"
+        case .allowAlways: label = "Allow Always"
+        case .deny: label = "Deny"
+        }
+        pendingPermission = nil
+        recordAndSend(
+            ClientAction(
+                id: random.uuid(),
+                kind: .permissionResponse,
+                title: "Permission",
+                detail: label
+            ),
+            commands: [.respondToPermission(id: id, decision: decision)]
+        )
+    }
+
+    /// Select a model with a visible history marker.
+    public func selectModel(id: String, label: String? = nil) {
+        guard !isComposerLockedForSessionResume else { return }
+        let detail = label
+            ?? availableModels.first { $0.id == id }?.label
+            ?? id
+        recordAndSend(
+            ClientAction(
+                id: random.uuid(),
+                kind: .model,
+                title: "Model",
+                detail: detail
+            ),
+            commands: [.selectModel(id: id)]
+        )
+    }
+
+    /// Start a fresh session with a visible history marker.
+    public func startNewSession() {
+        recordAndSend(
+            ClientAction(
+                id: random.uuid(),
+                kind: .sessionLifecycle,
+                title: "Session",
+                detail: "New session"
+            ),
+            commands: [.newSession]
+        )
+    }
+
+    /// Compact agent context with a visible history marker.
+    public func compactContext() {
+        recordAndSend(
+            ClientAction(
+                id: random.uuid(),
+                kind: .sessionLifecycle,
+                title: "Session",
+                detail: "Compact context"
+            ),
+            commands: [.compact]
+        )
+    }
+
+    /// Record a Codemixer-owned history marker, then forward commands in order.
+    public func recordAndSend(_ action: ClientAction, commands: [AgentCommand]) {
+        Task { [engine, weak self] in
+            do {
+                try await engine.send(.recordClientAction(action))
+                for command in commands {
+                    try await engine.send(command)
+                }
+            } catch {
+                await MainActor.run {
+                    guard let self else { return }
+                    let message = (error as? AgentError)?.userMessage ?? error.localizedDescription
+                    self.diagnostics.append(self.diagnostic(level: .error, message: message))
+                }
+            }
+        }
     }
 
     func agentMode(matchingSlashName name: String) -> AgentModeOption? {

@@ -61,10 +61,7 @@ struct ComposerModeModelMenus: View {
                             title: option.label,
                             isSelected: option.id == model.selectedAgentModeID
                         ) {
-                            model.selectedAgentModeID = option.id
-                            for command in option.selectCommands {
-                                model.send(command)
-                            }
+                            model.selectAgentMode(option)
                             showModeMenu = false
                         }
                     },

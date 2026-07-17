@@ -29,6 +29,7 @@ public enum InteractionCoverage {
         case updateAutoApprovalRules
         case updateAppearancePref
         case requestSnapshot
+        case recordClientAction
     }
 
     public static let macUI: Set<CommandShape> = [
@@ -52,6 +53,7 @@ public enum InteractionCoverage {
         .updateAutoApprovalRules,
         .updateAppearancePref,
         .requestSnapshot,
+        .recordClientAction,
     ]
 
     public static let remoteOnly: Set<CommandShape> = []

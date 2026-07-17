@@ -65,6 +65,8 @@ public enum WireCodec {
             return .appearancePrefChanged(key: key, value: value)
         case .snapshotReady(let kind, let payload):
             return .snapshotReady(kind: kind, payloadBase64: payload.base64EncodedString())
+        case .clientAction(let action):
+            return .clientAction(action)
         }
     }
 
@@ -127,6 +129,8 @@ public enum WireCodec {
             return .appearancePrefChanged(key: key, value: value)
         case .snapshotReady(let kind, let b64):
             return .snapshotReady(kind: kind, payload: Data(base64Encoded: b64) ?? Data())
+        case .clientAction(let action):
+            return .clientAction(action)
         }
     }
 

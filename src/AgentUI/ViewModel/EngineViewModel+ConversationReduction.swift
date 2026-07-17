@@ -216,6 +216,8 @@ extension EngineViewModel {
             }
         case .snapshotReady(let kind, let payload):
             pendingExport = PendingExport(kind: kind, payload: payload)
+        case .clientAction(let action):
+            messages.append(.clientAction(action))
         }
     }
 

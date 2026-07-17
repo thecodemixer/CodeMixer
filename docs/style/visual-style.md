@@ -933,7 +933,7 @@ A "turn" is one user message + the assistant's response (potentially many bubble
 - **UserBubble**: left-aligned, `Theme.color.surface.bubble.user`, `medium` corner radius, `s16` padding, `body` text.
 - **AssistantBubble**: right-aligned, `Theme.color.surface.bubble.assistant`, same shape and padding.
 - **ToolCallCard**: full-width inset, `Theme.color.surface.bubble.tool`, header + expandable body.
-- **SystemBubble**: centered, no background, `caption` text in `text.tertiary` — used for "Session resumed", "Permission granted", etc.
+- **SystemBubble**: centered, no background, `caption` text in `text.tertiary` — used for "Session resumed", "Permission granted", etc. Codemixer `ClientAction` rows (`ClientActionRowView`) follow this pattern for mode / model / slash / permission / session markers; they are live-session + export only and do not survive agent-transcript resume.
 
 ### Markdown rendering
 

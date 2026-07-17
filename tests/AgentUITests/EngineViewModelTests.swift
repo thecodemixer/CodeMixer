@@ -497,6 +497,8 @@ struct EngineViewModelTests {
         let port = RecordingCommandPort()
         let bus = MulticastEventBus()
         let vm = EngineViewModel(engine: port, bus: bus)
+        vm.subscribe()
+        defer { vm.unsubscribe() }
         vm.availableAgentModes = [
             AgentModeOption(
                 id: "ask",
@@ -508,9 +510,14 @@ struct EngineViewModelTests {
             SlashCommand(id: "/ask", name: "/ask", summary: "Q&A mode", sendsAsPrompt: false)
         )
         await drain()
-        #expect(port.commands == [.runSlashCommand(name: "/ask", args: [])])
+        #expect(port.commands.count == 2)
+        guard case .recordClientAction(let action) = port.commands[0] else {
+            Issue.record("expected recordClientAction first"); return
+        }
+        #expect(action.kind == .mode)
+        #expect(action.detail == "Ask")
+        #expect(port.commands[1] == .runSlashCommand(name: "/ask", args: []))
         #expect(vm.selectedAgentModeID == "ask")
-        #expect(vm.messages.isEmpty)
         await bus.shutdown()
     }
 
@@ -530,6 +537,165 @@ struct EngineViewModelTests {
         } else {
             Issue.record("expected optimistic user bubble")
         }
+        await bus.shutdown()
+    }
+
+    @Test("activateSlashCommand records a non-prompt slash as a client action")
+    func activateSlashCommandNonPromptRecordsAction() async {
+        let port = RecordingCommandPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port, bus: bus)
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+        vm.activateSlashCommand(
+            SlashCommand(id: "/debug", name: "/debug", summary: "Debug", sendsAsPrompt: false)
+        )
+        await drain()
+        #expect(port.commands.count == 2)
+        guard case .recordClientAction(let action) = port.commands[0] else {
+            Issue.record("expected recordClientAction"); return
+        }
+        #expect(action.kind == .slashCommand)
+        #expect(action.detail == "/debug")
+        #expect(port.commands[1] == .runSlashCommand(name: "/debug", args: []))
+        await bus.publish(.clientAction(action))
+        await drain()
+        #expect(vm.messages.count == 1)
+        if case .clientAction(let recorded) = vm.messages[0] {
+            #expect(recorded.detail == "/debug")
+        } else {
+            Issue.record("expected clientAction message")
+        }
+        await bus.shutdown()
+    }
+
+    @Test("selectAgentMode records one action then sends selectCommands")
+    func selectAgentModeRecordsOneAction() async {
+        let port = RecordingCommandPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port, bus: bus)
+        let mode = AgentModeOption(
+            id: "think",
+            label: "Think",
+            selectCommands: [
+                .toggleThinkMode(enabled: true),
+                .toggleReviewMode(enabled: false),
+            ]
+        )
+        vm.selectAgentMode(mode)
+        await drain()
+        #expect(port.commands.count == 3)
+        guard case .recordClientAction(let action) = port.commands[0] else {
+            Issue.record("expected recordClientAction"); return
+        }
+        #expect(action.kind == .mode)
+        #expect(action.detail == "Think")
+        #expect(port.commands[1] == .toggleThinkMode(enabled: true))
+        #expect(port.commands[2] == .toggleReviewMode(enabled: false))
+        #expect(vm.selectedAgentModeID == "think")
+        await bus.shutdown()
+    }
+
+    @Test("respondToPermission records the decision and clears pending prompt")
+    func respondToPermissionRecordsDecision() async {
+        let port = RecordingCommandPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port, bus: bus)
+        let prompt = PermissionPrompt(toolName: "Bash",
+                                       summary: "Run ls",
+                                       argumentsSummary: "{}",
+                                       requestedAt: Date())
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+        await bus.publish(.permissionRequest(prompt: prompt))
+        await drain()
+        #expect(vm.pendingPermission != nil)
+
+        vm.respondToPermission(id: prompt.id, decision: .allow)
+        await drain()
+        #expect(vm.pendingPermission == nil)
+        #expect(port.commands.count == 2)
+        guard case .recordClientAction(let action) = port.commands[0] else {
+            Issue.record("expected recordClientAction"); return
+        }
+        #expect(action.kind == .permissionResponse)
+        #expect(action.detail == "Allow")
+        #expect(port.commands[1] == .respondToPermission(id: prompt.id, decision: .allow))
+        await bus.shutdown()
+    }
+
+    @Test("selectModel records a model action then sends selectModel")
+    func selectModelRecordsAction() async {
+        let port = RecordingCommandPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port, bus: bus)
+        vm.availableModels = [
+            AgentModelOption(id: "opus", label: "Opus"),
+        ]
+        vm.selectModel(id: "opus", label: "Opus")
+        await drain()
+        #expect(port.commands.count == 2)
+        guard case .recordClientAction(let action) = port.commands[0] else {
+            Issue.record("expected recordClientAction"); return
+        }
+        #expect(action.kind == .model)
+        #expect(action.detail == "Opus")
+        #expect(port.commands[1] == .selectModel(id: "opus"))
+        await bus.shutdown()
+    }
+
+    @Test("startNewSession records a sessionLifecycle action then sends newSession")
+    func startNewSessionRecordsAction() async {
+        let port = RecordingCommandPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port, bus: bus)
+        vm.startNewSession()
+        await drain()
+        #expect(port.commands.count == 2)
+        guard case .recordClientAction(let action) = port.commands[0] else {
+            Issue.record("expected recordClientAction"); return
+        }
+        #expect(action.kind == .sessionLifecycle)
+        #expect(action.detail == "New session")
+        #expect(port.commands[1] == .newSession)
+        await bus.shutdown()
+    }
+
+    @Test("compactContext records a sessionLifecycle action then sends compact")
+    func compactContextRecordsAction() async {
+        let port = RecordingCommandPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port, bus: bus)
+        vm.compactContext()
+        await drain()
+        #expect(port.commands.count == 2)
+        guard case .recordClientAction(let action) = port.commands[0] else {
+            Issue.record("expected recordClientAction"); return
+        }
+        #expect(action.kind == .sessionLifecycle)
+        #expect(action.detail == "Compact context")
+        #expect(port.commands[1] == .compact)
+        await bus.shutdown()
+    }
+
+    @Test("clientAction event appends a conversation marker")
+    func clientActionAppendsMessage() async {
+        let (vm, bus) = makeModel()
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        let action = ClientAction(id: UUID(), kind: .permissionMode, title: "Permission mode", detail: "Plan")
+        await bus.publish(.clientAction(action))
+        await drain()
+
+        #expect(vm.messages.count == 1)
+        if case .clientAction(let recorded) = vm.messages[0] {
+            #expect(recorded == action)
+        } else {
+            Issue.record("expected clientAction message")
+        }
+        #expect(vm.messages[0].textContent == "Permission mode: Plan")
+
         await bus.shutdown()
     }
 

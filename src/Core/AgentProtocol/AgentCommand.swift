@@ -51,6 +51,12 @@ public enum AgentCommand: Sendable, Codable, Hashable {
     // MARK: Diagnostics
 
     case requestSnapshot(SnapshotKind)
+
+    // MARK: Client-owned history markers
+
+    /// Publish a Codemixer-owned conversation marker without writing to the
+    /// agent CLI transcript. See `ClientAction` for persistence limits.
+    case recordClientAction(ClientAction)
 }
 
 /// Shared inbound entry point for the agent engine.

@@ -38,7 +38,7 @@ public struct PromptComposerView: View {
         VStack(spacing: Theme.spacing.s12) {
             if let prompt = model.pendingPermission {
                 PermissionPromptView(prompt: prompt) { decision in
-                    model.send(.respondToPermission(id: prompt.id, decision: decision))
+                    model.respondToPermission(id: prompt.id, decision: decision)
                 }
             }
 

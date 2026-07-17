@@ -185,8 +185,8 @@ struct RootView: View {
     private func toolbarOverflow(for model: EngineViewModel) -> some View {
         Menu {
             Section("Session") {
-                Button("New Session") { model.send(.newSession) }
-                Button("Compact Context") { model.send(.compact) }
+                Button("New Session") { model.startNewSession() }
+                Button("Compact Context") { model.compactContext() }
                 if let workspace = model.workspace {
                     Button("Reopen Current Project") {
                         model.send(.openProject(path: workspace.path, resumeSessionID: model.sessionID))
@@ -199,16 +199,32 @@ struct RootView: View {
                 .disabled(bootstrap.workspace == nil)
             }
             Section("Mode") {
-                Button("Default Permissions") { model.send(.setPermissionMode(.default)) }
-                Button("Accept Edits") { model.send(.setPermissionMode(.acceptEdits)) }
-                Button("Plan Mode") { model.send(.setPermissionMode(.plan)) }
-                Button("Bypass Permissions") { model.send(.setPermissionMode(.bypassPermissions)) }
+                Button("Default Permissions") { model.setPermissionMode(.default) }
+                Button("Accept Edits") { model.setPermissionMode(.acceptEdits) }
+                Button("Plan Mode") { model.setPermissionMode(.plan) }
+                Button("Bypass Permissions") { model.setPermissionMode(.bypassPermissions) }
             }
             Section("Quick Commands") {
-                Button("Help") { model.send(.runSlashCommand(name: "/help", args: [])) }
-                Button("Usage") { model.send(.runSlashCommand(name: "/usage", args: [])) }
-                Button("Model") { model.send(.runSlashCommand(name: "/model", args: [])) }
-                Button("Permissions") { model.send(.runSlashCommand(name: "/permissions", args: [])) }
+                Button("Help") {
+                    model.activateSlashCommand(
+                        SlashCommand(id: "/help", name: "/help", summary: "Show help")
+                    )
+                }
+                Button("Usage") {
+                    model.activateSlashCommand(
+                        SlashCommand(id: "/usage", name: "/usage", summary: "Show usage")
+                    )
+                }
+                Button("Model") {
+                    model.activateSlashCommand(
+                        SlashCommand(id: "/model", name: "/model", summary: "Show or set model")
+                    )
+                }
+                Button("Permissions") {
+                    model.activateSlashCommand(
+                        SlashCommand(id: "/permissions", name: "/permissions", summary: "Show permissions")
+                    )
+                }
             }
             Section("Export Snapshot") {
                 Button("Conversation") { model.send(.requestSnapshot(.conversation)) }

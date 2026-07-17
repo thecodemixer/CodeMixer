@@ -9,6 +9,7 @@ public enum AgentCommandFixtures {
         public static let bubble = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
         public static let permission = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
         public static let hunk = UUID(uuidString: "00000000-0000-0000-0000-000000000003")!
+        public static let clientAction = UUID(uuidString: "00000000-0000-0000-0000-000000000004")!
     }
 
     public static let sampleAttachment = AttachmentRef(id: "upload-1",
@@ -39,6 +40,12 @@ public enum AgentCommandFixtures {
             .updateAutoApprovalRules([AutoApprovalRule(match: "Bash ls *", decision: .allow)]),
             .updateAppearancePref(key: .theme, value: .string("dark")),
             .requestSnapshot(.conversation),
+            .recordClientAction(ClientAction(
+                id: IDs.clientAction,
+                kind: .permissionMode,
+                title: "Permission mode",
+                detail: "Plan"
+            )),
         ]
     }
 

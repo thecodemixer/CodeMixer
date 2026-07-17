@@ -47,6 +47,7 @@ public enum AgentEventWire: Sendable, Codable, Hashable {
     case prefsChanged(rulesCount: Int)
     case appearancePrefChanged(key: AppearancePrefKey, value: AppearancePrefValue)
     case snapshotReady(kind: SnapshotKind, payloadBase64: String)
+    case clientAction(ClientAction)
 }
 
 // MARK: - Wire payload types

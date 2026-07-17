@@ -178,6 +178,12 @@ struct WireCodecParityTests {
             .prefsChanged(rulesCount: 2),
             .appearancePrefChanged(key: .theme, value: .string("dark")),
             .snapshotReady(kind: .prefs, payload: Data("{}".utf8)),
+            .clientAction(ClientAction(
+                id: UUID(uuidString: "00000000-0000-0000-0000-000000000004")!,
+                kind: .permissionMode,
+                title: "Permission mode",
+                detail: "Plan"
+            )),
         ]
     }
 }
@@ -214,6 +220,7 @@ extension AgentEvent {
         case .prefsChanged:             "prefsChanged"
         case .appearancePrefChanged:    "appearancePrefChanged"
         case .snapshotReady:            "snapshotReady"
+        case .clientAction:             "clientAction"
         }
     }
 
@@ -285,6 +292,8 @@ extension AgentEvent {
             return k1 == k2 && v1 == v2
         case (.snapshotReady(let k1, let p1), .snapshotReady(let k2, let p2)):
             return k1 == k2 && p1 == p2
+        case (.clientAction(let a1), .clientAction(let a2)):
+            return a1 == a2
         default:
             return false
         }

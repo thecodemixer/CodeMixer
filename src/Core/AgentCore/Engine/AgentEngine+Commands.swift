@@ -135,7 +135,8 @@ extension AgentEngine {
 
         case .openProject,
              .speakAssistantBubble, .revertFile, .revertHunk,
-             .updateAutoApprovalRules, .updateAppearancePref, .requestSnapshot:
+             .updateAutoApprovalRules, .updateAppearancePref, .requestSnapshot,
+             .recordClientAction:
             // Already handled in `handleOutOfBand`.
             break
         }
@@ -177,6 +178,11 @@ extension AgentEngine {
                 workspace: workspace
             )
             await bus.publish(.snapshotReady(kind: kind, payload: data))
+            return ()
+        case .recordClientAction(let action):
+            let text = action.detail.map { "\(action.title): \($0)" } ?? action.title
+            transcript.append(.init(role: "action", text: text, timestamp: seams.clock.now()))
+            await bus.publish(.clientAction(action))
             return ()
         default:
             return nil

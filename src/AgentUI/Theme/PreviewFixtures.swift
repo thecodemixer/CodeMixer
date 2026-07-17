@@ -22,8 +22,15 @@ enum PreviewFixtures {
     static func conversationMessages() -> [EngineViewModel.Message] {
         let userID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
         let asstID = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+        let actionID = UUID(uuidString: "00000000-0000-0000-0000-000000000003")!
         return [
             .user(bubbleID: userID, text: "Add a session navigator to the sidebar."),
+            .clientAction(ClientAction(
+                id: actionID,
+                kind: .mode,
+                title: "Mode",
+                detail: "Think"
+            )),
             .assistant(bubbleID: asstID,
                        text: "I'll scaffold the navigator with projects and resumable sessions."),
         ]
@@ -35,7 +42,7 @@ enum PreviewFixtures {
             PaletteCommand(id: "new-chat",
                            title: "New Chat",
                            subtitle: "Start a fresh session",
-                           systemImage: "plus.message") { model.send(.newSession) },
+                           systemImage: "plus.message") { model.startNewSession() },
             PaletteCommand(id: "toggle-sidebar",
                            title: "Toggle Sidebar",
                            subtitle: nil,

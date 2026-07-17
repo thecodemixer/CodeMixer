@@ -216,6 +216,57 @@ struct ThinkingBlockView: View {
     }
 }
 
+// MARK: - Client action marker
+
+/// Centered, chrome-free history marker for an agent-affecting client intent.
+/// Live session + export only — not restored from agent JSONL on resume.
+struct ClientActionRowView: View {
+    let action: ClientAction
+
+    var body: some View {
+        HStack(spacing: Theme.spacing.s8) {
+            Image(systemName: symbolName)
+                .font(Theme.typography.iconSmall)
+                .foregroundStyle(Theme.text.tertiary)
+                .accessibilityHidden(true)
+            Text(action.title)
+                .font(Theme.typography.caption)
+                .foregroundStyle(Theme.text.tertiary)
+            if let detail = action.detail {
+                Text(detail)
+                    .font(Theme.typography.caption)
+                    .foregroundStyle(Theme.text.secondary)
+            }
+        }
+        .padding(.vertical, Theme.spacing.s4)
+        .frame(maxWidth: .infinity, alignment: .center)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityText)
+    }
+
+    private var symbolName: String {
+        switch action.kind {
+        case .mode, .permissionMode:
+            return "slider.horizontal.3"
+        case .model:
+            return "cpu"
+        case .slashCommand:
+            return "terminal"
+        case .permissionResponse:
+            return "shield.lefthalf.filled"
+        case .sessionLifecycle:
+            return "arrow.triangle.2.circlepath"
+        }
+    }
+
+    private var accessibilityText: String {
+        if let detail = action.detail {
+            return "Action: \(action.title) \(detail)"
+        }
+        return "Action: \(action.title)"
+    }
+}
+
 // MARK: - Helpers
 
 private func copyToClipboard(_ text: String) {

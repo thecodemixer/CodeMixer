@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import AgentUI
+import AgentProtocol
 
 @Suite("SessionExporter — pure transcript export")
 struct SessionExporterTests {
@@ -38,6 +39,25 @@ struct SessionExporterTests {
     @Test("htmlEscaped replaces ampersand before angle brackets")
     func htmlEscapedOrdering() {
         #expect(SessionExporter.htmlEscaped("<tag attr=\"a&b\">") == "&lt;tag attr=\"a&amp;b\"&gt;")
+    }
+
+    @Test("Exports include client-action markers")
+    func exportsIncludeClientActions() throws {
+        let action = ClientAction(id: UUID(), kind: .mode, title: "Mode", detail: "Think")
+        let msgs: [EngineViewModel.Message] = [
+            .user(bubbleID: UUID(), text: "hi"),
+            .clientAction(action),
+            .assistant(bubbleID: UUID(), text: "hello"),
+        ]
+
+        let md = try #require(String(data: SessionExporter.markdown(msgs), encoding: .utf8))
+        #expect(md.contains("*Mode: Think*"))
+
+        let jsonl = try #require(String(data: SessionExporter.jsonl(msgs), encoding: .utf8))
+        #expect(jsonl.contains(#"{"role":"action","text":"Mode: Think"}"#))
+
+        let html = try #require(String(data: SessionExporter.html(msgs), encoding: .utf8))
+        #expect(html.contains("<div class=\"action\">Mode: Think</div>"))
     }
 
     private func messages() -> [EngineViewModel.Message] {

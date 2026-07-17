@@ -310,6 +310,9 @@ public extension EngineViewModel {
         /// from `activeToolCalls` by `callID`, so the entry can keep mutating
         /// (progress, completion) while its position in the turn stays fixed.
         case toolCall(callID: String)
+        /// Codemixer-owned history marker for an agent-affecting client intent
+        /// (mode, slash, permission). Live session + export only.
+        case clientAction(ClientAction)
 
         public var id: String {
             switch self {
@@ -322,6 +325,7 @@ public extension EngineViewModel {
             case .thinkingChunk(let id, _):     return "thinking-\(id)"
             case .thinkingComplete(let id, _, _):  return "thinking-\(id)"
             case .toolCall(let id):             return "tool-\(id)"
+            case .clientAction(let action):     return "action-\(action.id)"
             }
         }
 
@@ -332,6 +336,8 @@ public extension EngineViewModel {
             case .thinkingChunk(_, let t): return t
             case .thinkingComplete(_, let t, _): return t
             case .toolCall: return nil
+            case .clientAction(let action):
+                return action.detail.map { "\(action.title): \($0)" } ?? action.title
             }
         }
     }

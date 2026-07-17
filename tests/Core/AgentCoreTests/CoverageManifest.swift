@@ -140,6 +140,18 @@ private let _pmAcceptEdits = PermissionMode.acceptEdits
 private let _pmBypass      = PermissionMode.bypassPermissions
 private let _pmPlan        = PermissionMode.plan
 
+// ClientAction — Codemixer-owned history markers (live + export only)
+private let _clientActionKinds: [ClientAction.Kind] = [
+    .mode, .model, .slashCommand, .permissionMode, .permissionResponse, .sessionLifecycle,
+]
+private let _clientAction = ClientAction(
+    id: UUID(uuidString: "00000000-0000-0000-0000-000000000004")!,
+    kind: .permissionMode,
+    title: "Permission mode",
+    detail: "Plan"
+)
+private let _recordClientActionCommand = AgentCommand.recordClientAction(_clientAction)
+
 // TTSAction
 private let _ttsPlay  = TTSAction.play
 private let _ttsPause = TTSAction.pause
@@ -280,6 +292,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // BonjourBroadcaster
 // BroadcastError
 // Bundle
+// CachedAdapterModels
 // CaptureError
 // CertificateError
 // CertificateIdentityImporter
@@ -303,11 +316,13 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // ClaudeCodeTwinTurn
 // ClaudeHookInstaller
 // ClaudeInputEncoding
+// ClaudeModelCatalog
 // ClaudeProjectPaths
 // ClaudeSessionLister
 // ClaudeSlashCommands
 // ClaudeTUIFallback
 // ClaudeTranscriptTailer
+// ClientAction
 // ClientError
 // ClientFrame
 // CodeBlock
@@ -404,6 +419,8 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // LoggingNetworkTransport
 // MarkdownBlock
 // Message
+// ModelCatalogLoadError
+// ModelCatalogRefreshKind
 // MulticastEventBus
 // NetworkAddress
 // NetworkConnection
@@ -436,6 +453,8 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // ProjectAgentRouter
 // ProjectLocalState
 // ProjectLocalStateStore
+// ProjectMemoryFile
+// ProjectMemoryFileKind
 // ProjectPaths
 // ProjectPickerView
 // ProjectRecord
@@ -509,6 +528,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // TerminalSnapshot
 // TerminalSnapshotting
 // Theme
+// ThinkingEffort
 // Tick
 // Toast
 // ToolInput
@@ -535,19 +555,24 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // WireVersion
 // WorkspaceChip
 // WorkspaceLandingView
+// WorkspaceLifecycle
 // WorkspaceLocalState
 // WorkspaceLocalStateStore
+// WorkspaceModelCatalogRow
 // WorkspaceProjectsStore
 // WorkspaceScene
+// abortOpen
 // account
 // acpSessionsFileName
 // acpSessionsURL
 // action
+// activateSlashCommand
 // activeWorkspaceURL
 // activityDotSize
 // activityDotsHeight
 // adapter
 // adapterEvents
+// adapterModelCaches
 // addExistingProject
 // addition
 // additions
@@ -613,6 +638,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // bus
 // byteCount
 // bytes
+// cachedModels
 // cachesDirectory
 // cachesRelativePath
 // canCancel
@@ -646,7 +672,9 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // commandPaletteMaxWidth
 // commandPaletteMinWidth
 // compact
+// compactContext
 // compactControlMinWidth
+// composerModelPickerMaxHeight
 // composerModelPickerMinWidth
 // concatenate
 // configuration
@@ -704,6 +732,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // directoryURL
 // disabled
 // disconnect
+// discover
 // displayLabel
 // displayName
 // divider
@@ -729,12 +758,15 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // endTurn
 // engine
 // ensureDirectory
+// ensureModels
+// ensureModelsLoaded
 // ensureParentDirectory
 // entry
 // enumerate
 // enumerateProjectCommands
 // env
 // environment
+// errorDescription
 // errorMessage
 // errorResponse
 // event
@@ -746,6 +778,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // executable
 // executablePath
 // execute
+// exists
 // exitCode
 // exitStatus
 // extraEnv
@@ -773,6 +806,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // glyph
 // hairline
 // hasEmittedAssistantText
+// hasResumableSessionProjects
 // headByteBudget
 // header
 // headers
@@ -852,6 +886,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // load
 // loadAll
 // loadHookCommands
+// loadModelCatalogs
 // loadOrCreate
 // loadPersisted
 // loadSessions
@@ -866,6 +901,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // makeEventStream
 // makeHandle
 // makePairing
+// manualRefreshDetail
 // markActiveWorkspace
 // markdown
 // match
@@ -884,11 +920,15 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // minAttemptInterval
 // modeID
 // model
+// modelCatalogRefreshKind
+// modelCount
+// models
 // modificationDate
 // mono
 // monoSmall
 // monotonic
 // motion
+// move
 // muted
 // name
 // named
@@ -919,6 +959,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // onTap
 // onTranscript
 // opacity
+// openEmptyWorkspace
 // openFilePanel
 // openSession
 // openURL
@@ -938,6 +979,9 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // panel
 // parentMessageId
 // parse
+// parseCache
+// parseEffortOutput
+// parsePrintModelOutput
 // path
 // pause
 // payload
@@ -960,6 +1004,8 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // prefs
 // prefsFileName
 // prefsURL
+// present
+// presentFilename
 // primary
 // primaryAction
 // primaryAgentID
@@ -1009,6 +1055,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // reconfigure
 // reconnect
 // record
+// recordAndSend
 // recordOpen
 // recordSession
 // recordThread
@@ -1017,11 +1064,16 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // reduceMotion
 // ref
 // refresh
+// refreshAdapterModels
+// refreshKind
+// refreshModelCatalog
 // refreshProjects
+// refreshedAt
 // register
 // relativePath
 // release
 // reloadProjects
+// reloadWorkspaceModelCatalogStatus
 // remoteActions
 // remoteCertificatePasswordService
 // remoteEnabled
@@ -1051,6 +1103,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // resolveProjectType
 // resolvedSessionID
 // respond
+// respondToPermission
 // response
 // restoreProject
 // resumableSessions
@@ -1082,15 +1135,20 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // s8
 // sandbox
 // save
+// saveModels
 // savePanel
 // scenario
 // schemaVersion
 // secondary
+// seedModelCatalog
+// selectAgentMode
 // selectCommands
+// selectModel
 // selectProject
 // selectedAgentModeID
 // send
 // sendPrompt
+// sendsAsPrompt
 // serviceType
 // sessionBootstrapBytes
 // sessionID
@@ -1109,6 +1167,8 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // setConnectedRemoteClients
 // setLANEnabled
 // setMode
+// setModel
+// setPermissionMode
 // setProjectType
 // settingsMinHeight
 // settingsMinWidth
@@ -1152,6 +1212,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // start
 // startListening
 // startNewPairing
+// startNewSession
 // startPairing
 // startThread
 // startTurn
@@ -1190,6 +1251,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // summary
 // sunken
 // supersede
+// supportedThinkingEfforts
 // supportsOutOfBandInterrupt
 // supportsResumableSessions
 // surface
@@ -1208,6 +1270,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // text
 // textContent
 // theme
+// thinkingEffort
 // thinkingPhrase
 // threadID
 // timestamp
@@ -1262,6 +1325,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // versionLabel
 // voice
 // waitForExit
+// warmWorkspaceModelCatalogs
 // warning
 // waveformRange
 // webSocket
@@ -1284,7 +1348,5 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // write
 // writeAtomically
 // writeBytes
-// MANIFEST_SYMBOLS_END
-
-// Total: 1054 unique public symbols
+// MANIFEST_SYMBOLS_END public symbols
 

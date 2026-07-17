@@ -404,20 +404,34 @@ public enum AgentEvent: Sendable {
     case engineRestarted
     case stopped(reason: StopReason)
     case error(AgentError)
+    // Out-of-band (also on the bus): speakBubbleRequested, fileReverted,
+    // prefsChanged, appearancePrefChanged, snapshotReady, clientAction
 }
 ```
 
-### Five categorical roles
+### Categorical roles
 
 | Role | Cases |
 | --- | --- |
 | **Session lifecycle** | `sessionStarted`, `engineRestarted`, `stopped`, `error` |
-| **Conversation** | `userTurn`, `textDelta`, `assistantText`, `thinkingChunk`, `thinkingComplete` |
+| **Conversation** | `userTurn`, `textDelta`, `assistantText`, `thinkingChunk`, `thinkingComplete`, `clientAction` |
 | **Tool execution** | `toolStart`, `toolProgress`, `toolEnd` |
 | **Permissions** | `permissionRequest`, `permissionAlreadyResolved` |
 | **Activity & ambient** | `statusPhraseChanged`, `activityStateChanged`, `noEventGap`, `authURL` (legacy wire; adapters use `authenticationRequired` errors for setup), `bell`, `fileTouched`, `usage` |
+| **Out-of-band** | `speakBubbleRequested`, `fileReverted`, `prefsChanged`, `appearancePrefChanged`, `snapshotReady` |
 
 A consumer that knows nothing else can render a complete conversation by folding these events. New event cases require: (a) wire DTO in `AgentEventWire`, (b) `WireCodec` round-trip, (c) `RemoteParityTests` coverage, (d) a UI consumer or an explicit decision that none is wanted.
+
+### ClientAction — Codemixer-owned history markers
+
+Agent-affecting UI intents that are **not** user prompts (composer mode changes, model selection, permission-mode toggles, non-prompt slash commands, permission decisions, new session / compact) publish `AgentEvent.clientAction(ClientAction)` via `AgentCommand.recordClientAction`. They:
+
+- Appear as centered system rows in the live conversation pane and in Codemixer conversation snapshot exports (`role: "action"`).
+- Fan out on the bus to remote clients in the **current process**.
+- Are **never** written into agent-owned stores (Claude JSONL, Codex threads, Cursor sessions).
+- Are **not** restored when a session is reopened/resumed from the agent's transcript — that is a known limitation until Codemixer grows a durable conversation log of its own.
+
+Do not inject fake `.userTurn`s or PTY prompt text to make these visible; adapters keep encoding the underlying commands as today.
 
 ### Event identity and replay
 
@@ -760,6 +774,7 @@ public enum AgentCommand: Codable, Sendable {
     case updateAutoApprovalRules([AutoApprovalRule])
     case updateAppearancePref(key: AppearancePrefKey, value: AppearancePrefValue)
     case requestSnapshot(SnapshotKind)
+    case recordClientAction(ClientAction)
 }
 ```
 
@@ -769,7 +784,7 @@ public enum AgentCommand: Codable, Sendable {
 | --- | --- | --- |
 | **Agent input** | `sendPrompt`, `cancelCurrentTurn`, `editAndResubmitLast`, `runSlashCommand` | Translated to transport bytes via `adapter.encodeUserPrompt(_:)` / `adapter.encodeCommand(_:)`. |
 | **Engine state** | `newSession`, `selectModel`, `setPermissionMode`, `toggleThinkMode` | Encoded by the adapter; Claude uses slash-command lines, Codex uses JSON-RPC frames. |
-| **Out-of-band** | `revertFile`, `updateAutoApprovalRules`, `updateAppearancePref`, `requestSnapshot`, `speakAssistantBubble` | Handled by a higher-level service layer (`GitDiffEngine`, `SessionStore`, TTS). The engine returns immediately. |
+| **Out-of-band** | `revertFile`, `updateAutoApprovalRules`, `updateAppearancePref`, `requestSnapshot`, `speakAssistantBubble`, `recordClientAction` | Handled by a higher-level service layer (`GitDiffEngine`, `SessionStore`, TTS, Codemixer history markers). The engine returns immediately. |
 
 The third category may sound like a violation of the single-port discipline — it isn't. The *port* is still single; the engine is a tiny router that fans out to subsystems for non-agent commands. The wire protocol remains uniform; the mobile client sends `updateAppearancePref` the same way it sends `sendPrompt`.
 
@@ -1679,7 +1694,8 @@ Every frame carries `"v": WireVersion.current` (today `1`), declared in `Core/Ag
 
 - **Additive change** (new optional field on an existing case): usually no version bump; ship coordinated adapter + codec updates.
 - **Breaking change** (renamed tag, removed field, stricter decoding): bump `WireVersion.current`; old clients are rejected cleanly.
-- **No `unknown` wire catch-alls.** Wire enums decode exhaustively; new cases require a version bump and coordinated release.
+- **No `unknown` wire catch-alls.** Wire enums decode exhaustively; new cases normally require a version bump and coordinated release.
+- **Pre-production exception:** Codemixer is not yet shipping a frozen external wire client. New enum cases such as `AgentEvent.clientAction` / `AgentCommand.recordClientAction` may land on the current `WireVersion` when the in-tree GUI, daemon, and parity tests ship together. Bump before any external client depends on the previous grammar.
 
 ### Persistence evolution
 

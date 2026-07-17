@@ -102,6 +102,9 @@ private struct Line: Identifiable {
         case .prefsChanged(let n):                (kind, body, tint) = ("prefs", "rules=\(n)", Theme.text.tertiary)
         case .appearancePrefChanged(let k, let v): (kind, body, tint) = ("appearance", "\(k.rawValue)=\(v)", Theme.text.tertiary)
         case .snapshotReady(let k, let d):        (kind, body, tint) = ("snapshot", "\(k.rawValue) \(d.count)B", Theme.text.tertiary)
+        case .clientAction(let action):
+            let text = action.detail.map { "\(action.title): \($0)" } ?? action.title
+            (kind, body, tint) = ("action", text, Theme.text.tertiary)
         }
     }
 }

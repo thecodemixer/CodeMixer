@@ -62,6 +62,7 @@ Codemixer/
 | The interactive-shell environment resolver | `Core/AgentCore/PTY/ShellEnvironmentResolver.swift` |
 | Headless terminal emulation (SwiftTerm) | `Core/AgentCore/Terminal/TerminalEngine.swift` |
 | The typed event alphabet | `Core/AgentCore/Events/AgentEvent.swift` |
+| Client-owned conversation markers (mode / model / slash / permission / session) | `Core/AgentProtocol/ClientAction.swift` (`AgentCommand.recordClientAction` / `AgentEvent.clientAction`) |
 | The adapter protocol or supporting types | `Core/AgentCore/Events/AgentAdapter.swift`, `SupportingTypes.swift`, `AgentID.swift`, `Core/AgentCore/Transport/AgentTransport.swift` |
 | The error model | `Core/AgentCore/Events/AgentError.swift` |
 | Wire codec (domain ↔ wire) | `Core/AgentCore/Events/WireCodec.swift` |
@@ -275,6 +276,13 @@ tests/
 3. Add both `encode`/`decode` arms to `Core/AgentCore/Events/WireCodec.swift`.
 4. Add a case to `Remote/RemoteParityTests/WireCodecParityTests.swift`.
 5. Reduce it in `AgentUI/ViewModel/EngineViewModel.swift` (or document why it's intentionally not reduced).
+6. Update exhaustive consumers (`EventLogView`, exporters) and regenerate the coverage manifest.
+
+### Make an agent-affecting UI action visible in chat
+
+Use `ClientAction` + `AgentCommand.recordClientAction` (see `Core/AgentProtocol/ClientAction.swift`). Prefer `EngineViewModel.selectAgentMode` / `selectModel` / `setPermissionMode` / `activateSlashCommand` / `respondToPermission` / `startNewSession` / `compactContext` / `recordAndSend` rather than inventing a second local-only history store.
+
+**Do not** write markers into Claude/Codex/Cursor session files. **Known limitation:** action rows are live-session + export only; they do not reappear after reopen/resume from the agent's transcript.
 
 ### Add a new adapter (e.g. CursorCLI)
 

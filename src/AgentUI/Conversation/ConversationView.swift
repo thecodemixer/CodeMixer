@@ -144,6 +144,8 @@ public struct ConversationView: View {
             if let entry = model.activeToolCalls.first(where: { $0.id == callID }) {
                 ToolCallCardView(entry: entry)
             }
+        case .clientAction(let action):
+            ClientActionRowView(action: action)
         }
     }
 
@@ -186,11 +188,15 @@ public struct ConversationView: View {
         }
     }
 
-    /// Agent-side rows (assistant prose, streaming, thinking) carry the turn
-    /// spine; user prompts do not.
+    /// Agent-side rows (assistant prose, streaming, thinking, tools) carry the
+    /// turn spine; user prompts and Codemixer action markers do not.
     private func isAgentSide(_ message: EngineViewModel.Message) -> Bool {
-        if case .user = message { return false }
-        return true
+        switch message {
+        case .user, .clientAction:
+            return false
+        default:
+            return true
+        }
     }
 
     /// The conversation has nothing to show yet — drives the first-impression

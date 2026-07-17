@@ -47,4 +47,8 @@ public enum AgentEvent: Sendable {
     case prefsChanged(rulesCount: Int)
     case appearancePrefChanged(key: AppearancePrefKey, value: AppearancePrefValue)
     case snapshotReady(kind: SnapshotKind, payload: Data)
+
+    /// Codemixer-owned history marker for an agent-affecting client intent.
+    /// Live session + export only — not restored from agent JSONL on resume.
+    case clientAction(ClientAction)
 }

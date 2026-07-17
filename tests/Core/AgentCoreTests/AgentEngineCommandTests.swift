@@ -632,6 +632,38 @@ struct AgentEngineCommandTests {
         await h.shutdown()
     }
 
+    @Test("recordClientAction publishes clientAction and appears in conversation snapshot")
+    func recordClientActionPublishesAndSnapshots() async throws {
+        let h = try await EngineHarness.make()
+        let action = ClientAction(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000004")!,
+            kind: .slashCommand,
+            title: "Slash command",
+            detail: "/help"
+        )
+        try await h.engine.send(.recordClientAction(action))
+        try await Task.sleep(for: .milliseconds(20))
+        let events = await h.collectedSoFar()
+        #expect(events.contains {
+            if case .clientAction(let published) = $0 { return published == action }
+            return false
+        })
+
+        try await h.engine.send(.requestSnapshot(.conversation))
+        try await Task.sleep(for: .milliseconds(20))
+        let snapEvents = await h.collectedSoFar()
+        guard case .snapshotReady(.conversation, let payload)? = snapEvents.last(where: {
+            if case .snapshotReady(.conversation, _) = $0 { return true }
+            return false
+        }) else {
+            Issue.record("expected conversation snapshot"); return
+        }
+        let json = try #require(String(data: payload, encoding: .utf8))
+        #expect(json.contains("\"role\":\"action\""))
+        #expect(json.contains("Slash command: \\/help") || json.contains("Slash command: /help"))
+        await h.shutdown()
+    }
+
     // MARK: Resume startup watchdog
 
     @Test("resumed sessions without a live SessionStart reuse stalled-turn events")

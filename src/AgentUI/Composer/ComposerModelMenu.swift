@@ -37,7 +37,7 @@ struct ComposerModelMenu: View {
                         ComposerDropdownOption(id: option.id, title: option.label,
                                               isSelected: option.id == selectedModelID) {
                             selectedModelID = option.id
-                            model.send(.selectModel(id: option.id))
+                            model.selectModel(id: option.id, label: option.label)
                             isOpen = false
                         }
                     },

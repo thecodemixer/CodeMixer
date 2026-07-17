@@ -235,6 +235,19 @@ Each app boot calls `AdapterRegistry.shared.register(VendorAAdapter())`. The pic
 
 **Discovery is explicit by design.** Reflection / runtime-scan / dlopen-based plug-ins are fragile, hard to test, and security-loaded. Explicit registration at startup keeps the picker deterministic and the binary signature verifiable.
 
+### Visibility of mode / model / slash / permission / session commands
+
+Adapters encode agent-affecting commands (`setPermissionMode`, `selectModel`, `runSlashCommand`, `availableAgentModes().selectCommands`, `newSession`, `compact`, …) the same way they always have. **Chat visibility** of those intents is owned by Codemixer via `ClientAction` / `AgentCommand.recordClientAction` / `AgentEvent.clientAction` — not by writing fake user prompts into the agent transcript.
+
+Adapter authors must **not**:
+
+- Emit synthetic `.userTurn` events for mode switches or non-prompt slash commands.
+- Append Codemixer history markers into Claude JSONL / Codex threads / ACP session stores.
+
+UI call sites should use `EngineViewModel.selectAgentMode`, `selectModel`, `setPermissionMode`, `activateSlashCommand`, `respondToPermission`, `startNewSession`, or `compactContext` so one readable action row is recorded before the underlying commands run.
+
+**Known limitation:** ClientAction rows are live-session + Codemixer snapshot-export only. They do not survive reopen/resume from the agent's own transcript until Codemixer has a durable conversation log.
+
 ---
 
 ## Adding a vendor in seven steps
