@@ -52,6 +52,10 @@ public final class EngineViewModel {
     public var availableAgentModes: [AgentModeOption] = []
     /// Currently selected composer session mode id (from `availableAgentModes`).
     public var selectedAgentModeID: String = ""
+    /// Per-adapter model catalog rows for Workspace settings.
+    public internal(set) var workspaceModelCatalogRows: [WorkspaceModelCatalogRow] = []
+    /// Agent currently running a manual model refresh, if any.
+    public internal(set) var modelCatalogRefreshInFlight: AgentID?
 
     public var showUsageChip: Bool { appearancePrefs.showUsageChip }
     public var showSilentRecoveryLog: Bool { appearancePrefs.showSilentRecoveryLog }
@@ -249,6 +253,27 @@ public final class EngineViewModel {
                                                             message: error.localizedDescription))
                 }
             }
+        }
+    }
+
+    public struct WorkspaceModelCatalogRow: Identifiable, Sendable, Hashable {
+        public var id: AgentID { agentID }
+        public let agentID: AgentID
+        public let displayName: String
+        public let refreshKind: ModelCatalogRefreshKind
+        public let modelCount: Int
+        public let refreshedAt: Date?
+
+        public init(agentID: AgentID,
+                    displayName: String,
+                    refreshKind: ModelCatalogRefreshKind,
+                    modelCount: Int,
+                    refreshedAt: Date?) {
+            self.agentID = agentID
+            self.displayName = displayName
+            self.refreshKind = refreshKind
+            self.modelCount = modelCount
+            self.refreshedAt = refreshedAt
         }
     }
 }

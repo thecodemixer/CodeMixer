@@ -250,7 +250,7 @@ extension EngineViewModel {
                 }
                 return
             }
-            var models = adapter.availableModels()
+            var models = await self.resolveModels(for: adapter)
             let agentModes = adapter.availableAgentModes()
             let resumable = adapter.capabilities.contains(.resumableSessions)
             let builtIn = adapter.slashCommandCatalog
@@ -263,7 +263,7 @@ extension EngineViewModel {
             // Cursor fills its model cache asynchronously from `cursor-agent
             // models`. One short retry picks that up without blocking start.
             // Use wall-clock sleep so FakeClock-driven unit tests don't hang.
-            if models.isEmpty {
+            if models.isEmpty, case .automatic = adapter.modelCatalogRefreshKind() {
                 try? await Task.sleep(for: .milliseconds(750))
                 models = adapter.availableModels()
             }
@@ -283,6 +283,115 @@ extension EngineViewModel {
                 self.slashCommands = builtIn + projectCommands
             }
         }
+    }
+
+    /// Manual adapters (Claude) use the workspace cache; automatic adapters
+    /// keep their own discovery. An empty Claude cache triggers a one-time
+    /// print-mode probe, then persists the result for later sessions.
+    func resolveModels(for adapter: any AgentAdapter) async -> [AgentModelOption] {
+        switch adapter.modelCatalogRefreshKind() {
+        case .automatic:
+            return adapter.availableModels()
+        case .manual:
+            guard let workspaceRoot, let store = workspaceProjects else {
+                return adapter.availableModels()
+            }
+            if let cached = await store.cachedModels(for: adapter.id, in: workspaceRoot),
+               !cached.models.isEmpty {
+                adapter.seedModelCatalog(cached.models)
+                return cached.models
+            }
+            do {
+                let models = try await adapter.refreshModelCatalog()
+                guard !models.isEmpty else { return models }
+                try await store.saveModels(
+                    models,
+                    for: adapter.id,
+                    refreshedAt: clock.now(),
+                    in: workspaceRoot
+                )
+                return models
+            } catch {
+                return adapter.availableModels()
+            }
+        }
+    }
+
+    /// User-triggered model refresh from Workspace settings.
+    public func refreshAdapterModels(for agentID: AgentID) async {
+        guard let workspaceRoot, let store = workspaceProjects else {
+            diagnostics.append(diagnostic(
+                level: .error,
+                message: "Open a workspace before refreshing models."
+            ))
+            return
+        }
+        guard let adapter = await AdapterRegistry.shared.adapter(for: agentID) else {
+            diagnostics.append(diagnostic(
+                level: .error,
+                message: "Adapter unavailable for model refresh."
+            ))
+            return
+        }
+        switch adapter.modelCatalogRefreshKind() {
+        case .automatic:
+            diagnostics.append(diagnostic(
+                level: .info,
+                message: "\(adapter.displayName) refreshes models automatically."
+            ))
+            return
+        case .manual:
+            break
+        }
+        modelCatalogRefreshInFlight = agentID
+        defer { modelCatalogRefreshInFlight = nil }
+        do {
+            let models = try await adapter.refreshModelCatalog()
+            try await store.saveModels(
+                models,
+                for: agentID,
+                refreshedAt: clock.now(),
+                in: workspaceRoot
+            )
+            await reloadWorkspaceModelCatalogStatus()
+            if let activePath = workspace?.path,
+               let activeType = projects.first(where: { $0.path == activePath })?.projectType,
+               activeType.primaryAgentID == agentID {
+                availableModels = models
+            }
+        } catch {
+            diagnostics.append(diagnostic(
+                level: .error,
+                message: "Model refresh failed: \(error.localizedDescription)"
+            ))
+        }
+    }
+
+    public func reloadWorkspaceModelCatalogStatus() async {
+        guard let workspaceRoot, let store = workspaceProjects else {
+            workspaceModelCatalogRows = []
+            return
+        }
+        var rows: [WorkspaceModelCatalogRow] = []
+        for entry in SupportedBuiltInAgent.shipping {
+            let adapter = await AdapterRegistry.shared.adapter(for: entry.id)
+            let kind = adapter?.modelCatalogRefreshKind() ?? .automatic
+            let cached = await store.cachedModels(for: entry.id, in: workspaceRoot)
+            let automaticCount: Int
+            if case .automatic = kind {
+                automaticCount = adapter?.availableModels().count ?? 0
+            } else {
+                automaticCount = 0
+            }
+            rows.append(WorkspaceModelCatalogRow(
+                agentID: entry.id,
+                displayName: entry.displayLabel,
+                refreshKind: kind,
+                modelCount: cached?.models.count ?? automaticCount,
+                refreshedAt: cached?.refreshedAt
+            ))
+        }
+        workspaceModelCatalogRows = rows
     }
 
     func applyAdapterCapabilities(forProjectPath path: String) {

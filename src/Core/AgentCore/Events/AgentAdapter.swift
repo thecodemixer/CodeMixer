@@ -152,6 +152,16 @@ public protocol AgentAdapter: Sendable {
     /// empty — adapters with a `/model` command override.
     func availableModels() -> [AgentModelOption]
 
+    /// Whether model discovery is automatic or requires an explicit refresh.
+    func modelCatalogRefreshKind() -> ModelCatalogRefreshKind
+
+    /// Re-query the agent for models. Default returns `availableModels()`.
+    /// Manual adapters (Claude Code) override with a live discovery probe.
+    func refreshModelCatalog() async throws -> [AgentModelOption]
+
+    /// Replace the in-memory catalog without probing (workspace cache hydrate).
+    func seedModelCatalog(_ models: [AgentModelOption])
+
     // MARK: Agent modes
 
     /// Agent modes for the composer bottom-bar dropdown (Cursor agent/plan/ask,
@@ -194,6 +204,14 @@ public extension AgentAdapter {
                             workspace: URL) async -> Bool { false }
 
     func availableModels() -> [AgentModelOption] { [] }
+
+    func modelCatalogRefreshKind() -> ModelCatalogRefreshKind { .automatic }
+
+    func refreshModelCatalog() async throws -> [AgentModelOption] {
+        availableModels()
+    }
+
+    func seedModelCatalog(_ models: [AgentModelOption]) {}
 
     func availableAgentModes() -> [AgentModeOption] { [] }
 

@@ -5,6 +5,17 @@ Canonical specification: [`CONTRACT.md`](CONTRACT.md) (matrices, gap ledger, ver
 This module implements the Claude Code adapter (`Adapter/`), shared contract logic
 (`Common/`), and the digital twin (`digital-twin/`).
 
+## Model catalog
+
+Composer models come from `claude -p '/model'` (plus `/effort` for thinking
+levels). Print mode can consume agent credits, so Codemixer:
+
+1. Stores the catalog in `<workspace>/.codemixer/workspace.json` (`adapterModelCaches`)
+2. Runs the probe once when that cache is empty
+3. Re-runs only when the user clicks **Refresh models** under Settings → Workspace
+
+Codex and Cursor keep automatic discovery; their Workspace refresh controls stay disabled.
+
 ## Process model
 
 Codemixer spawns `claude` under a hidden PTY. Semantics flow through:

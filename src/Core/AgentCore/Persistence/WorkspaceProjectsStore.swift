@@ -1,6 +1,8 @@
 import Foundation
 import OSLog
 
+import AgentProtocol
+
 /// Agent-agnostic Workspace → Projects model and its persistence.
 ///
 /// A *workspace* is the loaded folder (one per window). Each workspace owns an
@@ -473,6 +475,28 @@ public actor WorkspaceProjectsStore {
         try WorkspaceLocalStateStore.save(projects: projects,
                                           to: workspace,
                                           fileSystem: fileSystem)
+    }
+
+    public func cachedModels(for agentID: AgentID,
+                             in workspace: URL) -> WorkspaceLocalState.CachedAdapterModels? {
+        WorkspaceLocalStateStore.cachedModels(
+            for: agentID,
+            in: workspace,
+            fileSystem: fileSystem
+        )
+    }
+
+    public func saveModels(_ models: [AgentModelOption],
+                           for agentID: AgentID,
+                           refreshedAt: Date,
+                           in workspace: URL) throws {
+        try WorkspaceLocalStateStore.saveModels(
+            models,
+            for: agentID,
+            refreshedAt: refreshedAt,
+            in: workspace,
+            fileSystem: fileSystem
+        )
     }
 
     /// Attempt a strict v2 decode of each project object. Legacy v1 entries

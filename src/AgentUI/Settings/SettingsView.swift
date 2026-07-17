@@ -3,8 +3,8 @@ import AppKit
 import AgentCore
 import AgentProtocol
 
-/// Top-level Settings sheet — four tabs: Appearance, Permissions, Remote,
-/// Claude (read-only).  Each tab is self-contained so future adapters can
+/// Top-level Settings sheet — Appearance, Permissions, Remote, Workspace,
+/// Claude (read-only). Each tab is self-contained so future adapters can
 /// inject their own tab without rebuilding the shell.
 public struct SettingsView: View {
     @Bindable public var model: EngineViewModel
@@ -24,6 +24,8 @@ public struct SettingsView: View {
                 .tabItem { Label("Permissions", systemImage: "lock.shield") }
             RemoteSettingsTab(model: model, actions: remoteActions)
                 .tabItem { Label("Remote", systemImage: "antenna.radiowaves.left.and.right") }
+            WorkspaceSettingsTab(model: model)
+                .tabItem { Label("Workspace", systemImage: "folder") }
             ClaudeSettingsTab()
                 .tabItem { Label("Claude", systemImage: "sparkles") }
         }
@@ -411,6 +413,85 @@ private struct RemoteSettingsTab: View {
             state = await actions.refresh()
             remoteEnabled = state.remoteEnabled
             lanEnabled = state.lanEnabled
+        }
+    }
+}
+
+// MARK: - Workspace
+
+private struct WorkspaceSettingsTab: View {
+    @Bindable var model: EngineViewModel
+
+    var body: some View {
+        Form {
+            Section("Models") {
+                if model.workspaceRoot == nil {
+                    Text("Open a workspace to manage cached model catalogs.")
+                        .font(Theme.typography.caption)
+                        .foregroundStyle(Theme.text.secondary)
+                } else {
+                    ForEach(model.workspaceModelCatalogRows) { row in
+                        modelRow(row)
+                    }
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .task {
+            await model.reloadWorkspaceModelCatalogStatus()
+        }
+        .onChange(of: model.workspaceRoot?.path) { _, _ in
+            Task { await model.reloadWorkspaceModelCatalogStatus() }
+        }
+    }
+
+    @ViewBuilder
+    private func modelRow(_ row: EngineViewModel.WorkspaceModelCatalogRow) -> some View {
+        VStack(alignment: .leading, spacing: Theme.spacing.s8) {
+            HStack {
+                Text(row.displayName)
+                    .font(Theme.typography.label)
+                Spacer()
+                Text(modelCountLabel(row))
+                    .font(Theme.typography.caption)
+                    .foregroundStyle(Theme.text.tertiary)
+            }
+            switch row.refreshKind {
+            case .automatic:
+                Text("Refreshes automatically")
+                    .font(Theme.typography.caption)
+                    .foregroundStyle(Theme.text.secondary)
+                Button("Refresh") {}
+                    .disabled(true)
+                    .accessibilityLabel("\(row.displayName) model refresh is automatic")
+            case .manual(let detail):
+                Text(detail)
+                    .font(Theme.typography.caption)
+                    .foregroundStyle(Theme.text.secondary)
+                if let refreshedAt = row.refreshedAt {
+                    Text("Last refreshed \(refreshedAt.formatted(date: .abbreviated, time: .shortened))")
+                        .font(Theme.typography.caption)
+                        .foregroundStyle(Theme.text.tertiary)
+                } else {
+                    Text("Not refreshed yet for this workspace")
+                        .font(Theme.typography.caption)
+                        .foregroundStyle(Theme.text.tertiary)
+                }
+                Button(model.modelCatalogRefreshInFlight == row.agentID ? "Refreshing…" : "Refresh models") {
+                    Task { await model.refreshAdapterModels(for: row.agentID) }
+                }
+                .disabled(model.modelCatalogRefreshInFlight != nil)
+                .accessibilityLabel("Refresh \(row.displayName) models")
+            }
+        }
+        .padding(.vertical, Theme.spacing.s4)
+    }
+
+    private func modelCountLabel(_ row: EngineViewModel.WorkspaceModelCatalogRow) -> String {
+        switch row.modelCount {
+        case 0: return "No models cached"
+        case 1: return "1 model"
+        default: return "\(row.modelCount) models"
         }
     }
 }

@@ -32,12 +32,14 @@ public final class ClaudeAdapter: AgentAdapter, @unchecked Sendable {
     private let clock: any AgentClock
     private let random: any RandomSource
     private let processRunner: ProcessRunner
+    private let modelCache: ClaudeModelCache
 
     public init(environment: any AgentEnvironment = SystemEnvironment(),
                 fileSystem: any FileSystem = SystemFileSystem(),
                 clock: any AgentClock = SystemClock(),
                 random: any RandomSource = SystemRandomSource(),
-                processRunner: ProcessRunner = ProcessRunner()) {
+                processRunner: ProcessRunner = ProcessRunner(),
+                initialModels: [AgentModelOption] = []) {
         self.environment = environment
         self.fileSystem = fileSystem
         self.clock = clock
@@ -45,6 +47,7 @@ public final class ClaudeAdapter: AgentAdapter, @unchecked Sendable {
         self.processRunner = processRunner
         self.binaryLocator = ClaudeBinaryLocator(fileSystem: fileSystem)
         self.hookDecoder = ClaudeHookDecoder(clock: clock, random: random)
+        self.modelCache = ClaudeModelCache(models: initialModels)
     }
 
     // MARK: - Discovery & launch
@@ -271,11 +274,35 @@ public final class ClaudeAdapter: AgentAdapter, @unchecked Sendable {
     public var slashCommandCatalog: [SlashCommand] { ClaudeSlashCommands.builtIn }
 
     public func availableModels() -> [AgentModelOption] {
-        [
-            AgentModelOption(id: "sonnet", label: "Sonnet"),
-            AgentModelOption(id: "opus", label: "Opus"),
-            AgentModelOption(id: "haiku", label: "Haiku"),
-        ]
+        modelCache.snapshot()
+    }
+
+    public func modelCatalogRefreshKind() -> ModelCatalogRefreshKind {
+        .manual(detail: ClaudeModelCatalog.manualRefreshDetail)
+    }
+
+    public func refreshModelCatalog() async throws -> [AgentModelOption] {
+        let env = await ShellEnvironmentResolver(
+            environment: environment,
+            processRunner: processRunner
+        ).resolve()
+        let binary = try await locateBinary(env: env)
+        let discoveryEnv = ResolvedEnvironment(
+            variables: env.withOverrides(defaultEnvOverrides()),
+            shell: env.shell
+        )
+        let models = try await ClaudeModelCatalog.discover(
+            executable: binary,
+            env: discoveryEnv,
+            processRunner: processRunner
+        )
+        modelCache.replace(with: models)
+        return models
+    }
+
+    /// Seeds the in-memory catalog from workspace cache without a live probe.
+    public func seedModelCatalog(_ models: [AgentModelOption]) {
+        modelCache.replace(with: models)
     }
 
     public func availableAgentModes() -> [AgentModeOption] {
@@ -336,4 +363,26 @@ public final class ClaudeAdapter: AgentAdapter, @unchecked Sendable {
 
 func shouldScrapeTUI(hooksActive: Bool) -> Bool {
     !hooksActive
+}
+
+/// Thread-safe snapshot of Claude models loaded from workspace cache or `-p`.
+private final class ClaudeModelCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private var models: [AgentModelOption]
+
+    init(models: [AgentModelOption]) {
+        self.models = models
+    }
+
+    func snapshot() -> [AgentModelOption] {
+        lock.lock()
+        defer { lock.unlock() }
+        return models
+    }
+
+    func replace(with models: [AgentModelOption]) {
+        lock.lock()
+        defer { lock.unlock() }
+        self.models = models
+    }
 }
