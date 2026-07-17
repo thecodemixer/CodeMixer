@@ -17,6 +17,7 @@ let package = Package(
         .library(name: "ClaudeCode", targets: ["ClaudeCode"]),
         .library(name: "Codex", targets: ["Codex"]),
         .library(name: "AgentClientProtocol", targets: ["AgentClientProtocol"]),
+        .library(name: "ACPCLIs", targets: ["ACPCLIs"]),
         .library(name: "AgentRemoteControl", targets: ["AgentRemoteControl"]),
         .library(name: "AgentUI", targets: ["AgentUI"]),
         .library(name: "AgentTestSupport", targets: ["AgentTestSupport"]),
@@ -79,6 +80,13 @@ let package = Package(
             swiftSettings: swiftSettings
         ),
         .target(
+            name: "ACPCLIs",
+            dependencies: ["AgentCore", "AgentProtocol", "AgentClientProtocol"],
+            path: "src/AgenticCLIs/ACPCLIs",
+            exclude: ["README.md"],
+            swiftSettings: swiftSettings
+        ),
+        .target(
             name: "AgentRemoteControl",
             dependencies: ["AgentCore", "AgentProtocol"],
             path: "src/Remote/AgentRemoteControl",
@@ -111,13 +119,13 @@ let package = Package(
         ),
         .executableTarget(
             name: "CodemixerDaemon",
-            dependencies: ["AgentCore", "ClaudeCode", "Codex", "AgentClientProtocol", "AgentRemoteControl"],
+            dependencies: ["AgentCore", "ClaudeCode", "Codex", "AgentClientProtocol", "ACPCLIs", "AgentRemoteControl"],
             path: "src/Remote/CodemixerDaemon",
             swiftSettings: swiftSettings
         ),
         .executableTarget(
             name: "CodemixerApp",
-            dependencies: ["AgentCore", "AgentUI", "ClaudeCode", "Codex", "AgentClientProtocol", "AgentRemoteControl"],
+            dependencies: ["AgentCore", "AgentUI", "ClaudeCode", "Codex", "AgentClientProtocol", "ACPCLIs", "AgentRemoteControl"],
             path: "src/CodemixerApp",
             exclude: [
                 "Info.plist",
@@ -160,6 +168,12 @@ let package = Package(
             name: "ACPAdapterTests",
             dependencies: ["AgentClientProtocol", "AgentCore", "AgentTestSupport"],
             path: "tests/AgenticCLIs/AgentClientProtocol/ACPAdapterTests",
+            swiftSettings: swiftSettings
+        ),
+        .testTarget(
+            name: "CursorACPCLITests",
+            dependencies: ["ACPCLIs", "AgentClientProtocol", "AgentCore", "AgentTestSupport"],
+            path: "tests/AgenticCLIs/ACPCLIs/CursorACPCLITests",
             swiftSettings: swiftSettings
         ),
         .testTarget(

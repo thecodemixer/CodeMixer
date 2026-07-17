@@ -78,7 +78,7 @@ Codemixer/
 | Status phrase priority | `Core/AgentCore/Status/StatusPhraseResolver.swift` |
 | Activity heartbeat | `Core/AgentCore/Activity/HeartbeatActivityMonitor.swift` |
 | Prefs / sessions / appearance persistence | `Core/AgentCore/Persistence/{PrefsStore,SessionStore,AppearancePrefs}.swift` |
-| Agent-agnostic Workspace→Projects model + persistence | `Core/AgentCore/Persistence/{WorkspaceProjectsStore,ProjectAgentMode,ProjectAgentRouter,ProjectLocalState,WorkspaceLocalState}.swift` |
+| Agent-agnostic Workspace→Projects model + persistence | `Core/AgentCore/Persistence/{WorkspaceProjectsStore,ProjectType,ProjectAgentRouter,ProjectLocalState,WorkspaceLocalState}.swift` |
 | Core framework wrappers (Process, Keychain, FSEvents) | `Core/AgentCore/External/{ProcessRunner,KeychainStore,FSEventsStream}.swift` |
 | Product constants (ports, identity, timing, buffers, paths) | `Core/AgentCore/{RemoteDefaults,RemoteAuthTiming,DaemonDefaults,AppIdentity,ActivityTiming,StreamBufferDefaults}.swift`, `Core/AgentCore/Paths/{AppSupportPaths,SystemPaths,ProjectPaths}.swift` |
 | DI seams | `Core/AgentCore/Seams/{Clock,RandomSource,Environment,FileSystem,Seams}.swift` |
@@ -102,8 +102,10 @@ Codemixer/
 | ACP framing / codec / session index / reverse FS+terminal | `AgenticCLIs/AgentClientProtocol/Common/*.swift` |
 | ACP reverse-terminal process wrapper | `AgenticCLIs/AgentClientProtocol/External/ACPTerminalProcess.swift` |
 | ACP digital twin | `AgenticCLIs/AgentClientProtocol/digital-twin/Twin/ACPTwin.swift` |
+| Shipping ACP CLIs (Cursor) | `AgenticCLIs/ACPCLIs/Cursor/` — `CursorACPAdapter`, binary locator, mode commands |
 | Custom ACP factory registration | `CustomAgentAdapterFactory` + `ACPCustomAgentAdapterFactory` (Bootstrap/daemon) |
 | Live ACP harness (opt-in tests) | `tests/AgenticCLIs/AgentClientProtocol/ACPAdapterTests/LiveACPHarness.swift` — docs in `tests/AgenticCLIs/README.md` |
+| Live Cursor ACP harness (opt-in) | `tests/AgenticCLIs/ACPCLIs/CursorACPCLITests/LiveCursorACPHarness.swift` |
 | Agentic CLI layout convention | `AgenticCLIs/README.md` |
 | The wire DTOs (Foundation-only) | `Core/AgentProtocol/{AgentCommand,AgentEventWire,WireFrames,Decisions,Prefs,AttachmentRef,WireVersion}.swift` |
 | WebSocket server | `Remote/AgentRemoteControl/RemoteControlServer.swift`, `ClientConnection.swift` |
@@ -229,6 +231,7 @@ tests/
 | ACP adapter + factory + framing | `AgenticCLIs/AgentClientProtocol/ACPAdapterTests/ACPAdapterTests.swift` |
 | Live ACP harness (opt-in) | `AgenticCLIs/AgentClientProtocol/ACPAdapterTests/{LiveACPHarness,LiveACPIntegrationTests}.swift` — see [`tests/AgenticCLIs/README.md`](tests/AgenticCLIs/README.md) |
 | ACP digital twin | `AgenticCLIs/AgentClientProtocol/ACPTwinTests/ACPTwinTests.swift` |
+| Cursor ACP adapter + fake/live harness | `AgenticCLIs/ACPCLIs/CursorACPCLITests/` — see [`tests/AgenticCLIs/README.md`](tests/AgenticCLIs/README.md) |
 | FakeClock virtual sleep | `TestSupport/AgentTestSupportTests/FakeClockTests.swift` |
 | Pairing PIN + lockout | `Remote/AgentRemoteControlTests/PairingServiceTests.swift` |
 | Paired-device store | `Remote/AgentRemoteControlTests/PairedDeviceStoreTests.swift` |

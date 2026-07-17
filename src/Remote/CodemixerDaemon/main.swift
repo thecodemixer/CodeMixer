@@ -5,6 +5,7 @@ import AgentRemoteControl
 import ClaudeCode
 import Codex
 import AgentClientProtocol
+import ACPCLIs
 
 /// `codemixerd` — the headless daemon.
 ///
@@ -26,6 +27,7 @@ struct CodemixerDaemon {
         let adapter = ClaudeAdapter()
         await AdapterRegistry.shared.register(adapter)
         await AdapterRegistry.shared.register(CodexAdapter())
+        await AdapterRegistry.shared.register(CursorACPAdapter())
         await CustomAgentAdapterFactories.shared.register(ACPCustomAgentAdapterFactory())
 
         let pairing = await RemoteRuntimeCoordinator.makePairing(seams: seams)

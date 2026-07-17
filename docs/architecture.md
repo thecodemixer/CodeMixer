@@ -1148,19 +1148,19 @@ Persists `AppearancePrefs` and auto-approval rules. Appearance includes theme (`
 
 ### `WorkspaceProjectsStore`
 
-The agent-agnostic model behind the GUI session navigator. A *workspace* is the loaded folder (one window); each workspace owns an ordered list of `ProjectRef`s (path, display name, required `ProjectAgentMode`). The workspace root is seeded as the default project; further projects are created as subfolders or added from anywhere on disk.
+The agent-agnostic model behind the GUI session navigator. A *workspace* is the loaded folder (one window); each workspace owns an ordered list of `ProjectRef`s (path, display name, required `ProjectType`). The workspace root is seeded as the default project; further projects are created as subfolders or added from anywhere on disk.
 
 Agent mode is dual-persisted: app-support `workspaces.json` *and* `<project>/.codemixer/project.json` (`ProjectPaths` / `ProjectLocalState`). Each workspace also writes its project catalog to `<workspace>/.codemixer/workspace.json` (`WorkspaceLocalState`). `workspaces.json` schema v3 tracks `activeWorkspacePath` so launch restores the last open workspace unless the user chose **Close Workspace**.
 
 ```swift
 public actor WorkspaceProjectsStore {
-    public func projects(for:rootMode:) async -> [ProjectRef]          // seeds root
-    public func resolveAgentMode(for:) async -> ProjectAgentMode?      // local file, then index
+    public func projects(for:rootProjectType:) async -> [ProjectRef]          // seeds root
+    public func resolveProjectType(for:) async -> ProjectType?      // local file, then index
     public func activeWorkspaceURL() -> URL?                           // launch restore
     public func markActiveWorkspace(_:) async throws
     public func clearActiveWorkspace() async throws                    // Close Workspace
-    public func createProject(name:agentMode:in:) async throws -> ProjectRef
-    public func addExistingProject(url:agentMode:in:) async throws -> ProjectRef
+    public func createProject(name:projectType:in:) async throws -> ProjectRef
+    public func addExistingProject(url:projectType:in:) async throws -> ProjectRef
     public func renameProject(path:to:in:) async throws -> ProjectRef  // label only
     public func removeProject(path:in:) async throws -> RemovedProject? // never the root
     public func restoreProject(_:in:) async throws                     // undo

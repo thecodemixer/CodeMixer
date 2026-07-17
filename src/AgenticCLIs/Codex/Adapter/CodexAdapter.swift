@@ -243,6 +243,21 @@ public final class CodexAdapter: AgentAdapter {
         CodexModelCatalog.builtIn
     }
 
+    public func availableAgentModes() -> [AgentModeOption] {
+        [
+            AgentModeOption(
+                id: "agent",
+                label: "Agent",
+                selectCommands: []
+            ),
+            AgentModeOption(
+                id: "review",
+                label: "Review",
+                selectCommands: [.toggleReviewMode(enabled: true)]
+            ),
+        ]
+    }
+
     public func truncateTranscript(afterUserTurnID turnID: String,
                                    sessionID: String,
                                    workspace: URL) async -> Bool {

@@ -16,9 +16,9 @@ struct AgentIDTests {
         }
     }
 
-    @Test("Claude Code and Codex are marked shipping")
+    @Test("Claude Code, Codex, and Cursor are marked shipping")
     func shippingSet() {
-        #expect(AgentID.shipping == [.claudeCode, .codex])
+        #expect(AgentID.shipping == [.claudeCode, .codex, .cursorCLI])
     }
 
     @Test("AgentID round-trips through Codable")
@@ -184,8 +184,11 @@ struct ProjectAgentModeTests {
     func pinnedModes() {
         #expect(ProjectAgentMode.claudeCode.primaryAgentID == .claudeCode)
         #expect(ProjectAgentMode.codex.primaryAgentID == .codex)
+        #expect(ProjectAgentMode.cursorCLI.primaryAgentID == .cursorCLI)
         #expect(ProjectAgentMode.claudeCode.shortLabel == "Claude")
         #expect(ProjectAgentMode.codex.shortLabel == "Codex")
+        #expect(ProjectAgentMode.cursorCLI.shortLabel == "Cursor")
+        #expect(SupportedBuiltInAgent.shipping.map(\.id) == [.claudeCode, .codex, .cursorCLI])
     }
 
     @Test("Mixed mode carries optional default agent")
@@ -215,6 +218,7 @@ struct ProjectAgentRouterTests {
     func pinnedModes() {
         #expect(ProjectAgentRouter.resolveAdapterID(mode: .claudeCode) == .claudeCode)
         #expect(ProjectAgentRouter.resolveAdapterID(mode: .codex) == .codex)
+        #expect(ProjectAgentRouter.resolveAdapterID(mode: .cursorCLI) == .cursorCLI)
     }
 
     @Test("Mixed mode prefers session then explicit preference then default")

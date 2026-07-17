@@ -108,7 +108,12 @@ Adding `src/AgenticCLIs/CursorCLI/` (example):
 | --- | --- | --- | --- |
 | [`ClaudeCode/`](ClaudeCode/README.md) | `ClaudeCode` | `claude` | `fake-claude` |
 | [`Codex/`](Codex/README.md) | `Codex` | `codex` | none |
-| [`AgentClientProtocol/`](AgentClientProtocol/README.md) | `AgentClientProtocol` | user-configured ACP binary | none (digital twin) |
+| [`AgentClientProtocol/`](AgentClientProtocol/README.md) | `AgentClientProtocol` | user-configured ACP binary | `fake-acp` |
+| [`ACPCLIs/`](ACPCLIs/README.md) | `ACPCLIs` | shipping ACP CLIs (Cursor first) | reuses `fake-acp` |
+
+> **Grouped ACP CLIs:** `ACPCLIs` is the intentional exception to one-target-per-agent.
+> Generic ACP protocol primitives stay in `AgentClientProtocol`; named shipping
+> ACP-backed vendors live under `ACPCLIs/<Vendor>/`.
 
 ---
 
@@ -117,4 +122,5 @@ Adding `src/AgenticCLIs/CursorCLI/` (example):
 - Claude Code contract (v1 reference): [`ClaudeCode/README.md`](ClaudeCode/README.md)
 - Claude Code executable spec: [`ClaudeCode/CONTRACT.md`](ClaudeCode/CONTRACT.md)
 - Adapter / twin / live test catalog: [`tests/AgenticCLIs/README.md`](../../tests/AgenticCLIs/README.md)
-  (includes opt-in `CODEMIXER_LIVE_CLAUDE=1`, `CODEMIXER_LIVE_CODEX=1`, and `CODEMIXER_LIVE_ACP=1` harnesses)
+  (includes opt-in `CODEMIXER_LIVE_CLAUDE=1`, `CODEMIXER_LIVE_CODEX=1`,
+  `CODEMIXER_LIVE_ACP=1`, and `CODEMIXER_LIVE_CURSOR_ACP=1` harnesses)

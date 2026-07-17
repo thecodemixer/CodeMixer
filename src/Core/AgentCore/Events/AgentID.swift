@@ -22,7 +22,7 @@ public enum AgentID: String, Sendable, Hashable, Codable {
     case other
 
     /// Adapters with a registered implementation in this build.
-    public static let shipping: Set<AgentID> = [.claudeCode, .codex]
+    public static let shipping: Set<AgentID> = [.claudeCode, .codex, .cursorCLI]
 }
 
 /// Capabilities an adapter declares. The engine wires up only the matching

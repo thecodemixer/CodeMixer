@@ -52,6 +52,7 @@ let requiredPaths = [
     "src/AgenticCLIs/ClaudeCode/README.md",
     "src/AgenticCLIs/Codex/README.md",
     "src/AgenticCLIs/AgentClientProtocol/README.md",
+    "src/AgenticCLIs/ACPCLIs/README.md",
     "tests/AgenticCLIs/README.md",
 ]
 
@@ -69,9 +70,12 @@ let requiredDirectories = [
     "src/AgenticCLIs/AgentClientProtocol/Common",
     "src/AgenticCLIs/AgentClientProtocol/External",
     "src/AgenticCLIs/AgentClientProtocol/digital-twin/Twin",
+    "src/AgenticCLIs/ACPCLIs/Cursor/Adapter",
+    "src/AgenticCLIs/ACPCLIs/Cursor/Common",
     "tests/AgenticCLIs/ClaudeCode",
     "tests/AgenticCLIs/Codex",
     "tests/AgenticCLIs/AgentClientProtocol",
+    "tests/AgenticCLIs/ACPCLIs",
 ]
 
 let requiredTestSuites = [
@@ -81,6 +85,7 @@ let requiredTestSuites = [
     "tests/AgenticCLIs/ClaudeCode/ClaudeAdapterTests",
     "tests/AgenticCLIs/Codex/CodexAdapterTests",
     "tests/AgenticCLIs/AgentClientProtocol/ACPAdapterTests",
+    "tests/AgenticCLIs/ACPCLIs/CursorACPCLITests",
     "tests/Remote/AgentRemoteControlTests",
     "tests/AgentUITests",
     "tests/Remote/RemoteParityTests",

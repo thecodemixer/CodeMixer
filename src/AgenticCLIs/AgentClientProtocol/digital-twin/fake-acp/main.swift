@@ -44,6 +44,7 @@ private struct FakeACPServer {
     var workspacePath: String?
     var pendingPromptID: JSONValue?
     var pendingReplyPrefix = ""
+    var currentModeID = "agent"
 
     init(scenario: ACPTwinScenario) {
         self.scenario = scenario
@@ -88,16 +89,39 @@ private struct FakeACPServer {
         case "session/new":
             workspacePath = params["cwd"]?.stringValue
             sessionID = UUID().uuidString
+            currentModeID = "agent"
             return [ACPRPCCodec.response(
                 id: id,
-                result: .object(["sessionId": .string(sessionID)])
+                result: .object([
+                    "sessionId": .string(sessionID),
+                    "modes": modesPayload(),
+                ])
             )]
         case "session/load", "session/resume":
             workspacePath = params["cwd"]?.stringValue
             if let resume = params["sessionId"]?.stringValue {
                 sessionID = resume
             }
-            return [ACPRPCCodec.response(id: id, result: .object([:]))]
+            return [ACPRPCCodec.response(id: id, result: .object([
+                "modes": modesPayload(),
+            ]))]
+        case "session/set_mode":
+            if let mode = params["modeId"]?.stringValue {
+                currentModeID = mode
+            }
+            return [
+                ACPRPCCodec.notification(
+                    method: "session/update",
+                    params: .object([
+                        "sessionId": .string(sessionID),
+                        "update": .object([
+                            "sessionUpdate": .string("current_mode_update"),
+                            "currentModeId": .string(currentModeID),
+                        ]),
+                    ])
+                ),
+                ACPRPCCodec.response(id: id, result: .object([:])),
+            ]
         case "session/list":
             return [ACPRPCCodec.response(
                 id: id,

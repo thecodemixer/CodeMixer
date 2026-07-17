@@ -23,6 +23,7 @@ public final class ACPClientState: @unchecked Sendable {
         case sessionResume
         case sessionPrompt
         case sessionList
+        case sessionSetMode
         case other(String)
     }
 
@@ -55,6 +56,8 @@ public final class ACPClientState: @unchecked Sendable {
     private var assistantTextByItemID: [String: String] = [:]
     private var thinkingBlockIDs: [String: UUID] = [:]
     private var agentCapabilities: JSONValue?
+    private var availableModeIDs: [String] = []
+    private var currentModeIDStorage: String?
 
     public init() {}
 
@@ -83,6 +86,8 @@ public final class ACPClientState: @unchecked Sendable {
             assistantTextByItemID.removeAll()
             thinkingBlockIDs.removeAll()
             agentCapabilities = nil
+            availableModeIDs = []
+            currentModeIDStorage = nil
         }
     }
 
@@ -132,6 +137,8 @@ public final class ACPClientState: @unchecked Sendable {
             assistantTextByItemID.removeAll()
             thinkingBlockIDs.removeAll()
             phaseStorage = .awaitingSession
+            availableModeIDs = []
+            currentModeIDStorage = nil
         }
     }
 
@@ -155,6 +162,29 @@ public final class ACPClientState: @unchecked Sendable {
 
     func supportsListSessions() -> Bool {
         withLock { listSessionsSupported }
+    }
+
+    func setSessionModes(currentModeID: String?, availableModeIDs: [String]) {
+        withLock {
+            self.currentModeIDStorage = currentModeID
+            self.availableModeIDs = availableModeIDs
+        }
+    }
+
+    func setCurrentModeID(_ modeID: String) {
+        withLock { currentModeIDStorage = modeID }
+    }
+
+    func currentModeID() -> String? {
+        withLock { currentModeIDStorage }
+    }
+
+    func availableModes() -> [String] {
+        withLock { availableModeIDs }
+    }
+
+    func supportsMode(_ modeID: String) -> Bool {
+        withLock { availableModeIDs.contains(modeID) }
     }
 
     func enqueuePrompt(_ text: String) {

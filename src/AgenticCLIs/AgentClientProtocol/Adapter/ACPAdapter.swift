@@ -162,6 +162,11 @@ public final class ACPAdapter: AgentAdapter {
         }
     }
 
+    /// Encodes ACP `session/set_mode` for agents that advertise `availableModes`.
+    public func encodeSessionMode(_ modeID: String) -> Data {
+        ACPInputEncoding.setMode(modeID: modeID, state: state)
+    }
+
     public func encodePermissionResponse(_ decision: PermissionDecision,
                                          for prompt: PermissionPrompt) -> PermissionResponseDelivery {
         guard let approval = state.takeApproval(id: prompt.id) else {

@@ -278,6 +278,36 @@ public final class ClaudeAdapter: AgentAdapter, @unchecked Sendable {
         ]
     }
 
+    public func availableAgentModes() -> [AgentModeOption] {
+        [
+            AgentModeOption(
+                id: "agent",
+                label: "Agent",
+                selectCommands: [
+                    .setPermissionMode(.default),
+                    .toggleThinkMode(enabled: false),
+                    .toggleReviewMode(enabled: false),
+                ]
+            ),
+            AgentModeOption(
+                id: "think",
+                label: "Think",
+                selectCommands: [
+                    .toggleThinkMode(enabled: true),
+                    .toggleReviewMode(enabled: false),
+                ]
+            ),
+            AgentModeOption(
+                id: "review",
+                label: "Review",
+                selectCommands: [
+                    .toggleThinkMode(enabled: false),
+                    .toggleReviewMode(enabled: true),
+                ]
+            ),
+        ]
+    }
+
     public func enumerateProjectCommands(workspace: URL) async -> [SlashCommand] {
         ClaudeSlashCommands.enumerateProjectCommands(workspace: workspace,
                                                      claudeDirectory: environment.claudeDirectory,

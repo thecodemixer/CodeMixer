@@ -126,6 +126,21 @@ public enum ACPInputEncoding {
         )
     }
 
+    /// ACP `session/set_mode` — switches the agent operating mode advertised
+    /// on `session/new` / `session/load` (`availableModes`).
+    public static func setMode(modeID: String, state: ACPClientState) -> Data {
+        guard let sessionID = state.sessionID() else { return Data() }
+        let id = state.nextRequestID(for: .sessionSetMode)
+        return ACPRPCCodec.request(
+            id: id,
+            method: "session/set_mode",
+            params: .object([
+                "sessionId": .string(sessionID),
+                "modeId": .string(modeID),
+            ])
+        )
+    }
+
     public static func listSessions(state: ACPClientState) -> Data? {
         guard state.supportsListSessions(),
               let context = state.currentContext() else { return nil }

@@ -6,6 +6,7 @@ import AgentProtocol
 import ClaudeCode
 import Codex
 import AgentClientProtocol
+import ACPCLIs
 import AgentRemoteControl
 
 @MainActor
@@ -59,6 +60,7 @@ final class Bootstrap {
         let adapter = ClaudeAdapter()
         await AdapterRegistry.shared.register(adapter)
         await AdapterRegistry.shared.register(CodexAdapter())
+        await AdapterRegistry.shared.register(CursorACPAdapter())
         await CustomAgentAdapterFactories.shared.register(ACPCustomAgentAdapterFactory())
 
         let env = Seams.live.environment.processEnvironment()
@@ -83,6 +85,8 @@ final class Bootstrap {
         eventBus = engine.bus
         recents = await engine.sessions.recents()
         model.availableModels = []
+        model.availableAgentModes = []
+        model.selectedAgentModeID = ""
 
         // Session navigator wiring (agent-agnostic): the lister resolves the
         // adapter via the registry so AgentUI never imports a concrete adapter.
@@ -198,6 +202,8 @@ final class Bootstrap {
         eventBus = client.bus
         let model = EngineViewModel(engine: client, bus: client.bus)
         model.availableModels = adapter.availableModels()
+        model.availableAgentModes = adapter.availableAgentModes()
+        model.selectedAgentModeID = adapter.availableAgentModes().first?.id ?? ""
         viewModel = model
         startAppEventBridge(bus: client.bus)
         return true
@@ -242,14 +248,14 @@ final class Bootstrap {
     /// configure sheet instead of guessing.
     func openWorkspace(_ url: URL, resumeSessionID: String?) async {
         showProjectPicker = false
-        let resolved: ProjectAgentMode?
+        let resolved: ProjectType?
         if let store = viewModel?.workspaceProjects {
-            resolved = await store.resolveAgentMode(for: url)
+            resolved = await store.resolveProjectType(for: url)
         } else {
-            resolved = ProjectLocalStateStore.load(from: url, fileSystem: Seams.live.fileSystem)?.agentMode
+            resolved = ProjectLocalStateStore.load(from: url, fileSystem: Seams.live.fileSystem)?.projectType
         }
         if let mode = resolved {
-            await openWorkspace(url, resumeSessionID: resumeSessionID, agentMode: mode)
+            await openWorkspace(url, resumeSessionID: resumeSessionID, projectType: mode)
             return
         }
         // Empty workspace shell: adopted via New Workspace with no projects yet.
@@ -266,12 +272,12 @@ final class Bootstrap {
         pendingConfigureResumeSessionID = resumeSessionID
     }
 
-    func confirmPendingProjectConfiguration(mode: ProjectAgentMode) async {
+    func confirmPendingProjectConfiguration(mode: ProjectType) async {
         guard let url = pendingConfigureURL else { return }
         let resume = pendingConfigureResumeSessionID
         pendingConfigureURL = nil
         pendingConfigureResumeSessionID = nil
-        await openWorkspace(url, resumeSessionID: resume, agentMode: mode)
+        await openWorkspace(url, resumeSessionID: resume, projectType: mode)
     }
 
     func cancelPendingProjectConfiguration() {
@@ -279,7 +285,7 @@ final class Bootstrap {
         pendingConfigureResumeSessionID = nil
     }
 
-    func openWorkspace(_ url: URL, resumeSessionID: String?, agentMode: ProjectAgentMode) async {
+    func openWorkspace(_ url: URL, resumeSessionID: String?, projectType: ProjectType) async {
         showProjectPicker = false
         pendingConfigureURL = nil
         pendingConfigureResumeSessionID = nil
@@ -289,18 +295,18 @@ final class Bootstrap {
             viewModel?.workspaceRoot = url
             viewModel?.send(.openProject(path: url.path, resumeSessionID: resumeSessionID))
             try? await viewModel?.workspaceProjects?.markActiveWorkspace(url)
-            Task { await configureSlashCommands(for: url, mode: agentMode) }
+            Task { await configureSlashCommands(for: url, mode: projectType) }
             return
         }
         await engine.shutdown(reason: .userCancel)
         let projectsStore = viewModel?.workspaceProjects
         viewModel?.workspaceRoot = url
         if let store = projectsStore {
-            _ = await store.projects(for: url, rootMode: agentMode)
-            _ = try? await store.setAgentMode(path: url.path, mode: agentMode, in: url)
+            _ = await store.projects(for: url, rootProjectType: projectType)
+            _ = try? await store.setProjectType(path: url.path, mode: projectType, in: url)
         }
 
-        guard let adapter = await Self.adapter(for: agentMode) else {
+        guard let adapter = await Self.adapter(for: projectType) else {
             startupError = "Select a concrete agent for this mixed or custom project before starting a session."
             workspace = nil
             viewModel?.workspaceRoot = nil
@@ -314,8 +320,10 @@ final class Bootstrap {
             workspace = url
             viewModel?.workspaceRoot = url
             viewModel?.availableModels = adapter.availableModels()
+            viewModel?.availableAgentModes = adapter.availableAgentModes()
+            viewModel?.selectedAgentModeID = adapter.availableAgentModes().first?.id ?? ""
             viewModel?.supportsResumableSessions = adapter.capabilities.contains(.resumableSessions)
-            await viewModel?.reloadProjects(rootMode: agentMode)
+            await viewModel?.reloadProjects(rootProjectType: projectType)
             try? await projectsStore?.markActiveWorkspace(url)
         } catch let err as AgentError {
             startupError = err.userMessage
@@ -330,11 +338,11 @@ final class Bootstrap {
         }
         recents = await engine.sessions.recents()
         if workspace != nil {
-            await configureSlashCommands(for: url, mode: agentMode)
+            await configureSlashCommands(for: url, mode: projectType)
         }
     }
 
-    func configureSlashCommands(for url: URL, mode: ProjectAgentMode) async {
+    func configureSlashCommands(for url: URL, mode: ProjectType) async {
         guard let adapter = await Self.adapter(for: mode) else {
             viewModel?.slashCommands = []
             return
@@ -343,8 +351,8 @@ final class Bootstrap {
         viewModel?.slashCommands = adapter.slashCommandCatalog + projectCommands
     }
 
-    private static func adapter(for mode: ProjectAgentMode) async -> (any AgentAdapter)? {
-        await ProjectAgentRouter.resolveAdapter(mode: mode)
+    private static func adapter(for mode: ProjectType) async -> (any AgentAdapter)? {
+        await ProjectAgentRouter.resolveAdapter(projectType: mode)
     }
 
     private static func listSessions(for url: URL) async -> [SessionSummary] {

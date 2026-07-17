@@ -80,6 +80,7 @@ let project = Project(
                 .package(product: "ClaudeCode"),
                 .package(product: "Codex"),
                 .package(product: "AgentClientProtocol"),
+                .package(product: "ACPCLIs"),
                 .package(product: "AgentRemoteControl"),
             ],
             settings: .settings(base: guiSettings)

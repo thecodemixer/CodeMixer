@@ -266,3 +266,31 @@ Auth and install remain out-of-band: if the agent requires login, Codemixer surf
 For Cursor Agent ACP, authenticate the CLI first or provide `CURSOR_API_KEY`;
 otherwise the live harness fails fast with `authenticationRequired`.
 
+---
+
+## Cursor ACP CLI (`ACPCLIs` / `CursorACPCLITests`)
+
+Built-in Cursor adapter over ACP (`cursor-agent acp`). Modes use ACP
+`session/set_mode` for `agent` / `plan` / `ask`. `/debug` is diagnostic-only.
+
+| File | Role |
+| --- | --- |
+| `ACPCLIs/CursorACPCLITests/CursorACPAdapterTests.swift` | Identity, locator, mode encoding |
+| `ACPCLIs/CursorACPCLITests/FakeCursorACPIntegrationTests.swift` | Engine + Cursor + `fake-acp` mode switches |
+| `ACPCLIs/CursorACPCLITests/LiveCursorACPHarness.swift` | Opt-in live driver + mode probe |
+| `ACPCLIs/CursorACPCLITests/LiveCursorACPIntegrationTests.swift` | Live suite |
+
+```bash
+swift build --product fake-acp
+swift test --no-parallel --filter CursorACPCLI
+
+# Live Cursor ACP (authenticated cursor-agent)
+CODEMIXER_LIVE_CURSOR_ACP=1 \
+  swift test --no-parallel --filter LiveCursorACPIntegrationTests
+```
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `CODEMIXER_LIVE_CURSOR_ACP=1` | Yes (live) | Opt in |
+| `CURSOR_BIN` / `CODEMIXER_LIVE_CURSOR_BIN` | No | Override binary (defaults to PATH / `~/.local/bin/cursor-agent`) |
+| `CODEMIXER_LIVE_WORKSPACE` | No | Workspace directory |

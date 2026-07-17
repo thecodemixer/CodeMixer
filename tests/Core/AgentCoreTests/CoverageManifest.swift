@@ -339,6 +339,9 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // ConversationSnapshot
 // ConversationView
 // CostBadgeView
+// CursorACPAdapter
+// CursorBinaryLocator
+// CursorModeCommand
 // CustomAgentAdapterFactories
 // CustomAgentAdapterFactory
 // CustomAgentRef
@@ -489,6 +492,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // SubscribeOutcome
 // SubscribeReplayOutcome
 // Subscription
+// SupportedBuiltInAgent
 // SystemClock
 // SystemEnvironment
 // SystemFileSystem
@@ -617,10 +621,12 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // capabilities
 // caption
 // card
+// catalogSummary
 // certificateDER
 // certificateFingerprint
 // changedFiles
 // changing
+// chatMode
 // chip
 // chooseDirectoryPanel
 // claudeDirectory
@@ -696,6 +702,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // directoryURL
 // disabled
 // disconnect
+// displayLabel
 // displayName
 // divider
 // drain
@@ -714,12 +721,14 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // encode
 // encodeCommand
 // encodePermissionResponse
+// encodeSessionMode
 // encodeUserPrompt
 // encoded
 // endTurn
 // engine
 // ensureDirectory
 // ensureParentDirectory
+// entry
 // enumerate
 // enumerateProjectCommands
 // env
@@ -871,6 +880,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // metadata
 // mimeType
 // minAttemptInterval
+// modeID
 // model
 // modificationDate
 // mono
@@ -961,6 +971,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // projectCommands
 // projectDirectory
 // projectFileName
+// projectMode
 // projectPickerMaxHeight
 // projectPickerMinHeight
 // projectPickerMinWidth
@@ -1094,6 +1105,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // setAgentMode
 // setConnectedRemoteClients
 // setLANEnabled
+// setMode
 // settingsMinHeight
 // settingsMinWidth
 // settingsURL
@@ -1104,6 +1116,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // shimmer
 // shimmerPhaseStep
 // shipping
+// shippingIDs
 // shortLabel
 // showSilentRecoveryLog
 // showUsageChip
@@ -1115,8 +1128,10 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // silentDiagnostics
 // silentDiagnosticsPath
 // skipParagraph
+// slashCatalog
 // slashCommandCatalog
 // slashCommands
+// slashName
 // slashPaletteMaxHeight
 // slashPaletteMinWidth
 // sleep
@@ -1267,5 +1282,5 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // writeBytes
 // MANIFEST_SYMBOLS_END
 
-// Total: 1036 unique public symbols
+// Total: 1054 unique public symbols
 

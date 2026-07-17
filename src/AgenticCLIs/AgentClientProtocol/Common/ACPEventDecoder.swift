@@ -77,6 +77,8 @@ public actor ACPEventDecoder {
         case .sessionList:
             await mergeListedSessions(result)
             return Batch()
+        case .sessionSetMode:
+            return Batch()
         case .other:
             return Batch()
         }
@@ -109,6 +111,14 @@ public actor ACPEventDecoder {
             return Batch(events: [.error(ACPAgentError.missingSessionID.agentError)])
         }
         state.setSessionID(sessionID)
+        let modes = result?["modes"]
+        let available = (modes?["availableModes"]?.arrayValue ?? []).compactMap {
+            $0["id"]?.stringValue
+        }
+        state.setSessionModes(
+            currentModeID: modes?["currentModeId"]?.stringValue,
+            availableModeIDs: available
+        )
         await sessionIndex.recordSession(
             id: sessionID,
             customAgentID: context.customAgentID,
@@ -172,6 +182,17 @@ public actor ACPEventDecoder {
             return Batch()
         case "session_info_update":
             return await sessionInfoUpdate(params: params, update: update)
+        case "current_mode_update":
+            if let modeID = update["currentModeId"]?.stringValue
+                ?? update["modeId"]?.stringValue {
+                state.setCurrentModeID(modeID)
+                return Batch(events: [
+                    .statusPhraseChanged(source: .adapterPinned, phrase: "Mode: \(modeID)"),
+                ])
+            }
+            return Batch()
+        case "available_commands_update":
+            return Batch()
         default:
             await SilentDiagnostics.shared.record(
                 kind: .other,
