@@ -18,40 +18,6 @@ public enum DesktopActions {
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
-    static func workspaceFiles(in workspace: URL, limit: Int) -> [String] {
-        let skipDirs: Set<String> = [".git", "node_modules", ".build", "DerivedData",
-                                     ".swiftpm", "__pycache__", ".DS_Store"]
-        var results: [String] = []
-        guard let enumerator = FileManager.default.enumerator(
-            at: workspace,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        ) else { return [] }
-        for case let url as URL in enumerator {
-            if results.count >= limit { break }
-            if skipDirs.contains(url.lastPathComponent) {
-                enumerator.skipDescendants()
-                continue
-            }
-            if (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true {
-                let relativePath = url.path.replacingOccurrences(of: workspace.path + "/", with: "")
-                results.append(relativePath)
-            }
-        }
-        return results.sorted()
-    }
-
-    static func memoryFileBadge(atProjectPath path: String) -> String? {
-        let project = URL(fileURLWithPath: path)
-        if FileManager.default.fileExists(atPath: project.appendingPathComponent("CLAUDE.md").path) {
-            return "CLAUDE.md"
-        }
-        if FileManager.default.fileExists(atPath: project.appendingPathComponent("AGENTS.md").path) {
-            return "AGENTS.md"
-        }
-        return nil
-    }
-
     static func persistPastedImage(_ image: NSImage, sessionID: String?) -> String? {
         let sessionID = sessionID ?? "unknown"
         let dir = FileManager.default.temporaryDirectory

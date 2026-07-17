@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 @testable import AgentCore
+import AgentProtocol
 import AgentTestSupport
 
 /// Tests for `WorkspaceProjectsStore` — root seeding, createProject edge cases,
@@ -231,6 +232,33 @@ struct WorkspaceProjectsStoreTests {
         let projects = await store.projects(for: workspace)
         #expect(projects.map(\.path) == [workspace.path, api.path])
         #expect(projects.last?.projectType == .codex)
+    }
+
+    @Test("saveModels preserves project catalog and stores adapter models")
+    func saveModelsPreservesProjects() async throws {
+        let fs = InMemoryFileSystem()
+        let store = makeStore(fs: fs)
+        let ref = try await store.createProject(name: "api", projectType: .claudeCode, in: workspace)
+        let models = [
+            AgentModelOption(code: "sonnet", name: "Sonnet", thinkingEffort: "medium"),
+            AgentModelOption(code: "opus", name: "Opus"),
+        ]
+        let stamped = Date(timeIntervalSince1970: 1_700_000_000)
+        try await store.saveModels(models, for: .claudeCode, refreshedAt: stamped, in: workspace)
+
+        let cached = await store.cachedModels(for: .claudeCode, in: workspace)
+        #expect(cached?.models.map(\.code) == ["sonnet", "opus"])
+        #expect(cached?.refreshedAt == stamped)
+
+        let local = WorkspaceLocalStateStore.load(from: workspace, fileSystem: fs)
+        #expect(local?.schemaVersion == WorkspaceLocalState.currentSchemaVersion)
+        #expect(local?.projects.map(\.path) == [ref.path])
+        #expect(local?.adapterModelCaches["claudeCode"]?.models.count == 2)
+
+        // Project-only saves must not wipe the model cache.
+        try WorkspaceLocalStateStore.save(projects: local!.projects, to: workspace, fileSystem: fs)
+        let stillCached = await store.cachedModels(for: .claudeCode, in: workspace)
+        #expect(stillCached?.models.map(\.code) == ["sonnet", "opus"])
     }
 
     @Test("markActiveWorkspace / clearActiveWorkspace round-trip through workspaces.json")

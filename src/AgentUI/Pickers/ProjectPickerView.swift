@@ -8,6 +8,8 @@ import AgentProtocol
 /// (or the workspace index). Folders without a stored mode are handed back to
 /// the caller so they can present a configuration sheet.
 public struct ProjectPickerView: View {
+    private let memoryFiles = ProjectMemoryFile()
+
     public let recent: [SessionStore.ProjectRecord]
     public let onOpen: (URL, _ resumeSessionID: String?) -> Void
 
@@ -79,14 +81,16 @@ public struct ProjectPickerView: View {
                                 VStack(alignment: .leading) {
                                     HStack(spacing: Theme.spacing.s8) {
                                         Text(project.displayName).font(Theme.typography.body)
-                                        if let badge = memoryFileBadge(at: project.path) {
-                                            Text(badge)
+                                        if let filename = memoryFiles.presentFilename(
+                                            in: URL(fileURLWithPath: project.path)
+                                        ) {
+                                            Text(filename)
                                                 .font(Theme.typography.caption)
                                                 .foregroundStyle(Theme.signal.info)
                                                 .padding(.horizontal, Theme.spacing.s4)
                                                 .background(Theme.signal.info.opacity(Theme.opacity.subtle), in: .capsule)
-                                                .help("Project has \(badge) in its root")
-                                                .accessibilityLabel("Has \(badge)")
+                                                .help("Project has \(filename) in its root")
+                                                .accessibilityLabel("Has \(filename)")
                                         }
                                     }
                                     Text(project.path)
@@ -156,11 +160,6 @@ public struct ProjectPickerView: View {
         onOpen(url, resumeSessionID)
     }
 
-    /// Returns `"CLAUDE.md"` or `"AGENTS.md"` if either file is present
-    /// in the project root, or `nil` if neither exists.
-    private func memoryFileBadge(at path: String) -> String? {
-        DesktopActions.memoryFileBadge(atProjectPath: path)
-    }
 }
 
 #if DEBUG
