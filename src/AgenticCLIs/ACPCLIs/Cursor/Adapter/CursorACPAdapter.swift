@@ -53,30 +53,41 @@ public final class CursorACPAdapter: AgentAdapter {
     }
 
     public func locateBinary(env: ResolvedEnvironment) async throws -> URL {
-        do {
-            let binary = try locator.locate(env: env)
-            // Do not block session start on `cursor-agent models` (often many
-            // seconds). A late catalog fill must not delay / race project switches.
-            Task { [processRunner, modelCache] in
-                await Self.refreshModelCatalog(
-                    executable: binary,
-                    env: env,
-                    processRunner: processRunner,
-                    modelCache: modelCache,
-                    envOverrides: ["NO_COLOR": "1"]
-                )
-            }
-            return binary
-        } catch let error as CursorBinaryLocator.LocateError {
-            switch error {
-            case .notFound(let checked):
-                let locations = checked.prefix(4).joined(separator: ", ")
-                throw AgentError.binaryNotFound(
-                    agentID: .cursorCLI,
-                    hint: "Install Cursor Agent CLI (`cursor-agent`). Checked: \(locations)"
-                )
+        let binary = try resolveBinary(env: env)
+        // Do not block session start on `cursor-agent models` (often many
+        // seconds). A late catalog fill must not delay / race project switches.
+        Task { [processRunner, modelCache] in
+            let models = await Self.probeModels(
+                executable: binary,
+                env: discoveryEnvironment(from: env),
+                processRunner: processRunner
+            )
+            if !models.isEmpty {
+                modelCache.replace(with: models)
             }
         }
+        return binary
+    }
+
+    public func refreshModelCatalog() async throws -> [AgentModelOption] {
+        let env = await ShellEnvironmentResolver(
+            environment: environment,
+            processRunner: processRunner
+        ).resolve()
+        let binary = try resolveBinary(env: env)
+        let models = await Self.probeModels(
+            executable: binary,
+            env: discoveryEnvironment(from: env),
+            processRunner: processRunner
+        )
+        if !models.isEmpty {
+            modelCache.replace(with: models)
+        }
+        return modelCache.snapshot()
+    }
+
+    public func seedModelCatalog(_ models: [AgentModelOption]) {
+        modelCache.replace(with: models)
     }
 
     public func defaultEnvOverrides() -> [String: String] {
@@ -173,32 +184,45 @@ public final class CursorACPAdapter: AgentAdapter {
 
     public func resumeArgvAddition(sessionID: String) -> [String] { [] }
 
-    private static func refreshModelCatalog(executable: URL,
-                                            env: ResolvedEnvironment,
-                                            processRunner: ProcessRunner,
-                                            modelCache: CursorModelCache,
-                                            envOverrides: [String: String]) async {
-        let environment = env.withOverrides(envOverrides)
+    private func resolveBinary(env: ResolvedEnvironment) throws -> URL {
+        do {
+            return try locator.locate(env: env)
+        } catch let error as CursorBinaryLocator.LocateError {
+            switch error {
+            case .notFound(let checked):
+                let locations = checked.prefix(4).joined(separator: ", ")
+                throw AgentError.binaryNotFound(
+                    agentID: .cursorCLI,
+                    hint: "Install Cursor Agent CLI (`cursor-agent`). Checked: \(locations)"
+                )
+            }
+        }
+    }
+
+    private func discoveryEnvironment(from env: ResolvedEnvironment) -> [String: String] {
+        env.withOverrides(defaultEnvOverrides())
+    }
+
+    private static func probeModels(executable: URL,
+                                    env: [String: String],
+                                    processRunner: ProcessRunner) async -> [AgentModelOption] {
         let stdout: Data?
         do {
             let result = try await processRunner.run(
                 executable: executable,
                 arguments: ["models"],
-                env: environment
+                env: env
             )
             stdout = result.stdout
         } catch {
             stdout = try? await processRunner.run(
                 executable: executable,
                 arguments: ["--list-models"],
-                env: environment
+                env: env
             ).stdout
         }
-        guard let stdout else { return }
-        let models = CursorModelCatalog.parse(stdout)
-        if !models.isEmpty {
-            modelCache.replace(with: models)
-        }
+        guard let stdout else { return [] }
+        return CursorModelCatalog.parse(stdout)
     }
 }
 

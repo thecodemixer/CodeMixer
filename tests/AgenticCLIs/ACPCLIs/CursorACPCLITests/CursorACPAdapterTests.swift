@@ -144,6 +144,15 @@ struct CursorACPAdapterTests {
         #expect(adapter.availableModels().map(\.id) == ["auto", "gpt-5.3-codex-high"])
     }
 
+    @Test("seedModelCatalog replaces the in-memory cursor catalog")
+    func seedModelCatalog() {
+        let adapter = CursorACPAdapter()
+        adapter.seedModelCatalog([
+            AgentModelOption(id: "auto", label: "Auto"),
+        ])
+        #expect(adapter.availableModels().map(\.id) == ["auto"])
+    }
+
     @Test("AgentID.shipping includes cursorCLI")
     func shipping() {
         #expect(AgentID.shipping.contains(.cursorCLI))

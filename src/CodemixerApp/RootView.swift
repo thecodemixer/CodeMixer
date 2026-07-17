@@ -12,7 +12,9 @@ struct RootView: View {
     var body: some View {
         ZStack {
             if bootstrap.isStartupComplete, let model = bootstrap.viewModel {
-                if bootstrap.workspace == nil {
+                if bootstrap.isPreparingWorkspace {
+                    startupLoading
+                } else if bootstrap.workspace == nil {
                     noWorkspaceLanding
                 } else if model.projects.isEmpty {
                     emptyWorkspaceLanding
@@ -54,8 +56,8 @@ struct RootView: View {
                 NewProjectSheet(
                     onCancel: { bootstrap.showNewProjectSheet = false },
                     onCreate: { name, mode in
+                        await model.createProject(name: name, projectType: mode)
                         bootstrap.showNewProjectSheet = false
-                        model.createProject(name: name, projectType: mode)
                     }
                 )
             }
@@ -125,7 +127,9 @@ struct RootView: View {
                 ProgressView()
                     .controlSize(.regular)
             }
-            .accessibilityLabel("Loading")
+            .accessibilityLabel(bootstrap.isPreparingWorkspace
+                                ? "Loading workspace models"
+                                : "Loading")
     }
 
     private var noWorkspaceLanding: some View {
@@ -193,13 +197,6 @@ struct RootView: View {
                     Task { await bootstrap.closeWorkspace() }
                 }
                 .disabled(bootstrap.workspace == nil)
-            }
-            Section("Model") {
-                ForEach(model.availableModels, id: \.id) { option in
-                    Button("Use \(option.label)") {
-                        model.send(.selectModel(id: option.id))
-                    }
-                }
             }
             Section("Mode") {
                 Button("Default Permissions") { model.send(.setPermissionMode(.default)) }

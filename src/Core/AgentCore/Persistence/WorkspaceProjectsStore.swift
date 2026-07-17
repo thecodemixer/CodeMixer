@@ -38,13 +38,27 @@ public actor WorkspaceProjectsStore {
     }
 
     /// Errors surfaced to the caller so the UI can show an inline message.
-    public enum StoreError: Error, Sendable, Equatable {
+    public enum StoreError: Error, LocalizedError, Sendable, Equatable {
         case invalidProjectName(String)
         case projectFolderExists(path: String)
+        case cannotRenameWorkspaceRoot(path: String)
         /// A stored project could not be decoded into the current schema
         /// (e.g. missing required `projectType`). Surfaced for repair — never
         /// silently reset or auto-assigned to Claude.
         case undecodableProject(path: String, detail: String)
+
+        public var errorDescription: String? {
+            switch self {
+            case .invalidProjectName:
+                "Project name is invalid."
+            case .projectFolderExists(let path):
+                "A folder already exists at \(path)."
+            case .cannotRenameWorkspaceRoot:
+                "The workspace root folder cannot be renamed from the project navigator."
+            case .undecodableProject(let path, let detail):
+                "Project at \(path) could not be decoded: \(detail)."
+            }
+        }
     }
 
     /// A project that was just removed, plus the index it occupied, so the UI
@@ -344,18 +358,34 @@ public actor WorkspaceProjectsStore {
     @discardableResult
     public func renameProject(path: String, to newName: String, in workspace: URL) async throws -> ProjectRef {
         let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { throw StoreError.invalidProjectName(newName) }
+        guard Self.isValidProjectName(trimmed) else { throw StoreError.invalidProjectName(newName) }
+        guard path != workspace.path else { throw StoreError.cannotRenameWorkspaceRoot(path: path) }
         let key = Self.key(for: workspace)
         var list = workspaces[key] ?? []
         guard let idx = list.firstIndex(where: { $0.path == path }) else {
             throw StoreError.invalidProjectName(newName)
         }
-        list[idx].displayName = trimmed
+        let folder = URL(fileURLWithPath: path, isDirectory: true)
+        let renamedFolder = folder
+            .deletingLastPathComponent()
+            .appendingPathComponent(trimmed, isDirectory: true)
+        if renamedFolder.path != folder.path {
+            guard !fileSystem.fileExists(at: renamedFolder) else {
+                throw StoreError.projectFolderExists(path: renamedFolder.path)
+            }
+            // Foundation exposes same-parent folder renames as `moveItem`.
+            try fileSystem.move(from: folder, to: renamedFolder)
+        }
+
+        let renamed = ProjectRef(path: renamedFolder.path,
+                                 displayName: trimmed,
+                                 projectType: list[idx].projectType)
+        list[idx] = renamed
         workspaces[key] = list
         try await persist()
-        try ProjectLocalStateStore.save(ref: list[idx], fileSystem: fileSystem)
+        try ProjectLocalStateStore.save(ref: renamed, fileSystem: fileSystem)
         try await persistWorkspaceLocal(projects: list, for: workspace)
-        return list[idx]
+        return renamed
     }
 
     @discardableResult

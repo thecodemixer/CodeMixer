@@ -9,9 +9,9 @@ import AgentProtocol
 /// with the folder. Per-project type still lives in each project's
 /// `.codemixer/project.json`; this file is the ordered index.
 ///
-/// Also caches per-adapter model pickers. Claude Code's catalog is expensive
-/// to refresh (print-mode probe), so it is stored here and only updated on
-/// first empty load or an explicit user refresh.
+/// Also caches Claude Code's model picker. That catalog is expensive to refresh
+/// (print-mode probe), so it is stored here and only updated on first empty
+/// load or an explicit user refresh. Other adapters keep models in memory only.
 public struct WorkspaceLocalState: Sendable, Codable, Hashable {
     public static let currentSchemaVersion = 2
 

@@ -121,56 +121,65 @@ extension EngineViewModel {
     }
 
     /// Create a new project (subfolder of the workspace) and switch to it.
-    public func createProject(name: String, projectType: ProjectType) {
+    /// Blocks until the project is registered and its model catalog is ready.
+    public func createProject(name: String, projectType: ProjectType) async {
         guard let workspaceRoot, let store = workspaceProjects else { return }
-        Task { [weak self] in
-            do {
-                let ref = try await store.createProject(name: name, projectType: projectType, in: workspaceRoot)
-                let refs = await store.projects(for: workspaceRoot, rootProjectType: projectType)
-                let support = await Self.resumableSessionSupport(for: refs)
-                await MainActor.run {
-                    self?.projects = refs
-                    self?.projectResumableSessionSupport = support
-                    self?.applyAdapterCapabilities(for: projectType, projectURL: URL(fileURLWithPath: ref.path))
-                    self?.newChat(in: ref.path)
-                }
-            } catch {
-                await MainActor.run { self?.recordProjectError(error) }
-            }
+        do {
+            let ref = try await store.createProject(name: name, projectType: projectType, in: workspaceRoot)
+            try await WorkspaceLifecycle(model: self).ensureModels(for: projectType)
+            let refs = await store.projects(for: workspaceRoot, rootProjectType: projectType)
+            let support = await Self.resumableSessionSupport(for: refs)
+            projects = refs
+            projectResumableSessionSupport = support
+            applyAdapterCapabilities(for: projectType, projectURL: URL(fileURLWithPath: ref.path))
+            newChat(in: ref.path)
+        } catch {
+            recordProjectError(error)
         }
     }
 
     /// Register an existing folder as a project of the workspace.
-    public func addExistingProject(url: URL, projectType: ProjectType) {
+    /// Blocks until the project is registered and its model catalog is ready.
+    public func addExistingProject(url: URL, projectType: ProjectType) async {
         guard let workspaceRoot, let store = workspaceProjects else { return }
-        Task { [weak self] in
-            do {
-                let ref = try await store.addExistingProject(url: url, projectType: projectType, in: workspaceRoot)
-                let refs = await store.projects(for: workspaceRoot, rootProjectType: projectType)
-                let support = await Self.resumableSessionSupport(for: refs)
-                await MainActor.run {
-                    self?.projects = refs
-                    self?.projectResumableSessionSupport = support
-                    self?.applyAdapterCapabilities(for: projectType, projectURL: URL(fileURLWithPath: ref.path))
-                    self?.newChat(in: ref.path)
-                }
-            } catch {
-                await MainActor.run { self?.recordProjectError(error) }
-            }
+        do {
+            let ref = try await store.addExistingProject(url: url, projectType: projectType, in: workspaceRoot)
+            try await WorkspaceLifecycle(model: self).ensureModels(for: projectType)
+            let refs = await store.projects(for: workspaceRoot, rootProjectType: projectType)
+            let support = await Self.resumableSessionSupport(for: refs)
+            projects = refs
+            projectResumableSessionSupport = support
+            applyAdapterCapabilities(for: projectType, projectURL: URL(fileURLWithPath: ref.path))
+            newChat(in: ref.path)
+        } catch {
+            recordProjectError(error)
         }
     }
 
-    /// Rename a project's display label (folder on disk is untouched).
+    /// Rename a project and its folder on disk.
     public func renameProject(path: String, newName: String) {
         guard let workspaceRoot, let store = workspaceProjects else { return }
+        let renamesActiveProject = workspace?.path == path
+        guard activity == .idle else {
+            diagnostics.append(diagnostic(
+                level: .error,
+                message: "Wait for the current turn to finish before renaming a project."
+            ))
+            return
+        }
+        let resumeSessionID = sessionID.flatMap { $0.isEmpty ? nil : $0 }
         Task { [weak self] in
             do {
-                try await store.renameProject(path: path, to: newName, in: workspaceRoot)
+                let renamed = try await store.renameProject(path: path, to: newName, in: workspaceRoot)
                 let refs = await store.projects(for: workspaceRoot)
                 let support = await Self.resumableSessionSupport(for: refs)
                 await MainActor.run {
                     self?.projects = refs
                     self?.projectResumableSessionSupport = support
+                    self?.applyRenamedProjectPath(from: path, to: renamed.path)
+                    if renamesActiveProject {
+                        self?.send(.openProject(path: renamed.path, resumeSessionID: resumeSessionID))
+                    }
                 }
             } catch {
                 await MainActor.run { self?.recordProjectError(error) }
@@ -199,24 +208,22 @@ extension EngineViewModel {
     }
 
     /// Restore the most recently removed project at its former position.
-    public func undoRemoveProject() {
+    /// Blocks until the project is restored and its model catalog is ready.
+    public func undoRemoveProject() async {
         guard let workspaceRoot, let store = workspaceProjects,
               let removed = removedProjectUndo else { return }
         removedProjectUndoTask?.cancel()
         removedProjectUndoTask = nil
         removedProjectUndo = nil
-        Task { [weak self] in
-            do {
-                try await store.restoreProject(removed, in: workspaceRoot)
-                let refs = await store.projects(for: workspaceRoot)
-                let support = await Self.resumableSessionSupport(for: refs)
-                await MainActor.run {
-                    self?.projects = refs
-                    self?.projectResumableSessionSupport = support
-                }
-            } catch {
-                await MainActor.run { self?.recordProjectError(error) }
-            }
+        do {
+            try await store.restoreProject(removed, in: workspaceRoot)
+            try await WorkspaceLifecycle(model: self).ensureModels(for: removed.ref.projectType)
+            let refs = await store.projects(for: workspaceRoot)
+            let support = await Self.resumableSessionSupport(for: refs)
+            projects = refs
+            projectResumableSessionSupport = support
+        } catch {
+            recordProjectError(error)
         }
     }
 
@@ -250,7 +257,23 @@ extension EngineViewModel {
                 }
                 return
             }
-            var models = await self.resolveModels(for: adapter)
+            let models: [AgentModelOption]
+            do {
+                models = try await self.loadModels(for: adapter)
+            } catch {
+                await MainActor.run {
+                    guard self.shouldApplyAdapterCapabilities(
+                        generation: generation,
+                        expectedPath: expectedPath
+                    ) else { return }
+                    self.diagnostics.append(self.diagnostic(
+                        level: .error,
+                        message: error.localizedDescription
+                    ))
+                    self.availableModels = []
+                }
+                return
+            }
             let agentModes = adapter.availableAgentModes()
             let resumable = adapter.capabilities.contains(.resumableSessions)
             let builtIn = adapter.slashCommandCatalog
@@ -259,13 +282,6 @@ extension EngineViewModel {
                 projectCommands = await adapter.enumerateProjectCommands(workspace: url)
             } else {
                 projectCommands = []
-            }
-            // Cursor fills its model cache asynchronously from `cursor-agent
-            // models`. One short retry picks that up without blocking start.
-            // Use wall-clock sleep so FakeClock-driven unit tests don't hang.
-            if models.isEmpty, case .automatic = adapter.modelCatalogRefreshKind() {
-                try? await Task.sleep(for: .milliseconds(750))
-                models = adapter.availableModels()
             }
             await MainActor.run {
                 guard self.shouldApplyAdapterCapabilities(
@@ -285,13 +301,55 @@ extension EngineViewModel {
         }
     }
 
+    /// Loads model catalogs for every shipping adapter used by projects in this
+    /// workspace. Claude may persist to workspace file storage; other adapters
+    /// stay in memory. Throws if any required catalog cannot be populated.
+    public func warmWorkspaceModelCatalogs() async throws {
+        guard workspaceRoot != nil, workspaceProjects != nil else {
+            workspaceModelCatalogRows = []
+            return
+        }
+        let agentIDs = Self.modelCatalogAgentIDs(in: projects)
+        for agentID in agentIDs {
+            try await ensureModelsLoaded(for: agentID)
+        }
+        await reloadWorkspaceModelCatalogStatus()
+    }
+
+    /// Ensures every shipping adapter required by `projectType` has a
+    /// non-empty model catalog. Mixed projects require all shipping adapters.
+    public func ensureModelsLoaded(for projectType: ProjectType) async throws {
+        for agentID in Self.modelCatalogAgentIDs(for: projectType) {
+            try await ensureModelsLoaded(for: agentID)
+        }
+    }
+
+    /// Ensures `agentID` has a non-empty in-memory catalog (Claude also
+    /// persists to the workspace file when needed).
+    public func ensureModelsLoaded(for agentID: AgentID) async throws {
+        guard AgentID.shipping.contains(agentID) else { return }
+        guard let adapter = await AdapterRegistry.shared.adapter(for: agentID) else {
+            throw ModelCatalogLoadError.adapterUnavailable(agentID)
+        }
+        let models = try await loadModels(for: adapter)
+        guard !models.isEmpty else {
+            throw ModelCatalogLoadError.emptyCatalog(adapter.displayName)
+        }
+    }
+
     /// Manual adapters (Claude) use the workspace cache; automatic adapters
-    /// keep their own discovery. An empty Claude cache triggers a one-time
-    /// print-mode probe, then persists the result for later sessions.
-    func resolveModels(for adapter: any AgentAdapter) async -> [AgentModelOption] {
+    /// keep discovery in memory only. An empty Claude cache triggers a
+    /// one-time print-mode probe, then persists the result for later sessions.
+    func loadModels(for adapter: any AgentAdapter) async throws -> [AgentModelOption] {
         switch adapter.modelCatalogRefreshKind() {
         case .automatic:
-            return adapter.availableModels()
+            let existing = adapter.availableModels()
+            if !existing.isEmpty { return existing }
+            let models = try await adapter.refreshModelCatalog()
+            if !models.isEmpty {
+                adapter.seedModelCatalog(models)
+            }
+            return models.isEmpty ? adapter.availableModels() : models
         case .manual:
             guard let workspaceRoot, let store = workspaceProjects else {
                 return adapter.availableModels()
@@ -301,23 +359,20 @@ extension EngineViewModel {
                 adapter.seedModelCatalog(cached.models)
                 return cached.models
             }
-            do {
-                let models = try await adapter.refreshModelCatalog()
-                guard !models.isEmpty else { return models }
-                try await store.saveModels(
-                    models,
-                    for: adapter.id,
-                    refreshedAt: clock.now(),
-                    in: workspaceRoot
-                )
-                return models
-            } catch {
-                return adapter.availableModels()
-            }
+            let models = try await adapter.refreshModelCatalog()
+            guard !models.isEmpty else { return models }
+            try await store.saveModels(
+                models,
+                for: adapter.id,
+                refreshedAt: clock.now(),
+                in: workspaceRoot
+            )
+            return models
         }
     }
 
-    /// User-triggered model refresh from Workspace settings.
+    /// User-triggered model refresh from Workspace settings (Claude only —
+    /// other catalogs are automatic / in-memory).
     public func refreshAdapterModels(for agentID: AgentID) async {
         guard let workspaceRoot, let store = workspaceProjects else {
             diagnostics.append(diagnostic(
@@ -347,6 +402,9 @@ extension EngineViewModel {
         defer { modelCatalogRefreshInFlight = nil }
         do {
             let models = try await adapter.refreshModelCatalog()
+            guard !models.isEmpty else {
+                throw ModelCatalogLoadError.emptyCatalog(adapter.displayName)
+            }
             try await store.saveModels(
                 models,
                 for: agentID,
@@ -373,25 +431,59 @@ extension EngineViewModel {
             return
         }
         var rows: [WorkspaceModelCatalogRow] = []
-        for entry in SupportedBuiltInAgent.shipping {
-            let adapter = await AdapterRegistry.shared.adapter(for: entry.id)
+        for agentID in Self.modelCatalogAgentIDs(in: projects) {
+            guard let entry = SupportedBuiltInAgent.entry(for: agentID) else { continue }
+            let adapter = await AdapterRegistry.shared.adapter(for: agentID)
             let kind = adapter?.modelCatalogRefreshKind() ?? .automatic
-            let cached = await store.cachedModels(for: entry.id, in: workspaceRoot)
-            let automaticCount: Int
-            if case .automatic = kind {
-                automaticCount = adapter?.availableModels().count ?? 0
-            } else {
-                automaticCount = 0
+            let cached = await store.cachedModels(for: agentID, in: workspaceRoot)
+            let modelCount: Int
+            let refreshedAt: Date?
+            switch kind {
+            case .automatic:
+                modelCount = adapter?.availableModels().count ?? 0
+                refreshedAt = nil
+            case .manual:
+                modelCount = cached?.models.count ?? 0
+                refreshedAt = cached?.refreshedAt
             }
             rows.append(WorkspaceModelCatalogRow(
                 agentID: entry.id,
                 displayName: entry.displayLabel,
                 refreshKind: kind,
-                modelCount: cached?.models.count ?? automaticCount,
-                refreshedAt: cached?.refreshedAt
+                modelCount: modelCount,
+                refreshedAt: refreshedAt
             ))
         }
         workspaceModelCatalogRows = rows
+    }
+
+    /// Shipping agents whose model catalogs are required for `projectType`.
+    /// Mixed projects can switch among all shipping CLIs, so every shipping
+    /// adapter is required. Custom projects have no shipping catalog.
+    static func modelCatalogAgentIDs(for projectType: ProjectType) -> [AgentID] {
+        switch projectType {
+        case .claudeCode, .codex, .cursorCLI:
+            if let id = projectType.primaryAgentID { return [id] }
+            return []
+        case .mixed:
+            return SupportedBuiltInAgent.shippingIDs()
+        case .custom:
+            return []
+        }
+    }
+
+    /// Deduped shipping agent IDs required by the current workspace projects.
+    static func modelCatalogAgentIDs(
+        in projects: [WorkspaceProjectsStore.ProjectRef]
+    ) -> [AgentID] {
+        var ordered: [AgentID] = []
+        var seen: Set<AgentID> = []
+        for project in projects {
+            for id in modelCatalogAgentIDs(for: project.projectType) where seen.insert(id).inserted {
+                ordered.append(id)
+            }
+        }
+        return ordered
     }
 
     func applyAdapterCapabilities(forProjectPath path: String) {
@@ -431,6 +523,23 @@ extension EngineViewModel {
         removedProjectUndoTask = Task { [weak self] in
             try? await self?.clock.sleep(for: ActivityTiming.undoToastWindow)
             await MainActor.run { self?.removedProjectUndo = nil }
+        }
+    }
+
+    func applyRenamedProjectPath(from oldPath: String, to newPath: String) {
+        guard oldPath != newPath else { return }
+        if workspace?.path == oldPath {
+            workspace = URL(fileURLWithPath: newPath, isDirectory: true)
+        }
+        if let sessions = sessionsByProject.removeValue(forKey: oldPath) {
+            sessionsByProject[newPath] = sessions
+        }
+        if loadingProjectPaths.remove(oldPath) != nil {
+            loadingProjectPaths.insert(newPath)
+        }
+        if let support = projectResumableSessionSupport.removeValue(forKey: oldPath),
+           projectResumableSessionSupport[newPath] == nil {
+            projectResumableSessionSupport[newPath] = support
         }
     }
 
@@ -564,7 +673,8 @@ extension EngineViewModel {
 
     /// Opens a freshly created workspace folder without starting an agent.
     /// Project type is chosen later via File → New Project…
-    public func adoptEmptyWorkspace(_ url: URL) {
+    /// Awaits model-catalog warm so callers can gate the UI until catalogs are ready.
+    public func adoptEmptyWorkspace(_ url: URL) async throws {
         endSessionSwitch()
         workspaceRoot = url
         workspace = nil
@@ -588,7 +698,8 @@ extension EngineViewModel {
         availableAgentModes = []
         selectedAgentModeID = ""
         slashCommands = []
-        refreshProjects()
+        await reloadProjects()
+        try await warmWorkspaceModelCatalogs()
     }
 
     /// Clears navigator + conversation chrome after File → Close Workspace.
@@ -615,6 +726,7 @@ extension EngineViewModel {
         availableModels = []
         availableAgentModes = []
         selectedAgentModeID = ""
+        workspaceModelCatalogRows = []
         slashCommands = []
     }
 

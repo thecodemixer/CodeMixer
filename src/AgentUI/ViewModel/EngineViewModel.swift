@@ -276,6 +276,20 @@ public final class EngineViewModel {
             self.refreshedAt = refreshedAt
         }
     }
+
+    public enum ModelCatalogLoadError: Error, LocalizedError, Sendable {
+        case adapterUnavailable(AgentID)
+        case emptyCatalog(String)
+
+        public var errorDescription: String? {
+            switch self {
+            case .adapterUnavailable(let id):
+                return "No adapter is registered for \(id.rawValue)."
+            case .emptyCatalog(let name):
+                return "\(name) returned no models. Check that the CLI is installed and authenticated."
+            }
+        }
+    }
 }
 
 // MARK: - View-model value types

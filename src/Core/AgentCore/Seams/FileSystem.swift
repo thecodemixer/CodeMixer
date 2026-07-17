@@ -23,6 +23,7 @@ public protocol FileSystem: Sendable {
     func readData(at url: URL, fromOffset offset: Int) throws -> Data
     func byteCount(at url: URL) throws -> Int
     func writeAtomically(_ data: Data, to url: URL) throws
+    func move(from source: URL, to destination: URL) throws
     func remove(at url: URL) throws
     func contentsOfDirectory(at url: URL) throws -> [URL]
     func modificationDate(at url: URL) throws -> Date
@@ -101,6 +102,19 @@ public struct SystemFileSystem: FileSystem {
             try data.write(to: url, options: [.atomic])
         } catch {
             throw FileSystemError.ioError(path: url.path,
+                                          underlying: error.localizedDescription)
+        }
+    }
+
+    public func move(from source: URL, to destination: URL) throws {
+        do {
+            try FileManager.default.moveItem(at: source, to: destination)
+        } catch let error as NSError where error.code == NSFileNoSuchFileError {
+            throw FileSystemError.notFound(path: source.path)
+        } catch let error as NSError where error.code == NSFileWriteNoPermissionError {
+            throw FileSystemError.permissionDenied(path: destination.path)
+        } catch {
+            throw FileSystemError.ioError(path: source.path,
                                           underlying: error.localizedDescription)
         }
     }

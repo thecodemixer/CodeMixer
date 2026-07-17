@@ -148,6 +148,7 @@ Codemixer/
 | UI framework wrappers (desktop, speech, QR, notifications) | `AgentUI/External/{DesktopActions,SpeechCapture,SpeechSynthesis,QRCodeRenderer,SystemNotifications}.swift` |
 | Command/event interaction coverage map | `AgentUI/Interaction/InteractionCoverage.swift` |
 | Root scene (split view) | `AgentUI/Workspace/WorkspaceScene.swift` |
+| Shared create/open workspace paths (catalog warm) | `AgentUI/Workspace/WorkspaceLifecycle.swift` |
 | GUI app entry point | `CodemixerApp/CodemixerApp.swift`, `RootView.swift` |
 | LaunchAgent installer | `CodemixerApp/External/LaunchAgentInstaller.swift` |
 | Daemon entry point | `Remote/CodemixerDaemon/main.swift` |

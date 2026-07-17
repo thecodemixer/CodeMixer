@@ -280,7 +280,7 @@ public struct NewWorkspaceSheet: View {
 /// Creates a subfolder project inside the current workspace.
 public struct NewProjectSheet: View {
     public let onCancel: () -> Void
-    public let onCreate: (String, ProjectType) -> Void
+    public let onCreate: (String, ProjectType) async -> Void
 
     @State private var name: String = ""
     @State private var category: ProjectTypeCategory = .singleAgent
@@ -290,9 +290,10 @@ public struct NewProjectSheet: View {
     @State private var customExecutable: String = ""
     @State private var customArguments: String = ""
     @State private var customTransport: AgentTransportKind = .agentClientProtocol
+    @State private var isCreating = false
 
     public init(onCancel: @escaping () -> Void,
-                onCreate: @escaping (String, ProjectType) -> Void) {
+                onCreate: @escaping (String, ProjectType) async -> Void) {
         self.onCancel = onCancel
         self.onCreate = onCreate
     }
@@ -310,7 +311,9 @@ public struct NewProjectSheet: View {
     }
 
     private var canCreate: Bool {
-        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && resolvedProjectType != nil
+        !isCreating
+            && !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && resolvedProjectType != nil
     }
 
     public var body: some View {
@@ -327,6 +330,7 @@ public struct NewProjectSheet: View {
                 TextField("api", text: $name)
                     .textFieldStyle(.roundedBorder)
                     .font(Theme.typography.body)
+                    .disabled(isCreating)
                     .accessibilityLabel("Project name")
             }
 
@@ -339,16 +343,25 @@ public struct NewProjectSheet: View {
                 customArguments: $customArguments,
                 customTransport: $customTransport
             )
+            .disabled(isCreating)
 
-            sheetFooter(primaryTitle: "Create", primaryEnabled: canCreate, onCancel: onCancel) {
+            sheetFooter(
+                primaryTitle: isCreating ? "Creating…" : "Create",
+                primaryEnabled: canCreate,
+                onCancel: onCancel,
+                cancelEnabled: !isCreating
+            ) {
                 guard let projectType = resolvedProjectType else { return }
                 let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-                onCreate(trimmed, projectType)
+                isCreating = true
+                defer { isCreating = false }
+                await onCreate(trimmed, projectType)
             }
         }
         .padding(Theme.spacing.s24)
         .frame(minWidth: Theme.layout.agentPickerMinWidth, minHeight: Theme.layout.agentPickerMinHeight)
         .background(Theme.surface.canvas)
+        .interactiveDismissDisabled(isCreating)
     }
 }
 
@@ -432,14 +445,18 @@ private func sheetHeader(title: String, subtitle: String) -> some View {
 private func sheetFooter(primaryTitle: String,
                          primaryEnabled: Bool,
                          onCancel: @escaping () -> Void,
-                         primaryAction: @escaping () -> Void) -> some View {
+                         cancelEnabled: Bool = true,
+                         primaryAction: @escaping () async -> Void) -> some View {
     HStack {
         Spacer()
         Button("Cancel", action: onCancel)
             .keyboardShortcut(.cancelAction)
-        Button(primaryTitle, action: primaryAction)
-            .buttonStyle(.borderedProminent)
-            .keyboardShortcut(.defaultAction)
-            .disabled(!primaryEnabled)
+            .disabled(!cancelEnabled)
+        Button(primaryTitle) {
+            Task { await primaryAction() }
+        }
+        .buttonStyle(.borderedProminent)
+        .keyboardShortcut(.defaultAction)
+        .disabled(!primaryEnabled)
     }
 }

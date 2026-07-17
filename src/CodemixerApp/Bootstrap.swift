@@ -27,6 +27,9 @@ final class Bootstrap {
     var startupError: String?
     /// False until `start()` finishes engine bootstrap and optional workspace restore.
     var isStartupComplete = false
+    /// True while opening a workspace and waiting for model catalogs to load.
+    /// The main workspace UI stays hidden until this clears.
+    var isPreparingWorkspace = false
     /// Folder chosen via Open Project that has no stored project type yet.
     var pendingConfigureURL: URL?
     var pendingConfigureResumeSessionID: String?
@@ -45,6 +48,11 @@ final class Bootstrap {
     var pairing: PairingService?
     private var appEventTask: Task<Void, Never>?
     let launchAgentInstaller = LaunchAgentInstaller()
+
+    /// Shared create/open workspace paths (model-catalog warm included).
+    private var workspaceLifecycle: WorkspaceLifecycle? {
+        viewModel.map { WorkspaceLifecycle(model: $0) }
+    }
 
     var bus: MulticastEventBus? { eventBus }
 
@@ -155,9 +163,17 @@ final class Bootstrap {
             return
         }
         await leaveWorkspaceWithoutPicker()
-        try? await viewModel?.workspaceProjects?.markActiveWorkspace(folder)
-        workspace = folder
-        viewModel?.adoptEmptyWorkspace(folder)
+        isPreparingWorkspace = true
+        defer { isPreparingWorkspace = false }
+        do {
+            guard let lifecycle = workspaceLifecycle else { return }
+            try await lifecycle.openEmptyWorkspace(folder)
+            workspace = folder
+        } catch {
+            startupError = error.localizedDescription
+            workspace = nil
+            workspaceLifecycle?.abortOpen()
+        }
     }
 
     /// File → New Project: create a subfolder project in the open workspace.
@@ -186,6 +202,7 @@ final class Bootstrap {
             recents = await engine.sessions.recents()
         }
         workspace = nil
+        isPreparingWorkspace = false
         viewModel?.resetForClosedWorkspace()
     }
 
@@ -262,9 +279,18 @@ final class Bootstrap {
         if let store = viewModel?.workspaceProjects {
             let existing = await store.projects(for: url)
             if existing.isEmpty {
-                try? await store.markActiveWorkspace(url)
-                workspace = url
-                viewModel?.adoptEmptyWorkspace(url)
+                isPreparingWorkspace = true
+                defer { isPreparingWorkspace = false }
+                do {
+                    guard let lifecycle = workspaceLifecycle else { return }
+                    try await lifecycle.openEmptyWorkspace(url)
+                    workspace = url
+                } catch {
+                    startupError = error.localizedDescription
+                    workspace = nil
+                    workspaceLifecycle?.abortOpen()
+                    try? await store.clearActiveWorkspace()
+                }
                 return
             }
         }
@@ -290,17 +316,27 @@ final class Bootstrap {
         pendingConfigureURL = nil
         pendingConfigureResumeSessionID = nil
         startupError = nil
+        isPreparingWorkspace = true
+        defer { isPreparingWorkspace = false }
+
         guard let engine = engine else {
-            workspace = url
-            viewModel?.workspaceRoot = url
+            do {
+                guard let lifecycle = workspaceLifecycle else { return }
+                try await lifecycle.loadModelCatalogs(at: url, rootProjectType: projectType)
+            } catch {
+                startupError = error.localizedDescription
+                workspace = nil
+                workspaceLifecycle?.abortOpen()
+                return
+            }
             viewModel?.send(.openProject(path: url.path, resumeSessionID: resumeSessionID))
             try? await viewModel?.workspaceProjects?.markActiveWorkspace(url)
             Task { await configureSlashCommands(for: url, mode: projectType) }
+            workspace = url
             return
         }
         await engine.shutdown(reason: .userCancel)
         let projectsStore = viewModel?.workspaceProjects
-        viewModel?.workspaceRoot = url
         if let store = projectsStore {
             _ = await store.projects(for: url, rootProjectType: projectType)
             _ = try? await store.setProjectType(path: url.path, projectType: projectType, in: url)
@@ -309,31 +345,44 @@ final class Bootstrap {
         guard let adapter = await Self.adapter(for: projectType) else {
             startupError = "Select a concrete agent for this mixed or custom project before starting a session."
             workspace = nil
-            viewModel?.workspaceRoot = nil
+            workspaceLifecycle?.abortOpen()
             try? await projectsStore?.clearActiveWorkspace()
             return
         }
+
+        // Model catalogs for adapters used in this workspace must be ready
+        // before the workspace UI is shown — same path as create / empty open.
+        do {
+            guard let lifecycle = workspaceLifecycle else { return }
+            try await lifecycle.loadModelCatalogs(at: url, rootProjectType: projectType)
+        } catch {
+            startupError = error.localizedDescription
+            workspace = nil
+            workspaceLifecycle?.abortOpen()
+            try? await projectsStore?.clearActiveWorkspace()
+            return
+        }
+
         do {
             try await engine.start(adapter: adapter,
                                    workspace: url,
                                    resumeSessionID: resumeSessionID)
-            workspace = url
             viewModel?.workspaceRoot = url
+            viewModel?.supportsResumableSessions = adapter.capabilities.contains(.resumableSessions)
             viewModel?.availableModels = adapter.availableModels()
             viewModel?.availableAgentModes = adapter.availableAgentModes()
             viewModel?.selectedAgentModeID = adapter.availableAgentModes().first?.id ?? ""
-            viewModel?.supportsResumableSessions = adapter.capabilities.contains(.resumableSessions)
-            await viewModel?.reloadProjects(rootProjectType: projectType)
             try? await projectsStore?.markActiveWorkspace(url)
+            workspace = url
         } catch let err as AgentError {
             startupError = err.userMessage
             workspace = nil
-            viewModel?.workspaceRoot = nil
+            workspaceLifecycle?.abortOpen()
             try? await projectsStore?.clearActiveWorkspace()
         } catch {
             startupError = error.localizedDescription
             workspace = nil
-            viewModel?.workspaceRoot = nil
+            workspaceLifecycle?.abortOpen()
             try? await projectsStore?.clearActiveWorkspace()
         }
         recents = await engine.sessions.recents()

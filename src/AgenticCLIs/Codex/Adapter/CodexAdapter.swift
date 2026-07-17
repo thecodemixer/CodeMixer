@@ -260,6 +260,14 @@ public final class CodexAdapter: AgentAdapter {
         return loaded
     }
 
+    public func refreshModelCatalog() async throws -> [AgentModelOption] {
+        availableModels()
+    }
+
+    public func seedModelCatalog(_ models: [AgentModelOption]) {
+        modelCache.replace(with: models)
+    }
+
     public func availableAgentModes() -> [AgentModeOption] {
         [
             AgentModeOption(

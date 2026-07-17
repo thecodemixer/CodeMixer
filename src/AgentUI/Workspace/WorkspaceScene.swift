@@ -59,7 +59,9 @@ public struct WorkspaceScene: View {
         .overlay(alignment: .bottom) {
             if let removed = model.removedProjectUndo {
                 UndoToast(message: "Removed \(removed.ref.displayName)",
-                          onUndo: { model.undoRemoveProject() })
+                          onUndo: {
+                              Task { await model.undoRemoveProject() }
+                          })
                     .padding(.bottom, Theme.spacing.s64)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
