@@ -11,7 +11,7 @@ struct RootView: View {
 
     var body: some View {
         ZStack {
-            if let model = bootstrap.viewModel {
+            if bootstrap.isStartupComplete, let model = bootstrap.viewModel {
                 if bootstrap.workspace == nil {
                     noWorkspaceLanding
                 } else if model.projects.isEmpty {
@@ -40,9 +40,7 @@ struct RootView: View {
                         }
                 }
             } else {
-                ProgressView("Starting agent…")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Theme.surface.canvas)
+                startupLoading
             }
         }
         .codemixerAppearance(bootstrap.viewModel?.appearancePrefs ?? AppearancePrefs())
@@ -129,6 +127,16 @@ struct RootView: View {
                 presentSavePanel(for: export)
             }
         }
+    }
+
+    private var startupLoading: some View {
+        Theme.surface.canvas
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay {
+                ProgressView()
+                    .controlSize(.regular)
+            }
+            .accessibilityLabel("Loading")
     }
 
     private var noWorkspaceLanding: some View {

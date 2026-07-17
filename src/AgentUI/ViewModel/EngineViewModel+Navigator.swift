@@ -13,11 +13,14 @@ extension EngineViewModel {
     /// Reload the projects for the current workspace. Pass `rootMode` only when
     /// seeding a brand-new workspace that has no stored projects yet.
     public func refreshProjects(rootMode: ProjectAgentMode? = nil) {
+        Task { await reloadProjects(rootMode: rootMode) }
+    }
+
+    /// Awaitable variant for startup restore and other flows that must not flash
+    /// an empty navigator before the project list is ready.
+    public func reloadProjects(rootMode: ProjectAgentMode? = nil) async {
         guard let workspaceRoot, let store = workspaceProjects else { return }
-        Task { [weak self] in
-            let refs = await store.projects(for: workspaceRoot, rootMode: rootMode)
-            await MainActor.run { self?.projects = refs }
-        }
+        projects = await store.projects(for: workspaceRoot, rootMode: rootMode)
     }
 
     /// Lazily list the resumable sessions for a project. A non-resumable agent

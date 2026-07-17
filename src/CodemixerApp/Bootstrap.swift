@@ -24,6 +24,8 @@ final class Bootstrap {
     var authURL: URL?
     var recents: [SessionStore.ProjectRecord] = []
     var startupError: String?
+    /// False until `start()` finishes engine bootstrap and optional workspace restore.
+    var isStartupComplete = false
     /// Non-nil when the last `openWorkspace` failed with `binaryNotFound`.
     var installHint: String?
     /// Folder chosen via Open Project that has no stored agent mode yet.
@@ -54,6 +56,7 @@ final class Bootstrap {
 
     func start() async {
         guard viewModel == nil else { return }
+        defer { isStartupComplete = true }
 
         let adapter = ClaudeAdapter()
         await AdapterRegistry.shared.register(adapter)
@@ -297,8 +300,8 @@ final class Bootstrap {
         await engine.shutdown(reason: .userCancel)
         let projectsStore = viewModel?.workspaceProjects
         viewModel?.workspaceRoot = url
-        _ = await projectsStore?.projects(for: url, rootMode: agentMode)
         if let store = projectsStore {
+            _ = await store.projects(for: url, rootMode: agentMode)
             _ = try? await store.setAgentMode(path: url.path, mode: agentMode, in: url)
         }
 
@@ -317,7 +320,7 @@ final class Bootstrap {
             viewModel?.workspaceRoot = url
             viewModel?.availableModels = adapter.availableModels()
             viewModel?.supportsResumableSessions = adapter.capabilities.contains(.resumableSessions)
-            viewModel?.refreshProjects(rootMode: agentMode)
+            await viewModel?.reloadProjects(rootMode: agentMode)
             try? await projectsStore?.markActiveWorkspace(url)
         } catch let err as AgentError {
             if case .binaryNotFound(_, let hint) = err {
