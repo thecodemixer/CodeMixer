@@ -205,6 +205,7 @@ struct SlashPaletteView: View {
     let query: String
     let commands: [SlashCommand]
     let onSelect: (SlashCommand) -> Void
+    let onDismiss: () -> Void
 
     @State private var selectedIndex: Int = 0
     @FocusState private var isFocused: Bool
@@ -282,6 +283,10 @@ struct SlashPaletteView: View {
         .onKeyPress(.return) {
             guard filtered.indices.contains(selectedIndex) else { return .ignored }
             onSelect(filtered[selectedIndex])
+            return .handled
+        }
+        .onKeyPress(.escape) {
+            onDismiss()
             return .handled
         }
         .onAppear {

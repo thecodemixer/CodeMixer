@@ -21,11 +21,13 @@ public struct PromptComposerView: View {
     @State private var isEditMode: Bool = false
     @State private var isDropTargeted: Bool = false
     @State private var showSlashPalette: Bool = false
+    @State private var slashPaletteHeight: CGFloat = 0
     @State private var showFilePicker: Bool = false
     @State private var filePickerQuery: String = ""
     @State private var selectedModelID: String = ""
     @State private var fileIndex = ComposerWorkspaceFileIndex()
     @FocusState private var focused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public init(model: EngineViewModel, voice: VoiceInputService? = nil) {
         self.model = model
@@ -78,25 +80,6 @@ public struct PromptComposerView: View {
                             perform: handleDrop)
                     .onPasteCommand(of: [UTType.fileURL, UTType.image], perform: handlePaste)
                     .accessibilityLabel("Prompt input")
-                    .popover(isPresented: $showSlashPalette,
-                             attachmentAnchor: .point(.top),
-                             arrowEdge: .bottom) {
-                        SlashPaletteView(
-                            query: PromptComposerDraftLogic.slashQuery(from: draft),
-                            commands: model.slashCommands,
-                            onSelect: { command in
-                                if command.isProjectDefined {
-                                    model.send(.runCustomCommand(path: command.name, args: []))
-                                    draft = ""
-                                } else {
-                                    model.send(.runSlashCommand(name: command.name, args: []))
-                                    draft = ""
-                                }
-                                showSlashPalette = false
-                                focused = true
-                            }
-                        )
-                    }
                     .popover(isPresented: $showFilePicker,
                              attachmentAnchor: .point(.top),
                              arrowEdge: .bottom) {
@@ -146,6 +129,31 @@ public struct PromptComposerView: View {
                                     : Color.clear, lineWidth: Theme.stroke.focus)
                     )
             )
+            .overlay(alignment: .topLeading) {
+                if showSlashPalette {
+                    SlashPaletteView(
+                        query: PromptComposerDraftLogic.slashQuery(from: draft),
+                        commands: model.slashCommands,
+                        onSelect: { command in
+                            if command.isProjectDefined {
+                                model.send(.runCustomCommand(path: command.name, args: []))
+                                draft = ""
+                            } else {
+                                model.send(.runSlashCommand(name: command.name, args: []))
+                                draft = ""
+                            }
+                            showSlashPalette = false
+                            focused = true
+                        },
+                        onDismiss: { showSlashPalette = false }
+                    )
+                    .positionedAboveAnchor(height: $slashPaletteHeight, gap: Theme.spacing.s4)
+                    .transition(.opacity)
+                    .zIndex(1)
+                }
+            }
+            .animation(Theme.motion.resolve(Theme.motion.arriving, reduceMotion: reduceMotion),
+                       value: showSlashPalette)
         }
         .padding(.horizontal, Theme.spacing.s16)
         .padding(.top, Theme.spacing.s16)
@@ -175,6 +183,15 @@ public struct PromptComposerView: View {
             if let workspace = model.workspace { fileIndex.refresh(workspace: workspace) }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 focused = true
+            }
+        }
+        .onChange(of: model.availableModels.map(\.id)) { _, ids in
+            guard let first = ids.first else {
+                selectedModelID = ""
+                return
+            }
+            if selectedModelID.isEmpty || !ids.contains(selectedModelID) {
+                selectedModelID = first
             }
         }
     }
