@@ -42,6 +42,8 @@ struct ComposerModelMenu: View {
                         }
                     },
                     minWidth: Theme.layout.composerModelPickerMinWidth,
+                    isSearchable: true,
+                    maxHeight: Theme.layout.composerModelPickerMaxHeight,
                     onDismiss: { isOpen = false }
                 )
                 .positionedAboveAnchor(height: $menuHeight, gap: Self.dropdownGap)

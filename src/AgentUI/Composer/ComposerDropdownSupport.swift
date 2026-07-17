@@ -20,13 +20,20 @@ struct ComposerDropdownOption: Identifiable {
 /// with no public API to suppress it (SwiftUI inherits that limitation on
 /// macOS). A plain view sidesteps the arrow entirely and also avoids
 /// `NSPopover`'s independent appearance/material resolution.
+///
+/// When `isSearchable` is true (model catalogs with dozens of entries), a
+/// filter field sits above a scrollable list capped by `maxHeight`. Short
+/// menus leave search off and grow to content within the same height cap.
 struct ComposerDropdownPanel: View {
     let options: [ComposerDropdownOption]
     let onDismiss: () -> Void
     let minWidth: CGFloat
     let opaqueItemBackgrounds: Bool
+    let isSearchable: Bool
+    let maxHeight: CGFloat
 
     @Environment(\.codemixerDropdownCornerRadius) private var radius
+    @State private var query: String = ""
     @State private var highlightedIndex: Int
     @FocusState private var isFocused: Bool
 
@@ -34,28 +41,48 @@ struct ComposerDropdownPanel: View {
         options: [ComposerDropdownOption],
         minWidth: CGFloat = Theme.layout.compactControlMinWidth * 0.7,
         opaqueItemBackgrounds: Bool = false,
+        isSearchable: Bool = false,
+        maxHeight: CGFloat = Theme.layout.composerModelPickerMaxHeight,
         onDismiss: @escaping () -> Void
     ) {
         self.options = options
         self.minWidth = minWidth
         self.opaqueItemBackgrounds = opaqueItemBackgrounds
+        self.isSearchable = isSearchable
+        self.maxHeight = maxHeight
         self.onDismiss = onDismiss
         _highlightedIndex = State(initialValue: options.firstIndex { $0.isSelected } ?? 0)
     }
 
+    private var filtered: [ComposerDropdownOption] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return options }
+        return options.filter { $0.title.localizedCaseInsensitiveContains(trimmed) }
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.spacing.s4 / 2) {
-            ForEach(Array(options.enumerated()), id: \.element.id) { index, option in
-                row(option, isHighlighted: index == highlightedIndex)
-                    // Hover only moves the active selection bar; only a
-                    // click (`onTapGesture` below) confirms a choice.
-                    .onHover { isHovering in
-                        if isHovering { highlightedIndex = index }
-                    }
-                    .onTapGesture { activate(option) }
+        panelChrome
+            .onAppear {
+                clampHighlight()
+                focusPanel()
             }
+            .onChange(of: query) { _, _ in
+                highlightedIndex = 0
+            }
+            .onChange(of: filtered.count) { _, _ in
+                clampHighlight()
+            }
+    }
+
+    @ViewBuilder
+    private var panelChrome: some View {
+        let chrome = VStack(alignment: .leading, spacing: 0) {
+            if isSearchable {
+                searchField
+                Divider().overlay(Theme.surface.divider)
+            }
+            optionsList
         }
-        .padding(Theme.spacing.s4)
         .frame(minWidth: minWidth)
         .background(
             RoundedRectangle(cornerRadius: radius, style: .continuous)
@@ -70,29 +97,92 @@ struct ComposerDropdownPanel: View {
         // can make the card fill read as translucent.
         .compositingGroup()
         .shadow(color: .black.opacity(Theme.opacity.muted), radius: 12, y: 4)
-        .focusable()
-        .focusEffectDisabled()
-        .focused($isFocused)
-        .onKeyPress(.upArrow) {
-            guard !options.isEmpty else { return .ignored }
-            highlightedIndex = (highlightedIndex - 1 + options.count) % options.count
-            return .handled
+
+        if isSearchable {
+            // Focus stays on the search field — do not attach `.focused` here.
+            chrome
+        } else {
+            chrome
+                .focusable()
+                .focusEffectDisabled()
+                .focused($isFocused)
+                .onKeyPress(.upArrow) { moveHighlight(-1) }
+                .onKeyPress(.downArrow) { moveHighlight(1) }
+                .onKeyPress(.return) { activateHighlighted() }
+                .onKeyPress(.escape) {
+                    onDismiss()
+                    return .handled
+                }
         }
-        .onKeyPress(.downArrow) {
-            guard !options.isEmpty else { return .ignored }
-            highlightedIndex = (highlightedIndex + 1) % options.count
-            return .handled
+    }
+
+    private var searchField: some View {
+        HStack(spacing: Theme.spacing.s8) {
+            Image(systemName: "magnifyingglass")
+                .accessibilityHidden(true)
+                .foregroundStyle(Theme.text.tertiary)
+                .font(Theme.typography.iconSmall)
+            TextField("Search models…", text: $query)
+                .textFieldStyle(.plain)
+                .font(Theme.typography.label)
+                .focused($isFocused)
+                .onSubmit { _ = activateHighlighted() }
+                .accessibilityLabel("Search models")
         }
-        .onKeyPress(.return) {
-            guard options.indices.contains(highlightedIndex) else { return .ignored }
-            activate(options[highlightedIndex])
-            return .handled
-        }
+        .padding(.horizontal, Theme.spacing.s8)
+        .padding(.vertical, Theme.spacing.s8)
+        // TextField steals focus, so arrows must be handled here (same
+        // pattern as `CommandPaletteView`).
+        .onKeyPress(.upArrow) { moveHighlight(-1) }
+        .onKeyPress(.downArrow) { moveHighlight(1) }
         .onKeyPress(.escape) {
             onDismiss()
             return .handled
         }
-        .onAppear { isFocused = true }
+    }
+
+    private var optionsList: some View {
+        // Overlay menus get an unbounded height proposal, so a bare
+        // `ScrollView` + `maxHeight` collapses to zero. Searchable catalogs
+        // (Cursor models) use a fixed-height scroller; short menus hug content.
+        // No scroll-to-highlight: hover already updates the wash, and
+        // auto-scrolling under the cursor is disorienting.
+        Group {
+            if isSearchable {
+                ScrollView {
+                    optionsStack
+                }
+                .scrollIndicators(.visible)
+                .frame(height: maxHeight)
+            } else {
+                optionsStack
+                    .frame(maxHeight: maxHeight)
+            }
+        }
+    }
+
+    private var optionsStack: some View {
+        VStack(alignment: .leading, spacing: Theme.spacing.s4 / 2) {
+            if filtered.isEmpty {
+                Text(isSearchable ? "No matching models" : "No options")
+                    .font(Theme.typography.caption)
+                    .foregroundStyle(Theme.text.tertiary)
+                    .padding(.horizontal, Theme.spacing.s8)
+                    .padding(.vertical, Theme.spacing.s8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                ForEach(Array(filtered.enumerated()), id: \.element.id) { index, option in
+                    row(option, isHighlighted: index == highlightedIndex)
+                        // Hover only moves the active selection bar; only a
+                        // click (`onTapGesture` below) confirms a choice.
+                        .onHover { isHovering in
+                            if isHovering { highlightedIndex = index }
+                        }
+                        .onTapGesture { activate(option) }
+                }
+            }
+        }
+        .padding(Theme.spacing.s4)
     }
 
     private func row(_ option: ComposerDropdownOption, isHighlighted: Bool) -> some View {
@@ -125,8 +215,41 @@ struct ComposerDropdownPanel: View {
         return opaqueItemBackgrounds ? Theme.surface.card : .clear
     }
 
+    private func moveHighlight(_ delta: Int) -> KeyPress.Result {
+        let items = filtered
+        guard !items.isEmpty else { return .ignored }
+        highlightedIndex = (highlightedIndex + delta + items.count) % items.count
+        return .handled
+    }
+
+    private func activateHighlighted() -> KeyPress.Result {
+        let items = filtered
+        guard items.indices.contains(highlightedIndex) else { return .ignored }
+        activate(items[highlightedIndex])
+        return .handled
+    }
+
     private func activate(_ option: ComposerDropdownOption) {
         option.action()
+    }
+
+    private func clampHighlight() {
+        let count = filtered.count
+        guard count > 0 else {
+            highlightedIndex = 0
+            return
+        }
+        if highlightedIndex >= count {
+            highlightedIndex = count - 1
+        }
+    }
+
+    /// Claims first responder after the overlay is in the hierarchy. A same-
+    /// turn assign can lose to the trigger button still holding focus.
+    private func focusPanel() {
+        Task { @MainActor in
+            isFocused = true
+        }
     }
 }
 
