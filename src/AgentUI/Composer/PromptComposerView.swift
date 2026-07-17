@@ -21,7 +21,7 @@ public struct PromptComposerView: View {
     @State private var isEditMode: Bool = false
     @State private var isDropTargeted: Bool = false
     @State private var showSlashPalette: Bool = false
-    @State private var slashPaletteHeight: CGFloat = 0
+    @State private var slashPaletteSelection: Int = 0
     @State private var showFilePicker: Bool = false
     @State private var filePickerQuery: String = ""
     @State private var selectedModelID: String = ""
@@ -65,59 +65,74 @@ public struct PromptComposerView: View {
             }
 
             VStack(spacing: Theme.spacing.s8) {
-                // File-picker popover is anchored to the text field.
-                TextField(promptPlaceholder,
-                          text: $draft, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .font(Theme.typography.body)
+                if showSlashPalette {
+                    SlashPaletteView(
+                        query: PromptComposerDraftLogic.slashQuery(from: draft),
+                        commands: model.slashCommands,
+                        selectedIndex: $slashPaletteSelection,
+                        onSelect: activateSlashCommand,
+                        onDismiss: { showSlashPalette = false }
+                    )
                     .padding(.horizontal, Theme.spacing.s12)
                     .padding(.top, Theme.spacing.s12)
-                    .padding(.bottom, Theme.spacing.s4)
-                    .focused($focused)
-                    .onSubmit(submit)
-                    .onChange(of: draft, handleDraftChange)
-                    .onDrop(of: [UTType.fileURL, UTType.image], isTargeted: $isDropTargeted,
-                            perform: handleDrop)
-                    .onPasteCommand(of: [UTType.fileURL, UTType.image], perform: handlePaste)
-                    .accessibilityLabel("Prompt input")
-                    .popover(isPresented: $showFilePicker,
-                             attachmentAnchor: .point(.top),
-                             arrowEdge: .bottom) {
-                        FilePickerView(
-                            query: filePickerQuery,
-                            files: fileIndex.files,
-                            onSelect: { path in
-                                insertAtPath(path)
-                                showFilePicker = false
-                                focused = true
-                            }
-                        )
-                    }
-                    .layoutPriority(1)
-                    .disabled(model.isComposerLockedForSessionResume)
-
-                HStack(alignment: .bottom, spacing: Theme.spacing.s8) {
-                    ComposerModeModelMenus(model: model,
-                                           selectedModelID: $selectedModelID)
-
-                    Spacer()
-
-                    composerMenu
-
-                    Button(action: openFilePicker) {
-                        Image(systemName: "paperclip")
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(Theme.text.secondary)
-                    .accessibilityLabel("Attach file")
-
-                    micButton
-
-                    actionButton
+                    .transition(.opacity)
                 }
-                .padding(.horizontal, Theme.spacing.s12)
-                .padding(.bottom, Theme.spacing.s8)
-                .disabled(model.isComposerLockedForSessionResume)
+
+                VStack(spacing: Theme.spacing.s8) {
+                    // File-picker popover is anchored to the text field.
+                    TextField(promptPlaceholder,
+                              text: $draft, axis: .vertical)
+                        .textFieldStyle(.plain)
+                        .font(Theme.typography.body)
+                        .padding(.horizontal, Theme.spacing.s12)
+                        .padding(.top, Theme.spacing.s12)
+                        .padding(.bottom, Theme.spacing.s4)
+                        .focused($focused)
+                        .onSubmit(handleSubmit)
+                        .onChange(of: draft, handleDraftChange)
+                        .onDrop(of: [UTType.fileURL, UTType.image], isTargeted: $isDropTargeted,
+                                perform: handleDrop)
+                        .onPasteCommand(of: [UTType.fileURL, UTType.image], perform: handlePaste)
+                        .accessibilityLabel("Prompt input")
+                        .popover(isPresented: $showFilePicker,
+                                 attachmentAnchor: .point(.top),
+                                 arrowEdge: .bottom) {
+                            FilePickerView(
+                                query: filePickerQuery,
+                                files: fileIndex.files,
+                                onSelect: { path in
+                                    insertAtPath(path)
+                                    showFilePicker = false
+                                    focused = true
+                                }
+                            )
+                        }
+                        .layoutPriority(1)
+                        .disabled(model.isComposerLockedForSessionResume)
+
+                    HStack(alignment: .bottom, spacing: Theme.spacing.s8) {
+                        ComposerModeModelMenus(model: model,
+                                               selectedModelID: $selectedModelID)
+
+                        Spacer()
+
+                        composerMenu
+
+                        Button(action: openFilePicker) {
+                            Image(systemName: "paperclip")
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Theme.text.secondary)
+                        .accessibilityLabel("Attach file")
+
+                        micButton
+
+                        actionButton
+                    }
+                    .padding(.horizontal, Theme.spacing.s12)
+                    .padding(.bottom, Theme.spacing.s8)
+                    .disabled(model.isComposerLockedForSessionResume)
+                }
             }
             .background(
                 RoundedRectangle(cornerRadius: Theme.corner.medium)
@@ -129,29 +144,6 @@ public struct PromptComposerView: View {
                                     : Color.clear, lineWidth: Theme.stroke.focus)
                     )
             )
-            .overlay(alignment: .topLeading) {
-                if showSlashPalette {
-                    SlashPaletteView(
-                        query: PromptComposerDraftLogic.slashQuery(from: draft),
-                        commands: model.slashCommands,
-                        onSelect: { command in
-                            if command.isProjectDefined {
-                                model.send(.runCustomCommand(path: command.name, args: []))
-                                draft = ""
-                            } else {
-                                model.send(.runSlashCommand(name: command.name, args: []))
-                                draft = ""
-                            }
-                            showSlashPalette = false
-                            focused = true
-                        },
-                        onDismiss: { showSlashPalette = false }
-                    )
-                    .positionedAboveAnchor(height: $slashPaletteHeight, gap: Theme.spacing.s4)
-                    .transition(.opacity)
-                    .zIndex(1)
-                }
-            }
             .animation(Theme.motion.resolve(Theme.motion.arriving, reduceMotion: reduceMotion),
                        value: showSlashPalette)
         }
@@ -204,7 +196,7 @@ public struct PromptComposerView: View {
                              isEditMode: isEditMode,
                              isSendDisabled: model.isComposerLockedForSessionResume
                                  || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                             submit: submit,
+                             submit: handleSubmit,
                              cancel: cancel)
     }
 
@@ -219,9 +211,35 @@ public struct PromptComposerView: View {
         let triggers = PromptComposerDraftLogic.paletteTriggers(for: new,
                                                                  showSlashPalette: showSlashPalette,
                                                                  showFilePicker: showFilePicker)
+        if triggers.showSlashPalette && !showSlashPalette {
+            slashPaletteSelection = 0
+        }
         showSlashPalette = triggers.showSlashPalette
         showFilePicker = triggers.showFilePicker
         filePickerQuery = triggers.filePickerQuery
+    }
+
+    private func handleSubmit() {
+        if showSlashPalette {
+            let query = PromptComposerDraftLogic.slashQuery(from: draft)
+            let filtered = PromptComposerDraftLogic.filteredSlashCommands(
+                from: model.slashCommands,
+                query: query
+            )
+            if filtered.indices.contains(slashPaletteSelection) {
+                activateSlashCommand(filtered[slashPaletteSelection])
+                return
+            }
+        }
+        submit()
+    }
+
+    private func activateSlashCommand(_ command: SlashCommand) {
+        model.activateSlashCommand(command)
+        draft = ""
+        showSlashPalette = false
+        slashPaletteSelection = 0
+        focused = true
     }
 
     // MARK: - Drag & drop
@@ -264,6 +282,13 @@ public struct PromptComposerView: View {
         guard !model.isComposerLockedForSessionResume else { return }
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
+        if let command = PromptComposerDraftLogic.exactSlashCommand(in: model.slashCommands, draft: text) {
+            draft = ""
+            isEditMode = false
+            model.activateSlashCommand(command)
+            focused = true
+            return
+        }
         draft = ""
         if isEditMode, let bubbleID = model.lastUserBubbleID {
             model.editAndResubmit(targetBubbleID: bubbleID, text: text, attachments: [])
@@ -293,6 +318,7 @@ public struct PromptComposerView: View {
             }
             Button("Open Slash Commands", systemImage: "terminal") {
                 if !draft.hasPrefix("/") { draft = "/" + draft }
+                slashPaletteSelection = 0
                 showSlashPalette = true
                 focused = true
             }

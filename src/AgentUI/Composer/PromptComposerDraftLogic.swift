@@ -1,4 +1,5 @@
 import Foundation
+import AgentCore
 
 /// Draft-input triggers and token insertion helpers extracted from the composer view.
 enum PromptComposerDraftLogic {
@@ -11,6 +12,20 @@ enum PromptComposerDraftLogic {
 
     static func slashQuery(from draft: String) -> String {
         draft.hasPrefix("/") ? String(draft.dropFirst()) : ""
+    }
+
+    static func filteredSlashCommands(from commands: [SlashCommand], query: String) -> [SlashCommand] {
+        let base = query.isEmpty ? commands : commands.filter {
+            $0.name.localizedCaseInsensitiveContains(query) ||
+            $0.summary.localizedCaseInsensitiveContains(query)
+        }
+        return Array(base.prefix(12))
+    }
+
+    static func exactSlashCommand(in commands: [SlashCommand], draft: String) -> SlashCommand? {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard text.hasPrefix("/"), !text.contains(" ") else { return nil }
+        return commands.first { $0.name == text }
     }
 
     static func paletteTriggers(for draft: String,

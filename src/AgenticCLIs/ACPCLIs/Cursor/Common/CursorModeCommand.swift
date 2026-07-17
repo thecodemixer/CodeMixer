@@ -71,7 +71,10 @@ public enum CursorModeCommand: String, Sendable, CaseIterable {
     /// entry that is intentionally not a chat mode.
     public static var slashCatalog: [SlashCommand] {
         let modes = allCases.map {
-            SlashCommand(id: $0.slashName, name: $0.slashName, summary: $0.catalogSummary)
+            SlashCommand(id: $0.slashName,
+                         name: $0.slashName,
+                         summary: $0.catalogSummary,
+                         sendsAsPrompt: false)
         }
         let debug = SlashCommand(
             id: "/debug",

@@ -204,18 +204,14 @@ struct ComposerMicButton: View {
 struct SlashPaletteView: View {
     let query: String
     let commands: [SlashCommand]
+    @Binding var selectedIndex: Int
     let onSelect: (SlashCommand) -> Void
     let onDismiss: () -> Void
 
-    @State private var selectedIndex: Int = 0
     @FocusState private var isFocused: Bool
 
     private var filtered: [SlashCommand] {
-        let base = query.isEmpty ? commands : commands.filter {
-            $0.name.localizedCaseInsensitiveContains(query) ||
-            $0.summary.localizedCaseInsensitiveContains(query)
-        }
-        return Array(base.prefix(12))
+        PromptComposerDraftLogic.filteredSlashCommands(from: commands, query: query)
     }
 
     var body: some View {
@@ -290,11 +286,22 @@ struct SlashPaletteView: View {
             return .handled
         }
         .onAppear {
-            selectedIndex = 0
+            if !filtered.indices.contains(selectedIndex) {
+                selectedIndex = 0
+            }
             isFocused = true
         }
         .onChange(of: query) { _, _ in
             selectedIndex = 0
+        }
+        .onChange(of: filtered.count) { _, count in
+            guard count > 0 else {
+                selectedIndex = 0
+                return
+            }
+            if selectedIndex >= count {
+                selectedIndex = count - 1
+            }
         }
     }
 }

@@ -11,6 +11,36 @@ extension EngineViewModel {
     /// then reconcile when the engine (and the Claude hook) echo `.userTurn`.
     /// Rolls the optimistic bubble back if the send throws.
     ///
+    /// Activate a slash-command palette entry. Mode-style slashes (e.g. Cursor
+    /// `/agent`) reuse the same `selectCommands` as the composer mode menu;
+    /// prompt-style commands get optimistic conversation feedback.
+    public func activateSlashCommand(_ command: SlashCommand) {
+        guard !isComposerLockedForSessionResume else { return }
+        if let mode = agentMode(matchingSlashName: command.name) {
+            selectedAgentModeID = mode.id
+            for cmd in mode.selectCommands { send(cmd) }
+            return
+        }
+        if !command.sendsAsPrompt {
+            if command.isProjectDefined {
+                send(.runCustomCommand(path: command.name, args: []))
+            } else {
+                send(.runSlashCommand(name: command.name, args: []))
+            }
+            return
+        }
+        sendPrompt(command.name)
+    }
+
+    func agentMode(matchingSlashName name: String) -> AgentModeOption? {
+        availableAgentModes.first { mode in
+            mode.selectCommands.contains { command in
+                guard case .runSlashCommand(let slashName, let args) = command else { return false }
+                return slashName == name && args.isEmpty
+            }
+        }
+    }
+
     /// Prefer this over `send(.sendPrompt(...))` from the UI so sending never
     /// waits on the PTY write + bus fan-out (visual-style §1.6).
     public func sendPrompt(_ text: String, attachments: [AttachmentRef] = []) {

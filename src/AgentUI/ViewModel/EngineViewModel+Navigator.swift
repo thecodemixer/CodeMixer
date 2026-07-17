@@ -340,6 +340,10 @@ extension EngineViewModel {
                 guard let self,
                       self.messages.isEmpty,
                       self.activeToolCalls.isEmpty else { return }
+                // Keep the empty-state "restoring" face while the composer is
+                // still gated — otherwise the hero flips to "Ready when you
+                // are" with a locked chat box.
+                guard !self.isComposerLockedForSessionResume else { return }
                 self.isSwitchingSession = false
                 self.sessionSwitchingTask = nil
             }
@@ -385,8 +389,7 @@ extension EngineViewModel {
             }
             guard !Task.isCancelled else { return }
             await MainActor.run {
-                self?.isComposerLockedForSessionResume = false
-                self?.composerResumeUnlockTask = nil
+                self?.unlockComposerForSessionResume()
             }
         }
     }
@@ -396,6 +399,11 @@ extension EngineViewModel {
         isComposerWaitingForClaudeCodeResume = false
         composerResumeUnlockTask?.cancel()
         composerResumeUnlockTask = nil
+        // Empty resumes never get replay content that would end the switch;
+        // drop the restoring banner once input is allowed again.
+        if isSwitchingSession, messages.isEmpty, activeToolCalls.isEmpty {
+            endSessionSwitch()
+        }
     }
 
     func sessionResumeNeedsClaudeCodeReadiness(projectPath: String, sessionID id: String) -> Bool {

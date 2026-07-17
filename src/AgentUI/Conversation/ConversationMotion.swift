@@ -39,14 +39,16 @@ private enum SessionSwitchEmptyTiming {
 }
 
 /// First-impression hero shown in the conversation pane before any turn has
-/// landed. Two faces: no workspace loaded yet, or a workspace ready and
-/// waiting for the first prompt. Transport-neutral — it only reads view-model
-/// state, never the agent.
+/// landed. Faces: no workspace, workspace ready for a prompt, or restoring a
+/// saved session (including while the composer is still gated on resume).
+/// Transport-neutral — it only reads view-model state, never the agent.
 ///
-/// While switching to a saved session the pane stays visually blank; copy
-/// appears only if replay is still in flight after `loadingCopyDelay`.
+/// While restoring a saved session the pane stays visually blank; copy
+/// appears only if restore is still in flight after `loadingCopyDelay`.
 struct ConversationEmptyState: View {
     let workspace: URL?
+    /// True while opening/replaying a saved session, or while the composer is
+    /// still locked waiting for live resume readiness.
     let isSwitchingSession: Bool
 
     @State private var showSwitchingCopy = false

@@ -115,6 +115,8 @@ public enum Theme {
         public static let compactControlMinWidth: CGFloat = 200
         /// Model picker in the composer bottom bar.
         public static let composerModelPickerMinWidth: CGFloat = compactControlMinWidth * 1.4
+        /// Caps the model dropdown so long catalogs (e.g. Cursor) scroll instead of overflowing the window.
+        public static let composerModelPickerMaxHeight: CGFloat = 320
         public static let commandPaletteMinWidth: CGFloat = 220
         public static let commandPaletteMaxWidth: CGFloat = 380
         public static let slashPaletteMinWidth: CGFloat = 280

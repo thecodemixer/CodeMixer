@@ -128,12 +128,21 @@ public struct SlashCommand: Sendable, Hashable, Identifiable {
     public let name: String
     public let summary: String
     public let isProjectDefined: Bool
+    /// When `false`, palette activation routes through `runSlashCommand` /
+    /// `runCustomCommand` (e.g. Cursor ACP mode switches). Default `true`
+    /// submits the command text as a user prompt with optimistic UI feedback.
+    public let sendsAsPrompt: Bool
 
-    public init(id: String, name: String, summary: String, isProjectDefined: Bool = false) {
+    public init(id: String,
+                name: String,
+                summary: String,
+                isProjectDefined: Bool = false,
+                sendsAsPrompt: Bool = true) {
         self.id = id
         self.name = name
         self.summary = summary
         self.isProjectDefined = isProjectDefined
+        self.sendsAsPrompt = sendsAsPrompt
     }
 }
 

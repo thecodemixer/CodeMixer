@@ -492,6 +492,47 @@ struct EngineViewModelTests {
         #expect(vm.slashCommands[0].name == "/test")
     }
 
+    @Test("activateSlashCommand routes Cursor mode slashes through selectCommands")
+    func activateSlashCommandCursorMode() async {
+        let port = RecordingCommandPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port, bus: bus)
+        vm.availableAgentModes = [
+            AgentModeOption(
+                id: "ask",
+                label: "Ask",
+                selectCommands: [.runSlashCommand(name: "/ask", args: [])]
+            ),
+        ]
+        vm.activateSlashCommand(
+            SlashCommand(id: "/ask", name: "/ask", summary: "Q&A mode", sendsAsPrompt: false)
+        )
+        await drain()
+        #expect(port.commands == [.runSlashCommand(name: "/ask", args: [])])
+        #expect(vm.selectedAgentModeID == "ask")
+        #expect(vm.messages.isEmpty)
+        await bus.shutdown()
+    }
+
+    @Test("activateSlashCommand sends built-in help as a prompt")
+    func activateSlashCommandPromptStyle() async {
+        let port = RecordingCommandPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port, bus: bus)
+        vm.activateSlashCommand(
+            SlashCommand(id: "/help", name: "/help", summary: "Show help")
+        )
+        await drain()
+        #expect(port.commands == [.sendPrompt(text: "/help", attachments: [])])
+        #expect(vm.messages.count == 1)
+        if case .user(_, let text) = vm.messages[0] {
+            #expect(text == "/help")
+        } else {
+            Issue.record("expected optimistic user bubble")
+        }
+        await bus.shutdown()
+    }
+
     // MARK: - toolEnd
 
     @Test("toolEnd marks the matching activeToolCall as finished with success + output")

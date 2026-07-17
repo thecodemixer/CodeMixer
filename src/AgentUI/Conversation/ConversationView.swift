@@ -41,7 +41,8 @@ public struct ConversationView: View {
 
             if isConversationEmpty {
                 ConversationEmptyState(workspace: model.workspace,
-                                       isSwitchingSession: model.isSwitchingSession)
+                                       isSwitchingSession: model.isSwitchingSession
+                                           || model.isComposerLockedForSessionResume)
                     .background(Theme.surface.canvas)
                     .transition(.opacity)
             } else {

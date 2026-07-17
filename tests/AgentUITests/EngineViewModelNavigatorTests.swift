@@ -442,6 +442,35 @@ struct EngineViewModelNavigatorTests {
         await bus.shutdown()
     }
 
+    @Test("openSession keeps switching state while empty resume still locks the composer")
+    func openSessionKeepsSwitchingWhileComposerLockedOnEmptyResume() async {
+        let port = RecordingPort()
+        let bus = MulticastEventBus()
+        let clock = FakeClock()
+        let vm = EngineViewModel(engine: port, bus: bus, clock: clock, random: FakeRandomSource())
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        vm.openSession(projectPath: "/Users/me/ws", id: "sess-42")
+        #expect(vm.isSwitchingSession)
+        #expect(vm.isComposerLockedForSessionResume)
+
+        await waitForPendingSleeps(clock, count: 2)
+        clock.advance(by: SessionSwitchingTiming.emptySessionFallback + .milliseconds(1))
+        try? await Task.sleep(for: .milliseconds(40))
+
+        #expect(vm.isSwitchingSession)
+        #expect(vm.isComposerLockedForSessionResume)
+
+        clock.advance(by: SessionSwitchingTiming.composerHardUnlock + .milliseconds(1))
+        try? await Task.sleep(for: .milliseconds(40))
+
+        #expect(!vm.isSwitchingSession)
+        #expect(!vm.isComposerLockedForSessionResume)
+
+        await bus.shutdown()
+    }
+
     @Test("openSession composer lock has a hard fallback")
     func openSessionComposerLockHardFallback() async {
         let port = RecordingPort()
