@@ -3,6 +3,7 @@ import OSLog
 import AgentCore
 import AgentRemoteControl
 import ClaudeCode
+import Codex
 
 /// `codemixerd` — the headless daemon.
 ///
@@ -23,6 +24,7 @@ struct CodemixerDaemon {
         await engine.bootstrap()
         let adapter = ClaudeAdapter()
         await AdapterRegistry.shared.register(adapter)
+        await AdapterRegistry.shared.register(CodexAdapter())
 
         let pairing = await RemoteRuntimeCoordinator.makePairing(seams: seams)
         let certificates = RemoteRuntimeCoordinator.makeCertificates(seams: seams)

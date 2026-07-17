@@ -32,8 +32,8 @@ public struct ResolvedEnvironment: Sendable, Equatable {
     /// Environment passed to a PTY-spawned agent child.
     ///
     /// Merges adapter overrides onto the resolved shell env, then strips keys
-    /// that would route Claude Code onto the SDK / API billing path instead of
-    /// the interactive subscription path (architecture §3.1).
+    /// that would route Claude Code onto the SDK / Agent Credits path instead
+    /// of the interactive subscription path (architecture §3.1).
     public func ptySpawnEnvironment(adapterOverrides: [String: String] = [:]) -> [String: String] {
         var merged = withOverrides(adapterOverrides)
         for key in Self.billingPoisonKeys {

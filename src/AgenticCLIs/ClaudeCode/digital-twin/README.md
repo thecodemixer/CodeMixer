@@ -28,7 +28,7 @@ Derived from behavior matrices in `CONTRACT.md`:
 - `--print` non-interactive mode
 - Deep subagent recursion (>1 level)
 - Undocumented transcript internals — hooks supply `transcript_path` / `last_assistant_message`; live harness verifies fusion policy
-- Real interactive billing path — use live harness / spikes, not the twin
+- Real interactive billing path / Agent Credits avoidance — use live harness / spikes, not the twin
 
 ## Verified against
 
@@ -54,4 +54,4 @@ Fixtures: `tests/AgenticCLIs/ClaudeCode/ClaudeAdapterTests/Fixtures/`
 
 - Contract spec: [`../CONTRACT.md`](../CONTRACT.md)
 - Conformance: `TwinDecoderParityTests`, `ConformanceFixturesTests`, `FakeClaudeIntegrationTests`
-- Live account (not twin): `LiveClaudeHarness` / `LiveClaudeIntegrationTests` in `ClaudeCodeTwinTests`
+- Live account (not twin): `LiveClaudeHarness` / `LiveClaudeIntegrationTests` in `ClaudeAdapterTests`

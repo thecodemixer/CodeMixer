@@ -25,6 +25,9 @@ public final class EngineViewModel {
     public internal(set) var status: StatusLine = .idle
     public internal(set) var activity: ActivitySubstate = .idle
     public internal(set) var changedFiles: [String] = []
+    /// WebSocket peers attached to `RemoteControlServer` (server-side count).
+    /// In Mode B includes the loopback GUI; in Mode A counts external peers only.
+    /// See `docs/architecture.md` §4.1 and `Remote/AgentRemoteControl/README.md`.
     public internal(set) var connectedRemoteClients: Int = 0
     public internal(set) var isSwitchingSession: Bool = false
     public internal(set) var sessionTokens: Int = 0

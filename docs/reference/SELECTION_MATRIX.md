@@ -37,7 +37,7 @@ Start with a problem. Find the row. Adopt the pattern. The library is curated, n
 | Problem | Pattern | Frequently combines with |
 | --- | --- | --- |
 | "I need to spawn a subprocess from Swift safely" | [posix-child-lifecycle](patterns/posix-child-lifecycle.md) | typed-errors-and-wire, structured-logging-with-privacy |
-| "My subprocess needs a controlling TTY (e.g. for interactive billing)" | posix-child-lifecycle → §"PTY spawn" | dependency-injection-seams (Environment) |
+| "My subprocess needs a controlling TTY (e.g. Claude interactive billing / Agent Credits avoidance)" | posix-child-lifecycle → §"PTY spawn" | dependency-injection-seams (Environment) |
 | "Children are leaking as zombies on crash" | posix-child-lifecycle → §"Reaper" | (foundational for any spawner) |
 | "I have a helper process that needs to push events to the host" | [ipc-server-listener](patterns/ipc-server-listener.md) | typed-errors-and-wire |
 | "I need to react to filesystem changes" | [filesystem-watch-with-debounce](patterns/filesystem-watch-with-debounce.md) | (consume into event-sourced-typed-port-core) |

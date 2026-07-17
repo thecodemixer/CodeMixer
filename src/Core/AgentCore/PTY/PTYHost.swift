@@ -12,7 +12,7 @@ import OSLog
 /// exactly once. After close, the host is inert — further reads complete the
 /// stream, further writes throw `.alreadyClosed`. The reaper task awaits the
 /// child's exit and forwards the status via `exitStatus`.
-public actor PTYHost: AgentPTY {
+public actor PTYHost {
 
     /// Description of the child to spawn under the new pty.
     public struct ChildSpec: Sendable {

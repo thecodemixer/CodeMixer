@@ -43,10 +43,11 @@ public protocol Adapter: Sendable {
     var displayName: String { get }
     var iconSymbol: String { get }      // SF Symbol or platform equivalent
 
-    // 2. Discovery & launch
+    // 2. Discovery, launch & transport
     func locateBinary(env: ResolvedEnvironment) async throws -> URL
     func defaultEnvOverrides() -> [String: String]
     func buildLaunchArgv(context: LaunchContext) -> [String]
+    var transportDescriptor: AgentTransportDescriptor { get }
 
     // 3. Authentication
     func authStatus(env: ResolvedEnvironment) async -> AuthStatus
@@ -62,6 +63,8 @@ public protocol Adapter: Sendable {
     // 6. Sending input
     func encodeUserInput(_ text: String) -> Data
     func cancelSequence() -> Data
+    func sessionBootstrapBytes(context: LaunchContext) -> Data
+    func encodeCommand(_ command: AgentCommand) -> Data?
 
     // 7. Permission responses (if applicable)
     func encodePermissionResponse(_ decision: PermissionDecision,
@@ -83,9 +86,43 @@ public protocol Adapter: Sendable {
 }
 ```
 
-Codemixer's live protocol uses `SlashCommand`, `AgentModelOption`, and `ToolRenderHint` names — see `AgentAdapter.swift`.
+Codemixer's live protocol uses `SlashCommand`, `AgentModelOption`, and
+transport-specific `AgentTransportDescriptor` names — see `AgentAdapter.swift`.
 
-Eleven sections. Each one is a *boundary* — a place where vendor specifics would otherwise leak into the core. Skipping a section because "vendor X doesn't need it" is fine if and only if you have a sentinel return (`nil`, `[]`, `.none`) that the core can interpret as "skip this wiring."
+Each section is a *boundary* — a place where vendor specifics would otherwise
+leak into the core. Skipping a section because "vendor X doesn't need it" is
+fine only when the core has an explicit interpretation for that sentinel
+(`nil`, `[]`, `.none`). Silent skips are not allowed.
+
+## Transport Descriptors
+
+Transport is declared by the adapter, not inferred from capabilities:
+
+```swift
+public enum AgentTransportKind: Sendable, Hashable, Codable {
+    case interactiveTerminal
+    case stdioJSONRPC
+    case agentClientProtocol
+}
+
+public struct AgentTransportDescriptor: Sendable, Hashable, Codable {
+    public static let interactiveTerminal: Self
+    public static let stdioJSONRPC: Self
+    public static let agentClientProtocol: Self
+}
+```
+
+- Claude Code declares `.interactiveTerminal`; the implementation wraps
+  `PTYHost` + `TerminalEngine` so the real CLI stays on the interactive billing
+  path and avoids Agent Credits from third-party / SDK-style Claude Code
+  invocations.
+- Codex declares `.stdioJSONRPC`; the implementation spawns
+  `codex app-server --stdio` and sends JSON-RPC frames directly.
+- `.agentClientProtocol` is reserved and currently returns an explicit
+  unsupported transport error until a real ACP implementation lands.
+
+Transport is not a capability bit. Capabilities describe optional signal
+sources and adapter features; transport describes the process/connection shape.
 
 ---
 
@@ -124,12 +161,12 @@ The adapter ingests *multiple* raw signal sources and emits *one* normalised `Ev
 
 ```swift
 public struct AdapterInputs: Sendable {
-    public let rawBytes: AsyncStream<Data>             // primary subprocess output
+    public let outputBytes: AsyncStream<Data>          // primary subprocess output
     public let hookSocket: HookSocketHandle?           // nil unless .hooksOverIPC
     public let workspace: URL
     public let sessionID: AsyncStream<String>          // hot stream — empty until known
     public let fsEvents: AsyncStream<FSEvent>?          // nil unless .fsEventsHints
-    public let screen: any TerminalSnapshotting?       // nil for non-TUI vendors
+    public let terminal: (any TerminalSnapshotting)?   // nil for non-terminal vendors
 }
 
 public extension Adapter {
@@ -137,7 +174,7 @@ public extension Adapter {
         AsyncStream { continuation in
             Task {
                 async let hookEvents = consumeHooks(inputs.hookSocket)
-                async let outputEvents = consumeRawOutput(inputs.rawBytes)
+                async let outputEvents = consumeRawOutput(inputs.outputBytes)
                 async let fsEvents = consumeFSEvents(inputs.fsEvents)
 
                 for await event in merge(hookEvents, outputEvents, fsEvents) {

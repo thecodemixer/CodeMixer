@@ -39,11 +39,13 @@ On Stop/SubagentStop, `ClaudeAdapter` drains the transcript first, then drops ho
 `assistantText` when `ClaudeTranscriptTailer.hasEmittedAssistantText()` is true.
 Without this, every turn would paint two assistant bubbles (transcript + Stop).
 
-### Interactive billing path (no `-p`)
+### Interactive billing path (avoid Agent Credits)
 
 `buildLaunchArgv` launches bare `claude` under a PTY — never `--print` / `-p` /
-stream-json. Live transcript markers should show `entrypoint: "cli"` and
-`promptSource: "typed"` (not `sdk-cli` / `sdk`). Opt-in validation:
+stream-json. This keeps Codemixer off the Agent Credits path used by
+third-party / SDK-style Claude Code invocations. Live transcript markers should
+show `entrypoint: "cli"` and `promptSource: "typed"` (not `sdk-cli` / `sdk`).
+Opt-in validation:
 [`tests/AgenticCLIs/README.md`](../../../tests/AgenticCLIs/README.md#live-claude-harness-claudecodetwintests).
 
 ## Settings
@@ -64,7 +66,7 @@ PTY: `1\r` allow, `2\r` allow-always, `3\r` deny. Workspace trust: `1\r` trust, 
 
 - In-process: `ClaudeCodeTwin` (`digital-twin/Twin/`) — fast projection tests.
 - Executable: `fake-claude` — integration authority (`CODEMIXER_FAKE_CLAUDE=1`).
-- Live account: `LiveClaudeHarness` in `ClaudeCodeTwinTests` (`CODEMIXER_LIVE_CLAUDE=1`).
+- Live account: `LiveClaudeHarness` in `ClaudeAdapterTests` (`CODEMIXER_LIVE_CLAUDE=1`).
 - Coverage statement: [`digital-twin/README.md`](digital-twin/README.md).
 - Test catalog: [`tests/AgenticCLIs/README.md`](../../../tests/AgenticCLIs/README.md).
 

@@ -11,7 +11,8 @@ import OSLog
 /// recent context.
 ///
 /// Each published event is tagged with a bus-assigned `UUID` in
-/// `HistoryEntry`. Remote clients store the last `entryID` they received
+/// `HistoryEntry`. Wire consumers (remote clients in the client-role sense —
+/// see `docs/architecture.md` §4.1) store the last `entryID` they received
 /// and pass it back in the `subscribe` frame on reconnect; the bus then
 /// replays only the slice they missed — avoiding duplicate delivery.
 public actor MulticastEventBus {

@@ -4,6 +4,7 @@ import AgentCore
 import AgentUI
 import AgentProtocol
 import ClaudeCode
+import Codex
 import AgentRemoteControl
 
 @MainActor
@@ -14,6 +15,7 @@ final class Bootstrap {
     var remoteFingerprint: String?
     var remoteHost: RemoteControlServer.BindHost = .loopback
     var showProjectPicker: Bool = false
+    var showNewProjectSheet: Bool = false
     var showSettings: Bool = false
     var showDebugTerminal: Bool = false
     var showEventLog: Bool = false
@@ -23,12 +25,18 @@ final class Bootstrap {
     var startupError: String?
     /// Non-nil when the last `openWorkspace` failed with `binaryNotFound`.
     var installHint: String?
+    /// Folder chosen via Open Project that has no stored agent mode yet.
+    var pendingConfigureURL: URL?
+    var pendingConfigureResumeSessionID: String?
 
     let voice = VoiceInputService()
     let tts = TTSService()
     private let notifications = UserNotificationBridge()
 
     var engine: AgentEngine?
+    /// Mode B only: loopback `RemoteEngineClient` that implements
+    /// `AgentEngineCommandPort` for `EngineViewModel`. Not the server's
+    /// connected-peer count — see `EngineViewModel.connectedRemoteClients`.
     var remoteClient: RemoteEngineClient?
     var eventBus: MulticastEventBus?
     var remoteRuntime: RemoteRuntimeCoordinator?
@@ -48,6 +56,7 @@ final class Bootstrap {
 
         let adapter = ClaudeAdapter()
         await AdapterRegistry.shared.register(adapter)
+        await AdapterRegistry.shared.register(CodexAdapter())
 
         let env = Seams.live.environment.processEnvironment()
         if env["CODEMIXER_UI_BACKEND"] == "daemon" {
@@ -70,7 +79,7 @@ final class Bootstrap {
         viewModel = model
         eventBus = engine.bus
         recents = await engine.sessions.recents()
-        model.availableModels = adapter.availableModels()
+        model.availableModels = []
 
         // Session navigator wiring (agent-agnostic): the lister resolves the
         // adapter via the registry so AgentUI never imports a concrete adapter.
@@ -78,23 +87,21 @@ final class Bootstrap {
                                                    fileSystem: Seams.live.fileSystem)
         await projectsStore.load()
         model.workspaceProjects = projectsStore
-        let adapterID = adapter.id
         model.sessionLister = { url in
-            guard let resolved = await AdapterRegistry.shared.adapter(for: adapterID) else { return [] }
-            return await resolved.listResumableSessions(workspace: url)
+            await Self.listSessions(for: url)
         }
-        model.supportsResumableSessions = adapter.capabilities.contains(.resumableSessions)
+        model.supportsResumableSessions = true
         model.sidebarVisible = await engine.prefs.state().appearance.sidebarVisible
         model.hydrate(from: await engine.prefs.state())
 
         startAppEventBridge(bus: engine.bus)
 
-        if recents.isEmpty {
-            showProjectPicker = true
-        } else if let lastPath = recents.first?.path {
-            // Reopen the last workspace but start a fresh chat — never pass
-            // `lastSessionID`; the user resumes a saved session explicitly.
-            await openWorkspace(URL(fileURLWithPath: lastPath), resumeSessionID: nil)
+        // Restore the last open workspace when the user did not Close Workspace.
+        // Otherwise show the Open Project picker.
+        if let active = await projectsStore.activeWorkspaceURL() {
+            await openWorkspace(active, resumeSessionID: nil)
+        } else {
+            presentProjectPicker()
         }
 
         // Remote control is opt-in for the GUI. Starting it eagerly touches the
@@ -102,7 +109,52 @@ final class Bootstrap {
         // intrusive for a local-only chat launch.
     }
 
+    /// Reliable entry point for File → Open Project. Mutating the flag through
+    /// a method (rather than a menu closure capturing `@State`) keeps SwiftUI
+    /// observation wired when the sheet was previously dismissed.
+    func presentProjectPicker() {
+        pendingConfigureURL = nil
+        pendingConfigureResumeSessionID = nil
+        showProjectPicker = true
+    }
+
+    /// File → New Workspace: close the current workspace (if any) and pick a folder.
+    func presentNewWorkspace() async {
+        if workspace != nil {
+            await closeWorkspace()
+        } else {
+            presentProjectPicker()
+        }
+    }
+
+    /// File → New Project: create a subfolder project in the open workspace.
+    func presentNewProjectSheet() {
+        guard workspace != nil else { return }
+        showNewProjectSheet = true
+    }
+
+    /// File → Close Workspace: clear the active-workspace restore flag, shut
+    /// down the agent, and return to the project picker.
+    func closeWorkspace() async {
+        showProjectPicker = false
+        showNewProjectSheet = false
+        pendingConfigureURL = nil
+        pendingConfigureResumeSessionID = nil
+        installHint = nil
+        startupError = nil
+        try? await viewModel?.workspaceProjects?.clearActiveWorkspace()
+        if let engine {
+            await engine.shutdown(reason: .userCancel)
+            recents = await engine.sessions.recents()
+        }
+        workspace = nil
+        viewModel?.resetForClosedWorkspace()
+        presentProjectPicker()
+    }
+
     func connectDaemonBackedUI(adapter: ClaudeAdapter) async -> Bool {
+        // Client role: GUI becomes a WebSocket consumer of codemixerd (Mode B).
+        // On success there is no in-process AgentEngine — see architecture.md §4.1.
         let client = RemoteEngineClient(configuration: .init(reconnect: .daemon))
         do {
             try await client.connect()
@@ -114,7 +166,7 @@ final class Bootstrap {
         let model = EngineViewModel(engine: client, bus: client.bus)
         model.availableModels = adapter.availableModels()
         viewModel = model
-        showProjectPicker = true
+        presentProjectPicker()
         startAppEventBridge(bus: client.bus)
         return true
     }
@@ -155,49 +207,117 @@ final class Bootstrap {
         }
     }
 
+    /// Opens a folder after resolving its agent mode from project-local state
+    /// or the workspace index. If neither knows the mode, presents the
+    /// configure sheet instead of guessing.
     func openWorkspace(_ url: URL, resumeSessionID: String?) async {
         showProjectPicker = false
+        let resolved: ProjectAgentMode?
+        if let store = viewModel?.workspaceProjects {
+            resolved = await store.resolveAgentMode(for: url)
+        } else {
+            resolved = ProjectLocalStateStore.load(from: url, fileSystem: Seams.live.fileSystem)?.agentMode
+        }
+        if let mode = resolved {
+            await openWorkspace(url, resumeSessionID: resumeSessionID, agentMode: mode)
+            return
+        }
+        pendingConfigureURL = url
+        pendingConfigureResumeSessionID = resumeSessionID
+    }
+
+    func confirmPendingProjectConfiguration(mode: ProjectAgentMode) async {
+        guard let url = pendingConfigureURL else { return }
+        let resume = pendingConfigureResumeSessionID
+        pendingConfigureURL = nil
+        pendingConfigureResumeSessionID = nil
+        await openWorkspace(url, resumeSessionID: resume, agentMode: mode)
+    }
+
+    func cancelPendingProjectConfiguration() {
+        pendingConfigureURL = nil
+        pendingConfigureResumeSessionID = nil
+        if workspace == nil {
+            presentProjectPicker()
+        }
+    }
+
+    func openWorkspace(_ url: URL, resumeSessionID: String?, agentMode: ProjectAgentMode) async {
+        showProjectPicker = false
+        pendingConfigureURL = nil
+        pendingConfigureResumeSessionID = nil
         installHint = nil
         startupError = nil
         guard let engine = engine else {
             workspace = url
             viewModel?.send(.openProject(path: url.path, resumeSessionID: resumeSessionID))
-            configureSlashCommands(for: url)
+            try? await viewModel?.workspaceProjects?.markActiveWorkspace(url)
+            Task { await configureSlashCommands(for: url, mode: agentMode) }
             return
         }
         await engine.shutdown(reason: .userCancel)
-        let adapter = ClaudeAdapter()
+        let projectsStore = viewModel?.workspaceProjects
+        _ = await projectsStore?.projects(for: url, rootMode: agentMode)
+        if let store = projectsStore {
+            _ = try? await store.setAgentMode(path: url.path, mode: agentMode, in: url)
+        }
+
+        guard let adapter = await Self.adapter(for: agentMode) else {
+            startupError = "Select a concrete agent for this mixed or custom project before starting a session."
+            workspace = nil
+            try? await projectsStore?.clearActiveWorkspace()
+            presentProjectPicker()
+            return
+        }
         do {
             try await engine.start(adapter: adapter,
                                    workspace: url,
                                    resumeSessionID: resumeSessionID)
             workspace = url
+            viewModel?.availableModels = adapter.availableModels()
+            viewModel?.supportsResumableSessions = adapter.capabilities.contains(.resumableSessions)
+            viewModel?.refreshProjects(rootMode: agentMode)
+            try? await projectsStore?.markActiveWorkspace(url)
         } catch let err as AgentError {
             if case .binaryNotFound(_, let hint) = err {
-                // Surface the install-claude sheet.
                 installHint = hint
             } else {
                 startupError = err.userMessage
             }
             workspace = nil
-            showProjectPicker = true
+            try? await projectsStore?.clearActiveWorkspace()
+            presentProjectPicker()
         } catch {
             startupError = error.localizedDescription
             workspace = nil
-            showProjectPicker = true
+            try? await projectsStore?.clearActiveWorkspace()
+            presentProjectPicker()
         }
         recents = await engine.sessions.recents()
         if workspace != nil {
-            configureSlashCommands(for: url)
+            await configureSlashCommands(for: url, mode: agentMode)
         }
     }
 
-    func configureSlashCommands(for url: URL) {
-        // Populate the slash-command palette from the adapter catalog + project commands.
-        let claudeDir = Seams.live.environment.claudeDirectory
-        let commands = ClaudeSlashCommands.builtIn +
-            ClaudeSlashCommands.enumerateProjectCommands(workspace: url,
-                                                         claudeDirectory: claudeDir)
-        viewModel?.slashCommands = commands
+    func configureSlashCommands(for url: URL, mode: ProjectAgentMode) async {
+        guard let adapter = await Self.adapter(for: mode) else {
+            viewModel?.slashCommands = []
+            return
+        }
+        let projectCommands = await adapter.enumerateProjectCommands(workspace: url)
+        viewModel?.slashCommands = adapter.slashCommandCatalog + projectCommands
+    }
+
+    private static func adapter(for mode: ProjectAgentMode) async -> (any AgentAdapter)? {
+        await ProjectAgentRouter.resolveAdapter(mode: mode)
+    }
+
+    private static func listSessions(for url: URL) async -> [SessionSummary] {
+        let adapters = await AdapterRegistry.shared.all()
+        var sessions: [SessionSummary] = []
+        for adapter in adapters where adapter.capabilities.contains(.resumableSessions) {
+            sessions += await adapter.listResumableSessions(workspace: url)
+        }
+        return sessions.sorted { $0.lastActivity > $1.lastActivity }
     }
 }

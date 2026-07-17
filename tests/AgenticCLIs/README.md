@@ -6,16 +6,18 @@ Test suites for adapters under `src/AgenticCLIs/` mirror that layout here:
 tests/AgenticCLIs/
 ├── README.md                 # this file
 └── <AgentName>/              # one folder per agent (e.g. ClaudeCode)
-    ├── <Agent>AdapterTests/  # SPM test target — adapter parsers, hooks, transcript
-    └── <Agent>TwinTests/     # optional second target — digital-twin + engine E2E
+    ├── <Agent>AdapterTests/  # SPM test target — adapter contract, parsers, production integration
+    └── <Agent>TwinTests/     # optional second target — digital-twin + twin engine E2E
 ```
 
-Claude Code (v1):
+Claude Code and Codex:
 
-| SPM test target | Path |
-| --- | --- |
-| `ClaudeAdapterTests` | `ClaudeCode/ClaudeAdapterTests/` |
-| `ClaudeCodeTwinTests` | `ClaudeCode/ClaudeCodeTwinTests/` |
+| SPM test target | Path | Concern |
+| --- | --- | --- |
+| `ClaudeAdapterTests` | `ClaudeCode/ClaudeAdapterTests/` | Production adapter contract, parsers, `fake-claude` + opt-in live harness |
+| `ClaudeCodeTwinTests` | `ClaudeCode/ClaudeCodeTwinTests/` | `ClaudeCodeTwin` projection and twin-driven engine E2E |
+| `CodexAdapterTests` | `Codex/CodexAdapterTests/` | App Server framing/RPC, scripted transports, opt-in live harness |
+| `CodexTwinTests` | `Codex/CodexTwinTests/` | `CodexTwin` projection only |
 
 Target names stay stable; only directory paths move when colocating with `src/AgenticCLIs/<AgentName>/`.
 
@@ -23,25 +25,25 @@ Source layout, twin rules, and the add-agent checklist: [`src/AgenticCLIs/README
 
 ---
 
-## Live Claude harness (`ClaudeCodeTwinTests`)
+## Live Claude harness (`ClaudeAdapterTests`)
 
-`ClaudeCodeTwinTests` includes an **opt-in** live-account harness for the production
+`ClaudeAdapterTests` includes an **opt-in** live-account harness for the production
 interactive PTY path (`AgentEngine` + `ClaudeAdapter` + hooks + transcript tailer).
 It does **not** use `claude -p` / `--print` — that path bills against API credits,
 not the interactive subscription.
 
 | File | Role |
 | --- | --- |
-| `ClaudeCode/ClaudeCodeTwinTests/LiveClaudeHarness.swift` | Reusable driver — spawn, trust auto-approve, prompt, assert |
-| `ClaudeCode/ClaudeCodeTwinTests/LiveClaudeIntegrationTests.swift` | Suite `AgentEngine + ClaudeAdapter live harness` |
+| `ClaudeCode/ClaudeAdapterTests/LiveClaudeHarness.swift` | Reusable driver — spawn, trust auto-approve, prompt, assert |
+| `ClaudeCode/ClaudeAdapterTests/LiveClaudeIntegrationTests.swift` | Suite `AgentEngine + ClaudeAdapter live harness` |
 
-### When to use which twin/live path
+### When to use which Claude adapter/twin path
 
 | Path | Binary | Login required | Suite |
 | --- | --- | --- | --- |
-| `ClaudeCodeTwin` projection | In-process twin | No | `EngineDigitalTwinTests` |
+| `ClaudeCodeTwin` projection | In-process twin | No | `EngineDigitalTwinTests` (`ClaudeCodeTwinTests`) |
 | `fake-claude` spawned | `fake-claude` | No | `FakeClaudeIntegrationTests` (`ClaudeAdapterTests`) |
-| **Live harness** | Real `claude` on PATH | Yes | `LiveClaudeIntegrationTests` |
+| **Live harness** | Real `claude` on PATH | Yes | `LiveClaudeIntegrationTests` (`ClaudeAdapterTests`) |
 
 ### Running
 
@@ -125,4 +127,80 @@ Static helpers for assertions without a full turn:
 
 - `LiveClaudeHarness.launchArgvIsInteractive()` — argv never contains `-p` / `--print`.
 - `LiveClaudeHarness.billingMarkers(in:prompt:)` — parse transcript JSONL billing fields.
+
+---
+
+## Live Codex harness (`CodexAdapterTests`)
+
+`CodexAdapterTests` includes an **opt-in** live-account harness for the production
+App Server stdio path (`AgentEngine` + `CodexAdapter` + `StdioJSONRPCTransport`).
+It does **not** use terminal emulation or a PTY.
+
+| File | Role |
+| --- | --- |
+| `Codex/CodexAdapterTests/LiveCodexHarness.swift` | Reusable driver — spawn, bootstrap, prompt, assert |
+| `Codex/CodexAdapterTests/LiveCodexIntegrationTests.swift` | Suite `AgentEngine + CodexAdapter live harness` |
+
+### When to use which Codex adapter/twin path
+
+| Path | Binary | Login required | Suite |
+| --- | --- | --- | --- |
+| `CodexTwin` projection | In-process twin | No | `CodexTwinTests` |
+| Scripted transport | Fixture bytes | No | `CodexAdapterTests` |
+| **Live harness** | Real `codex` on PATH | Yes | `LiveCodexIntegrationTests` (`CodexAdapterTests`) |
+
+### Running
+
+Default `swift test` **skips** the live turn silently (no failure). One fast argv
+guard always runs.
+
+```bash
+# Fast argv guard only (live turn skipped)
+swift test --no-parallel --filter LiveCodex
+
+# Full live validation — logged-in codex
+CODEMIXER_LIVE_CODEX=1 swift test --no-parallel --filter LiveCodexIntegrationTests
+```
+
+### Environment variables
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `CODEMIXER_LIVE_CODEX=1` | Yes (for live turn) | Opt in to network + real Codex account |
+| `CODEMIXER_LIVE_WORKSPACE` | No | Workspace directory (defaults to process cwd) |
+| `CODEX_BIN` | No | Override `codex` executable path |
+
+Prerequisites: `codex` installed and authenticated (`codex login status`).
+
+### What the harness does
+
+1. Starts `AgentEngine` with `Seams.live` and the production `CodexAdapter`.
+2. Spawns `codex app-server --stdio` and writes the bootstrap sequence
+   (`initialize`, `initialized`, `thread/start`).
+3. Waits for adapter `sessionStarted` with a non-empty Codex thread id.
+4. Sends one `sendPrompt`, auto-approves permission prompts.
+5. Waits for final `assistantText` and asserts **exactly one** final reply.
+
+Runtime budget override: `scripts/test-runtime-overrides.json` →
+`AgentEngine + CodexAdapter live harness` (180s when enabled).
+
+### Reusing `LiveCodexHarness` in new tests
+
+```swift
+guard LiveCodexHarness.isEnabled() else { return }
+
+let harness = LiveCodexHarness()
+var config = LiveCodexHarness.defaultConfiguration()
+config.prompt = "Reply with exactly: codemixer-codex-pong"
+config.expectedFinalSubstring = "codemixer-codex-pong"
+
+let result = try await harness.runTurn(config)
+// result.events, result.threadID, result.finalAssistantText,
+// result.finalAssistantTextCount
+```
+
+Static helpers for assertions without a full turn:
+
+- `LiveCodexHarness.launchArgvIsAppServerStdio()` — argv is `codex app-server --stdio`.
+- `LiveCodexHarness.transportIsStdioJSONRPC()` — descriptor matches the stdio JSON-RPC transport.
 

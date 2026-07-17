@@ -23,6 +23,8 @@ public final class ClaudeAdapter: AgentAdapter, @unchecked Sendable {
          .permissionPrompts, .resumableSessions]
     }
 
+    public var transportDescriptor: AgentTransportDescriptor { .interactiveTerminal }
+
     private let binaryLocator: ClaudeBinaryLocator
     private let hookDecoder: ClaudeHookDecoder
     private let environment: any AgentEnvironment
@@ -172,7 +174,7 @@ public final class ClaudeAdapter: AgentAdapter, @unchecked Sendable {
                 while !Task.isCancelled {
                     try? await Task.sleep(for: ActivityTiming.noEventPollInterval)
                     guard shouldScrapeTUI(hooksActive: hooksFlag.active) else { continue }
-                    let rows = await inputs.screen.snapshotRows()
+                    let rows = await inputs.terminal?.snapshotRows() ?? []
                     let snapshot = TerminalSnapshot(
                         lines: rows.enumerated().map { TerminalLine(text: $0.element, row: $0.offset) }
                     )

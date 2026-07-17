@@ -25,8 +25,8 @@ struct ClaudeAdapterEventStreamTests {
         let hookHandle = HookSocketHandle(incoming: hookStream, respond: { _, _ in })
         let adapter = ClaudeAdapter(environment: environment, fileSystem: fileSystem)
         let stream = adapter.makeEventStream(inputs: AgentInputs(
-            ptyOutput: AsyncStream { $0.finish() },
-            screen: EmptyScreen(),
+            outputBytes: AsyncStream { $0.finish() },
+            terminal: EmptyScreen(),
             hookSocket: hookHandle,
             workspace: workspace,
             sessionID: AsyncStream { $0.finish() }
@@ -67,8 +67,8 @@ struct ClaudeAdapterEventStreamTests {
         let hookHandle = HookSocketHandle(incoming: hookStream, respond: { _, _ in })
         let adapter = ClaudeAdapter(environment: environment, fileSystem: fileSystem)
         let stream = adapter.makeEventStream(inputs: AgentInputs(
-            ptyOutput: AsyncStream { $0.finish() },
-            screen: EmptyScreen(),
+            outputBytes: AsyncStream { $0.finish() },
+            terminal: EmptyScreen(),
             hookSocket: hookHandle,
             workspace: workspace,
             sessionID: AsyncStream { $0.finish() }
@@ -106,8 +106,8 @@ struct ClaudeAdapterEventStreamTests {
         let hookHandle = HookSocketHandle(incoming: hookStream, respond: { _, _ in })
         let adapter = ClaudeAdapter(environment: environment, fileSystem: fileSystem)
         let stream = adapter.makeEventStream(inputs: AgentInputs(
-            ptyOutput: AsyncStream { $0.finish() },
-            screen: EmptyScreen(),
+            outputBytes: AsyncStream { $0.finish() },
+            terminal: EmptyScreen(),
             hookSocket: hookHandle,
             workspace: workspace,
             sessionID: AsyncStream { $0.finish() }

@@ -131,7 +131,7 @@ struct FakeClaudeIntegrationTests {
         let fs = SystemFileSystem()
         let seams = Seams.fake(clock: clock, environment: env, fileSystem: fs)
         let pty = TestPTY()
-        let engine = AgentEngine(seams: seams, ptyFactory: { _ in pty })
+        let engine = AgentEngine(seams: seams, transportFactory: { _, _ in pty })
         await engine.bootstrap()
 
         let adapter = ClaudeAdapter(environment: env, fileSystem: fs, clock: clock)
@@ -216,8 +216,10 @@ private actor EventSink {
     }
 }
 
-private actor TestPTY: AgentPTY {
+private actor TestPTY: AgentTransport {
     nonisolated let outboundBytes: AsyncStream<Data>
+    nonisolated let bellEvents: AsyncStream<Void>
+    nonisolated var terminalSnapshot: (any TerminalSnapshotting)? { nil }
     private let continuation: AsyncStream<Data>.Continuation
     private var writes: [Data] = []
 
@@ -225,11 +227,14 @@ private actor TestPTY: AgentPTY {
         var continuation: AsyncStream<Data>.Continuation!
         outboundBytes = AsyncStream { continuation = $0 }
         self.continuation = continuation
+        var bellCont: AsyncStream<Void>.Continuation!
+        bellEvents = AsyncStream { bellCont = $0 }
+        bellCont.finish()
     }
 
-    func write(_ data: Data) { writes.append(data) }
-    func interrupt() {}
-    func close() { continuation.finish() }
+    func write(_ data: Data) async throws { writes.append(data) }
+    func interrupt() async {}
+    func close() async { continuation.finish() }
 }
 
 private func pollUntil(timeout: Duration,

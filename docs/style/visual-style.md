@@ -1302,18 +1302,35 @@ Codemixer surfaces are minimal — quota is shown only when it has consequence.
 - **Daemon idle countdown** — never shown to the user; the daemon exits silently. Reconnect happens transparently when the GUI returns.
 - **Auth quota exhausted** — auth gate sheet re-appears with the explanation in `body` type and an action button to open billing in the browser.
 
-### Connection status pip
+### Connection status pip **[Roadmap]**
 
-When the GUI runs against a daemon (loopback) or remote clients are connected, a small pip sits in the window toolbar:
+Not shipped. The shipped surface for remote attachment is
+[`ConnectedClientsChip`](#connected-clients-indicator) below. A future pip would
+show daemon reachability (green / amber / red / grey) when the GUI runs in Mode B.
 
-| Pip | State |
-| --- | --- |
-| Green | Engine healthy; ≥ 0 clients. |
-| Amber | Engine healthy; daemon temporarily unreachable (reconnecting). |
-| Red | Engine reachable but reported `errored` state. |
-| Grey | Disconnected. |
+### Connected clients indicator (shipped)
 
-The pip is `Theme.shape.pill`, 8 pt × 8 pt, with a leading icon-only chip showing the client count. Click reveals a popover listing devices.
+When `RemoteControlServer` has one or more attached WebSocket peers, a chip
+appears in the window toolbar (`ConnectedClientsChip` in
+`AgentUI/Components/Primitives.swift`). Hidden when the count is 0.
+
+```
+[ 📡  1 connected ]
+```
+
+- **Icon:** `antenna.radiowaves.left.and.right` in `Theme.signal.info`.
+- **Background:** `Theme.signal.info` at `Theme.opacity.muted`, capsule shape.
+- **Click:** opens **Settings → Remote** (no per-device popover on the chip).
+- **Help / accessibility:** *"N remote client(s) attached. Click to open Settings → Remote."*
+
+The authoritative count and paired-device list live in **Settings → Remote**:
+`LabeledContent("Connected clients", …)` and the **Paired devices** section
+(revoke per token). In Mode B the count includes the loopback Mac GUI; in Mode A
+with remote access on it counts external peers only. See
+[architecture.md §4.1](../architecture.md).
+
+**[Roadmap]** Per-device popover on the chip and a daemon-connection caption in
+the toolbar (*"Connected to Codemixer daemon · localhost"*).
 
 ### Auto-save and persistence indicators
 
@@ -1983,18 +2000,23 @@ For the smoothest pairing, the GUI shows a QR code containing the engine's hostn
 
 ### Connected clients indicator
 
-Once paired, a small chip in the window toolbar shows connected clients:
+See [§ Connection status pip / Connected clients indicator](#connection-status-pip-roadmap)
+above for the shipped `ConnectedClientsChip` spec. Summary:
 
-```
-[● 1 client]
-```
-
-- **Green dot** when connected.
-- **Click reveals a popover** listing devices and a "Revoke access" action for each.
+- Toolbar chip when `connectedRemoteClients > 0`.
+- Tap → Settings → Remote (pairing, LAN, LaunchAgent, count, revoke).
 
 ### Remote client mirror
 
-When the GUI runs against a daemon (loopback WebSocket) or when a remote client connects, the conversation surface looks identical. The same visual language applies. The only difference is a small `caption` line in the window toolbar: *"Connected to Codemixer daemon · localhost"* or *"Connected to Codemixer · 192.168.1.5"*.
+When the GUI runs against a daemon (Mode B, loopback WebSocket) or when external
+remote clients are connected (Mode A + remote access, or Mode B + phone), the
+conversation surface uses the same visual language — no alternate layout. Parity
+is a product principle: every navigator/composer action routes through wire
+`AgentCommand`s so GUI and remote peers behave identically.
+
+**[Roadmap]** A `caption` line in the window toolbar when Mode B is active:
+*"Connected to Codemixer daemon · localhost"* (or the LAN host when applicable).
+Not implemented in v1; silent Mode B fallback is recorded only in Silent Diagnostics.
 
 ---
 

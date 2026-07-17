@@ -30,6 +30,7 @@ extension Bootstrap {
             )
             remoteRuntime = runtime
             remoteFingerprint = await runtime.certificateFingerprint
+            // Connected-peer count (server side) → toolbar chip + Settings → Remote.
             await remote.observeClientCount { [weak self] count in
                 Task { @MainActor in self?.viewModel?.setConnectedRemoteClients(count) }
             }

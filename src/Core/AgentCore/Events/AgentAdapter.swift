@@ -1,24 +1,28 @@
 import Foundation
 import AgentProtocol
 
-/// Raw signal sources the adapter consumes. The engine populates the streams
-/// the adapter declared via its capabilities; everything else is `nil`.
+/// Raw signal sources the adapter consumes. The engine populates streams from
+/// the bound `AgentTransport`; terminal snapshots are optional (nil for
+/// non-terminal transports such as Codex App Server).
 public struct AgentInputs: Sendable {
-    public let ptyOutput: AsyncStream<Data>
-    public let screen: any TerminalSnapshotting
+    public let outputBytes: AsyncStream<Data>
+    public let writeBytes: @Sendable (Data) async throws -> Void
+    public let terminal: (any TerminalSnapshotting)?
     public let hookSocket: HookSocketHandle?
     public let workspace: URL
     public let resumeSessionID: String?
     public let sessionID: AsyncStream<String>
 
-    public init(ptyOutput: AsyncStream<Data>,
-                screen: any TerminalSnapshotting,
+    public init(outputBytes: AsyncStream<Data>,
+                writeBytes: @escaping @Sendable (Data) async throws -> Void = { _ in },
+                terminal: (any TerminalSnapshotting)?,
                 hookSocket: HookSocketHandle?,
                 workspace: URL,
                 resumeSessionID: String? = nil,
                 sessionID: AsyncStream<String>) {
-        self.ptyOutput = ptyOutput
-        self.screen = screen
+        self.outputBytes = outputBytes
+        self.writeBytes = writeBytes
+        self.terminal = terminal
         self.hookSocket = hookSocket
         self.workspace = workspace
         self.resumeSessionID = resumeSessionID
@@ -96,6 +100,10 @@ public protocol AgentAdapter: Sendable {
     func defaultEnvOverrides() -> [String: String]
     func buildLaunchArgv(context: LaunchContext) -> [String]
 
+    /// Transport strategy for this adapter. The engine binds a matching
+    /// `AgentTransport` via `AgentTransportFactory`.
+    var transportDescriptor: AgentTransportDescriptor { get }
+
     // MARK: Authentication
 
     func authStatus(env: ResolvedEnvironment) async -> AuthStatus
@@ -112,6 +120,16 @@ public protocol AgentAdapter: Sendable {
 
     func encodeUserPrompt(_ text: String) -> Data
     func cancelSequence() -> Data
+
+    /// Bytes written immediately after the transport is live (handshake /
+    /// bootstrap). Default empty — terminal agents typically need nothing;
+    /// stdio JSON-RPC agents (Codex) send `initialize` + `thread/start`.
+    func sessionBootstrapBytes(context: LaunchContext) -> Data
+
+    /// Encode a non-prompt engine command into transport bytes. Return `nil`
+    /// when the adapter does not support the command; the engine surfaces an
+    /// explicit unsupported-command error rather than silently skipping.
+    func encodeCommand(_ command: AgentCommand) -> Data?
 
     // MARK: Permission responses
 
@@ -169,6 +187,29 @@ public extension AgentAdapter {
                             workspace: URL) async -> Bool { false }
 
     func availableModels() -> [AgentModelOption] { [] }
+
+    func sessionBootstrapBytes(context: LaunchContext) -> Data { Data() }
+
+    /// Default encodes Claude-compatible slash text for the common command
+    /// set. Non-terminal adapters override with protocol frames.
+    func encodeCommand(_ command: AgentCommand) -> Data? {
+        let line: String
+        switch command {
+        case .newSession:          line = "/clear\n"
+        case .compact:             line = "/compact\n"
+        case .selectModel(let id): line = "/model \(id)\n"
+        case .setPermissionMode(let m): line = "/permission \(m.rawValue)\n"
+        case .toggleThinkMode(let enabled): line = enabled ? "/think\n" : "/think off\n"
+        case .toggleReviewMode(let enabled): line = enabled ? "/review\n" : "/review off\n"
+        case .runSlashCommand(let name, let args):
+            line = ([name] + args).joined(separator: " ") + "\n"
+        case .runCustomCommand(let path, let args):
+            line = ([path] + args).joined(separator: " ") + "\n"
+        default:
+            return nil
+        }
+        return encodeUserPrompt(line)
+    }
 }
 
 /// Process-wide registry. UI surfaces resolve adapters through this rather

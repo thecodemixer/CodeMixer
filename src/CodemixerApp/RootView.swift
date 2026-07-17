@@ -34,15 +34,58 @@ struct RootView: View {
                         if !isEmpty { diffPanelVisible = true }
                     }
             } else {
-                ProgressView("Starting agent…")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Theme.surface.canvas)
+                // No workspace yet: landing surface instead of a stuck spinner when
+                // the picker sheet is dismissed.
+                VStack(spacing: Theme.spacing.s16) {
+                    if bootstrap.viewModel == nil {
+                        ProgressView("Starting agent…")
+                    } else {
+                        Image(systemName: "folder.badge.gearshape")
+                            .accessibilityHidden(true)
+                            .font(Theme.typography.heroIcon)
+                            .foregroundStyle(Theme.text.tertiary)
+                        Text("Open a project to begin")
+                            .font(Theme.typography.title)
+                        Button("Open Project…") {
+                            bootstrap.presentProjectPicker()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .keyboardShortcut("o", modifiers: .command)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Theme.surface.canvas)
             }
         }
         .codemixerAppearance(bootstrap.viewModel?.appearancePrefs ?? AppearancePrefs())
         .sheet(isPresented: $bootstrap.showProjectPicker) {
             ProjectPickerView(recent: bootstrap.recents) { url, resume in
                 Task { await bootstrap.openWorkspace(url, resumeSessionID: resume) }
+            }
+        }
+        .sheet(isPresented: $bootstrap.showNewProjectSheet) {
+            if let model = bootstrap.viewModel {
+                NewProjectSheet(
+                    onCancel: { bootstrap.showNewProjectSheet = false },
+                    onCreate: { name, mode in
+                        bootstrap.showNewProjectSheet = false
+                        model.createProject(name: name, agentMode: mode)
+                    }
+                )
+            }
+        }
+        .sheet(isPresented: Binding(
+            get: { bootstrap.pendingConfigureURL != nil },
+            set: { if !$0 { bootstrap.cancelPendingProjectConfiguration() } }
+        )) {
+            if let url = bootstrap.pendingConfigureURL {
+                ConfigureProjectSheet(
+                    projectURL: url,
+                    onCancel: { bootstrap.cancelPendingProjectConfiguration() },
+                    onConfirm: { mode in
+                        Task { await bootstrap.confirmPendingProjectConfiguration(mode: mode) }
+                    }
+                )
             }
         }
         .sheet(isPresented: $bootstrap.showSettings) {
@@ -129,6 +172,10 @@ struct RootView: View {
                     }
                 }
                 Button("Close Session") { model.send(.closeSession) }
+                Button("Close Workspace") {
+                    Task { await bootstrap.closeWorkspace() }
+                }
+                .disabled(bootstrap.workspace == nil)
             }
             Section("Model") {
                 ForEach(model.availableModels, id: \.id) { option in

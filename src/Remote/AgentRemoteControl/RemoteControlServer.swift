@@ -112,10 +112,10 @@ public actor RemoteControlServer {
     public var clientCount: Int { connections.count }
     public var certificateFingerprint: String? { lastFingerprint }
 
-    /// Registers an observer notified whenever the connected-client count
+    /// Registers an observer notified whenever the connected-peer count
     /// changes (connect, disconnect, or shutdown). Fires immediately with the
-    /// current count so the observer starts in sync. GUI chrome uses this to
-    /// drive the toolbar's connected-clients chip without polling.
+    /// current count. Drives `EngineViewModel.connectedRemoteClients` and
+    /// Settings → Remote. See `docs/architecture.md` §4.1.
     public func observeClientCount(_ observer: @escaping @Sendable (Int) -> Void) {
         clientCountObserver = observer
         observer(connections.count)
@@ -125,8 +125,8 @@ public actor RemoteControlServer {
         clientCountObserver?(connections.count)
     }
 
-    /// Number of currently connected and authenticated WebSocket clients.
-    /// Used by the daemon's idle-exit monitor.
+    /// Number of WebSocket peers currently attached (server-side count).
+    /// Mode B: includes the loopback Mac GUI. Daemon idle-exit uses this.
     public var connectedClientCount: Int { connections.count }
     public var currentConfiguration: Configuration? { configuration }
     public var boundPort: UInt16? { listener?.port }

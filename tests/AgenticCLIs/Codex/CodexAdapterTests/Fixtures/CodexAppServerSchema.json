@@ -1,0 +1,31 @@
+{
+  "notifications": [
+    {
+      "method": "item/started",
+      "params": {
+        "item": {
+          "id": "tool-1",
+          "type": "commandExecution",
+          "name": "Bash",
+          "command": "swift test",
+          "status": "inProgress"
+        }
+      }
+    },
+    {
+      "method": "item/completed",
+      "params": {
+        "item": {
+          "id": "tool-1",
+          "type": "commandExecution",
+          "name": "Bash",
+          "command": "swift test",
+          "status": "completed",
+          "aggregatedOutput": "Tests passed",
+          "exitCode": 0,
+          "durationMs": 42
+        }
+      }
+    }
+  ]
+}

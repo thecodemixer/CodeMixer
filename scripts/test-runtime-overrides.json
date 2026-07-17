@@ -6,6 +6,7 @@
     "ClaudeTranscriptTailer fixtures": 5.0,
     "AgentEngine + ClaudeAdapter + fake-claude": 5.0,
     "AgentEngine + ClaudeAdapter live harness": 180.0,
+    "AgentEngine + CodexAdapter live harness": 180.0,
     "PTYHost — process lifecycle": 10.0,
     "RemoteEngineClient": 3.0,
     "RemoteControlServer — end-to-end over in-memory transport": 5.0,

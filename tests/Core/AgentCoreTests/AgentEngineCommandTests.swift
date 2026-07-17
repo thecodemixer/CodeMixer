@@ -28,10 +28,10 @@ struct AgentEngineCommandTests {
             ],
             home: workspace
         )
-        let capture = CapturingPTYFactory()
+        let capture = CapturingTransportFactory()
         let h = try await EngineHarness.make(workspace: workspace,
                                              environment: env,
-                                             ptyFactory: capture.makePTY(_:))
+                                             transportFactory: capture.makeTransport)
         guard let spec = capture.lastSpec else {
             Issue.record("expected PTY spawn spec")
             await h.shutdown()
@@ -85,12 +85,83 @@ struct AgentEngineCommandTests {
         await h.shutdown()
     }
 
+    @Test("openProject resolves the stored project mode and switches adapters")
+    func openProjectUsesStoredProjectMode() async throws {
+        let capture = CapturingTransportFactory()
+        let h = try await EngineHarness.make(transportFactory: capture.makeTransport)
+        let codex = RoutingTestAdapter(id: .codex, descriptor: .stdioJSONRPC)
+        await AdapterRegistry.shared.register(codex)
+
+        let store = WorkspaceProjectsStore(environment: h.environment,
+                                           fileSystem: h.fileSystem)
+        let ref = try await store.createProject(name: "codex",
+                                                agentMode: .codex,
+                                                in: h.workspace)
+
+        try await h.engine.send(.openProject(path: ref.path, resumeSessionID: nil))
+
+        #expect(capture.descriptors.last == .stdioJSONRPC)
+        await h.shutdown()
+    }
+
+    @Test("openProject in mixed mode resumes with the session's agent")
+    func openProjectMixedResumeUsesSessionAgent() async throws {
+        let capture = CapturingTransportFactory()
+        let h = try await EngineHarness.make(transportFactory: capture.makeTransport)
+        let store = WorkspaceProjectsStore(environment: h.environment,
+                                           fileSystem: h.fileSystem)
+        let ref = try await store.createProject(name: "mixed",
+                                                agentMode: .mixed(defaultAgent: .claudeCode),
+                                                in: h.workspace)
+        let codex = RoutingTestAdapter(
+            id: .codex,
+            descriptor: .stdioJSONRPC,
+            sessions: [
+                SessionSummary(id: "thread-1",
+                               agentID: .codex,
+                               workspace: URL(fileURLWithPath: ref.path),
+                               title: "Codex thread",
+                               lastActivity: Date(),
+                               messageCount: 1),
+            ]
+        )
+        await AdapterRegistry.shared.register(codex)
+
+        try await h.engine.send(.openProject(path: ref.path, resumeSessionID: "thread-1"))
+
+        #expect(capture.descriptors.last == .stdioJSONRPC)
+        await h.shutdown()
+    }
+
+    @Test("openProject for custom mode fails explicitly when no custom adapter is registered")
+    func openProjectCustomWithoutAdapterFails() async throws {
+        let capture = CapturingTransportFactory()
+        let h = try await EngineHarness.make(transportFactory: capture.makeTransport)
+        let store = WorkspaceProjectsStore(environment: h.environment,
+                                           fileSystem: h.fileSystem)
+        let custom = CustomAgentRef(id: "local-custom",
+                                    displayName: "Local Custom",
+                                    transport: .stdioJSONRPC,
+                                    executablePath: "/custom/agent",
+                                    arguments: ["serve"])
+        let ref = try await store.createProject(name: "custom",
+                                                agentMode: .custom(custom),
+                                                in: h.workspace)
+
+        await #expect(throws: AgentError.self) {
+            try await h.engine.send(.openProject(path: ref.path, resumeSessionID: nil))
+        }
+
+        #expect(capture.descriptors.count == 1)
+        await h.shutdown()
+    }
+
     @Test("sendPrompt publishes userTurn before a PTY write failure is thrown")
     func sendPromptPublishesBeforeWriteFailure() async throws {
-        let pty = ScriptedPTY(writeSteps: [.fail(.writeFailed(errno: 5))])
-        let h = try await EngineHarness.make(pty: pty)
+        let transport = ScriptedTransport(writeSteps: [.fail(.writeFailed(errno: 5))])
+        let h = try await EngineHarness.make(transport: transport)
         let bus = h.engine.bus
-        await pty.setWriteProbe { _ in
+        await transport.setWriteProbe { _ in
             await bus.historySnapshot.contains {
                 if case .userTurn(_, let text) = $0.event { return text == "will fail" }
                 return false
@@ -106,8 +177,8 @@ struct AgentEngineCommandTests {
             Issue.record("expected PTYError.writeFailed, got \(error)")
         }
 
-        #expect(await pty.writeProbeResults() == [true])
-        #expect(await pty.writtenTexts() == ["will fail"])
+        #expect(await transport.writeProbeResults() == [true])
+        #expect(await transport.writtenTexts() == ["will fail"])
         let history = await h.engine.bus.historySnapshot
         #expect(history.contains {
             if case .userTurn(_, let text) = $0.event { return text == "will fail" }
@@ -118,8 +189,8 @@ struct AgentEngineCommandTests {
 
     @Test("sendPrompt write failure still fans userTurn out to remote-like subscribers")
     func sendPromptWriteFailureFansOutToRemoteSubscriber() async throws {
-        let pty = ScriptedPTY(writeSteps: [.fail(.writeFailed(errno: 5))])
-        let h = try await EngineHarness.make(pty: pty)
+        let transport = ScriptedTransport(writeSteps: [.fail(.writeFailed(errno: 5))])
+        let h = try await EngineHarness.make(transport: transport)
         let remoteSub = await h.engine.bus.subscribe()
         let remoteCollector = EventCollector()
         let remoteTask = Task { await remoteCollector.ingest(remoteSub.stream) }
@@ -222,8 +293,8 @@ struct AgentEngineCommandTests {
 
     @Test("editAndResubmitLast propagates cancel write failure before restart")
     func editAndResubmitCancelWriteFailurePropagates() async throws {
-        let pty = ScriptedPTY(writeSteps: [.succeed, .fail(.writeFailed(errno: 5))])
-        let h = try await EngineHarness.make(pty: pty)
+        let transport = ScriptedTransport(writeSteps: [.succeed, .fail(.writeFailed(errno: 5))])
+        let h = try await EngineHarness.make(transport: transport)
         try await h.engine.send(.sendPrompt(text: "first", attachments: []))
         try await Task.sleep(for: .milliseconds(20))
         let targetID = try await requireLastUserTurnID(h)
@@ -239,16 +310,16 @@ struct AgentEngineCommandTests {
             Issue.record("expected PTYError.writeFailed, got \(error)")
         }
 
-        #expect(await pty.writtenData() == [Data("first".utf8), Data([0x03])])
+        #expect(await transport.writtenData() == [Data("first".utf8), Data([0x03])])
         await h.shutdown()
     }
 
     @Test("editAndResubmitLast propagates revised prompt write failure after restart")
     func editAndResubmitRevisedPromptWriteFailurePropagates() async throws {
-        let firstPTY = ScriptedPTY()
-        let restartedPTY = ScriptedPTY(writeSteps: [.fail(.writeFailed(errno: 5))])
-        let factory = ScriptedPTYFactory([firstPTY, restartedPTY])
-        let h = try await EngineHarness.make(ptyFactory: factory.makePTY)
+        let firstPTY = ScriptedTransport()
+        let restartedPTY = ScriptedTransport(writeSteps: [.fail(.writeFailed(errno: 5))])
+        let factory = ScriptedTransportFactory([firstPTY, restartedPTY])
+        let h = try await EngineHarness.make(transportFactory: factory.makeTransport)
         try await h.engine.send(.sendPrompt(text: "first", attachments: []))
         try await Task.sleep(for: .milliseconds(20))
         let targetID = try await requireLastUserTurnID(h)
@@ -355,25 +426,25 @@ struct AgentEngineCommandTests {
 
     @Test("respondToPermission writePTY delivery writes exact PTY bytes")
     func respondToPermissionWritePTYWritesBytes() async throws {
-        let pty = ScriptedPTY()
+        let transport = ScriptedTransport()
         let adapter = RecordingMockAdapter(permissionDelivery: .writePTY(Data("allow\n".utf8)))
-        let h = try await EngineHarness.make(adapter: adapter, pty: pty)
+        let h = try await EngineHarness.make(adapter: adapter, transport: transport)
         let prompt = permissionPrompt()
         h.adapter.emit(.permissionRequest(prompt: prompt))
         try await Task.sleep(for: .milliseconds(20))
 
         try await h.engine.send(.respondToPermission(id: prompt.id, decision: .allow))
 
-        #expect(await pty.writtenData() == [Data("allow\n".utf8)])
+        #expect(await transport.writtenData() == [Data("allow\n".utf8)])
         #expect(h.adapter.recorded.contains(.permissionResponse(.allow, promptID: prompt.id)))
         await h.shutdown()
     }
 
     @Test("respondToPermission writePTY delivery propagates PTY write failure")
     func respondToPermissionWritePTYFailurePropagates() async throws {
-        let pty = ScriptedPTY(writeSteps: [.fail(.writeFailed(errno: 5))])
+        let transport = ScriptedTransport(writeSteps: [.fail(.writeFailed(errno: 5))])
         let adapter = RecordingMockAdapter(permissionDelivery: .writePTY(Data("allow\n".utf8)))
-        let h = try await EngineHarness.make(adapter: adapter, pty: pty)
+        let h = try await EngineHarness.make(adapter: adapter, transport: transport)
         let prompt = permissionPrompt()
         h.adapter.emit(.permissionRequest(prompt: prompt))
         try await Task.sleep(for: .milliseconds(20))
@@ -387,33 +458,33 @@ struct AgentEngineCommandTests {
             Issue.record("expected PTYError.writeFailed, got \(error)")
         }
 
-        #expect(await pty.writtenData() == [Data("allow\n".utf8)])
+        #expect(await transport.writtenData() == [Data("allow\n".utf8)])
         await h.shutdown()
     }
 
     @Test("respondToPermission both delivery writes PTY bytes")
     func respondToPermissionBothWritesPTYBytes() async throws {
-        let pty = ScriptedPTY()
+        let transport = ScriptedTransport()
         let adapter = RecordingMockAdapter(permissionDelivery: .both(ptyBytes: Data("both\n".utf8),
                                                                      hookStdout: Data("{}".utf8)))
-        let h = try await EngineHarness.make(adapter: adapter, pty: pty)
+        let h = try await EngineHarness.make(adapter: adapter, transport: transport)
         let prompt = permissionPrompt()
         h.adapter.emit(.permissionRequest(prompt: prompt))
         try await Task.sleep(for: .milliseconds(20))
 
         try await h.engine.send(.respondToPermission(id: prompt.id, decision: .allowAlways))
 
-        #expect(await pty.writtenData() == [Data("both\n".utf8)])
+        #expect(await transport.writtenData() == [Data("both\n".utf8)])
         #expect(h.adapter.recorded.contains(.permissionResponse(.allowAlways, promptID: prompt.id)))
         await h.shutdown()
     }
 
     @Test("respondToPermission both delivery propagates PTY write failure")
     func respondToPermissionBothFailurePropagates() async throws {
-        let pty = ScriptedPTY(writeSteps: [.fail(.writeFailed(errno: 5))])
+        let transport = ScriptedTransport(writeSteps: [.fail(.writeFailed(errno: 5))])
         let adapter = RecordingMockAdapter(permissionDelivery: .both(ptyBytes: Data("both\n".utf8),
                                                                      hookStdout: Data("{}".utf8)))
-        let h = try await EngineHarness.make(adapter: adapter, pty: pty)
+        let h = try await EngineHarness.make(adapter: adapter, transport: transport)
         let prompt = permissionPrompt()
         h.adapter.emit(.permissionRequest(prompt: prompt))
         try await Task.sleep(for: .milliseconds(20))
@@ -427,22 +498,22 @@ struct AgentEngineCommandTests {
             Issue.record("expected PTYError.writeFailed, got \(error)")
         }
 
-        #expect(await pty.writtenData() == [Data("both\n".utf8)])
+        #expect(await transport.writtenData() == [Data("both\n".utf8)])
         await h.shutdown()
     }
 
     @Test("respondToPermission hook-only delivery does not touch the PTY")
     func respondToPermissionHookOnlyDoesNotWritePTY() async throws {
-        let pty = ScriptedPTY()
+        let transport = ScriptedTransport()
         let adapter = RecordingMockAdapter(permissionDelivery: .respondToHookProcess(jsonStdout: Data("{}".utf8)))
-        let h = try await EngineHarness.make(adapter: adapter, pty: pty)
+        let h = try await EngineHarness.make(adapter: adapter, transport: transport)
         let prompt = permissionPrompt()
         h.adapter.emit(.permissionRequest(prompt: prompt))
         try await Task.sleep(for: .milliseconds(20))
 
         try await h.engine.send(.respondToPermission(id: prompt.id, decision: .deny))
 
-        #expect(await pty.writtenData().isEmpty)
+        #expect(await transport.writtenData().isEmpty)
         #expect(h.adapter.recorded.contains(.permissionResponse(.deny, promptID: prompt.id)))
         await h.shutdown()
     }
@@ -592,15 +663,15 @@ struct AgentEngineCommandTests {
     @Test("ready resumed prompt cancels the resume startup watchdog")
     func readyResumePromptCancelsWatchdog() async throws {
         let clock = FakeClock()
-        let pty = ScriptedPTY()
+        let transport = ScriptedTransport()
         let adapter = RecordingMockAdapter(capabilities: .ptyTUIFallback)
         let h = try await EngineHarness.make(clock: clock,
                                              adapter: adapter,
                                              resumeSessionID: "old-session",
-                                             pty: pty)
+                                             transport: transport)
 
         try await spinUntil(clock: clock, target: 1, timeout: .seconds(2))
-        await pty.emit("❯\u{00A0}\n? for shortcuts\n")
+        await transport.emit("❯\u{00A0}\n? for shortcuts\n")
         #expect(h.adapter.emit(.sessionStarted(sessionID: "old-session",
                                               model: nil,
                                               cwd: h.workspace)))
@@ -612,7 +683,7 @@ struct AgentEngineCommandTests {
             try await Task.sleep(for: .milliseconds(40))
         }
         try await sendTask.value
-        #expect(await pty.writtenTexts() == ["ready"])
+        #expect(await transport.writtenTexts() == ["ready"])
         clock.advance(by: ActivityTiming.resumeStartupStallTimeout + .milliseconds(1))
         try await Task.sleep(for: .milliseconds(40))
 
@@ -632,18 +703,18 @@ struct AgentEngineCommandTests {
 
     @Test("resumed prompt waits for Claude's ready prompt before writing PTY bytes")
     func resumedPromptWaitsForClaudeReadyPrompt() async throws {
-        let pty = ScriptedPTY()
+        let transport = ScriptedTransport()
         let adapter = RecordingMockAdapter(capabilities: .ptyTUIFallback)
         let h = try await EngineHarness.make(adapter: adapter,
                                              resumeSessionID: "old-session",
-                                             pty: pty)
+                                             transport: transport)
 
         let sendTask = Task {
             try await h.engine.send(.sendPrompt(text: "held", attachments: []))
         }
         try await Task.sleep(for: .milliseconds(40))
 
-        #expect(await pty.writtenData().isEmpty)
+        #expect(await transport.writtenData().isEmpty)
         #expect((await h.collectedSoFar()).contains {
             if case .userTurn(_, let text) = $0 { return text == "held" }
             return false
@@ -653,40 +724,40 @@ struct AgentEngineCommandTests {
                                               model: nil,
                                               cwd: h.workspace)))
         try await Task.sleep(for: .milliseconds(150))
-        #expect(await pty.writtenData().isEmpty)
+        #expect(await transport.writtenData().isEmpty)
 
-        await pty.emit("❯\u{00A0}\n? for shortcuts\n")
+        await transport.emit("❯\u{00A0}\n? for shortcuts\n")
         try await waitUntil(timeout: .seconds(2)) {
-            await pty.writtenTexts() == ["held"]
+            await transport.writtenTexts() == ["held"]
         }
 
-        #expect(await pty.writtenTexts() == ["held"])
+        #expect(await transport.writtenTexts() == ["held"])
         try await sendTask.value
         await h.shutdown()
     }
 
     @Test("new TUI session first prompt waits for Claude's ready prompt")
     func newTUISessionPromptWaitsForClaudeReadyPrompt() async throws {
-        let pty = ScriptedPTY()
+        let transport = ScriptedTransport()
         let adapter = RecordingMockAdapter(capabilities: .ptyTUIFallback)
-        let h = try await EngineHarness.make(adapter: adapter, pty: pty)
+        let h = try await EngineHarness.make(adapter: adapter, transport: transport)
 
         let sendTask = Task {
             try await h.engine.send(.sendPrompt(text: "fresh held", attachments: []))
         }
         try await Task.sleep(for: .milliseconds(40))
 
-        #expect(await pty.writtenData().isEmpty)
+        #expect(await transport.writtenData().isEmpty)
 
         #expect(h.adapter.emit(.sessionStarted(sessionID: "new-session",
                                               model: nil,
                                               cwd: h.workspace)))
-        await pty.emit("❯\u{00A0}\n? for shortcuts\n")
+        await transport.emit("❯\u{00A0}\n? for shortcuts\n")
         try await waitUntil(timeout: .seconds(2)) {
-            await pty.writtenTexts() == ["fresh held"]
+            await transport.writtenTexts() == ["fresh held"]
         }
 
-        #expect(await pty.writtenTexts() == ["fresh held"])
+        #expect(await transport.writtenTexts() == ["fresh held"])
         try await sendTask.value
         await h.shutdown()
     }
@@ -694,9 +765,9 @@ struct AgentEngineCommandTests {
     @Test("startup timeout does not release prompt while permission is pending")
     func startupTimeoutDoesNotReleasePromptWhilePermissionPending() async throws {
         let clock = FakeClock()
-        let pty = ScriptedPTY()
+        let transport = ScriptedTransport()
         let adapter = RecordingMockAdapter(capabilities: .ptyTUIFallback)
-        let h = try await EngineHarness.make(clock: clock, adapter: adapter, pty: pty)
+        let h = try await EngineHarness.make(clock: clock, adapter: adapter, transport: transport)
 
         let sendTask = Task {
             try await h.engine.send(.sendPrompt(text: "blocked by trust", attachments: []))
@@ -720,7 +791,7 @@ struct AgentEngineCommandTests {
         clock.advance(by: ActivityTiming.resumeStartupStallTimeout + .milliseconds(1))
         try await Task.sleep(for: .milliseconds(40))
 
-        #expect(await pty.writtenData().isEmpty)
+        #expect(await transport.writtenData().isEmpty)
         sendTask.cancel()
         await h.shutdown()
     }
@@ -728,12 +799,12 @@ struct AgentEngineCommandTests {
     @Test("resumed prompt releases after resume startup timeout")
     func resumedPromptReleasesAfterStartupTimeout() async throws {
         let clock = FakeClock()
-        let pty = ScriptedPTY()
+        let transport = ScriptedTransport()
         let adapter = RecordingMockAdapter(capabilities: .ptyTUIFallback)
         let h = try await EngineHarness.make(clock: clock,
                                              adapter: adapter,
                                              resumeSessionID: "old-session",
-                                             pty: pty)
+                                             transport: transport)
 
         let sendTask = Task {
             try await h.engine.send(.sendPrompt(text: "released", attachments: []))
@@ -741,12 +812,12 @@ struct AgentEngineCommandTests {
         try await spinUntil(clock: clock, target: 1, timeout: .seconds(2))
         try await Task.sleep(for: .milliseconds(40))
 
-        #expect(await pty.writtenData().isEmpty)
+        #expect(await transport.writtenData().isEmpty)
         clock.advance(by: ActivityTiming.resumeStartupStallTimeout + .milliseconds(1))
         try await Task.sleep(for: .milliseconds(40))
         try await sendTask.value
 
-        #expect(await pty.writtenTexts() == ["released"])
+        #expect(await transport.writtenTexts() == ["released"])
         await h.shutdown()
     }
 
@@ -804,15 +875,15 @@ struct AgentEngineCommandTests {
     @Test("startup submit recovery re-sends Enter when first prompt stays unsubmitted")
     func startupSubmitRecoveryResendsEnterWhenUnsubmitted() async throws {
         let clock = FakeClock()
-        let pty = ScriptedPTY()
+        let transport = ScriptedTransport()
         let adapter = RecordingMockAdapter(capabilities: .ptyTUIFallback)
         let h = try await EngineHarness.make(clock: clock,
                                              adapter: adapter,
                                              resumeSessionID: "old-session",
-                                             pty: pty)
+                                             transport: transport)
 
         try await spinUntil(clock: clock, target: 1, timeout: .seconds(2))
-        await pty.emit("❯\u{00A0}\n? for shortcuts\n")
+        await transport.emit("❯\u{00A0}\n? for shortcuts\n")
         #expect(h.adapter.emit(.sessionStarted(sessionID: "old-session",
                                               model: nil,
                                               cwd: h.workspace)))
@@ -824,32 +895,32 @@ struct AgentEngineCommandTests {
             try await Task.sleep(for: .milliseconds(40))
         }
         try await sendTask.value
-        #expect(await pty.writtenTexts() == ["stuck"])
+        #expect(await transport.writtenTexts() == ["stuck"])
 
         // Simulate the prompt still sitting in the input row (Enter swallowed).
-        await pty.emit("❯ stuck\n? for shortcuts\n")
+        await transport.emit("❯ stuck\n? for shortcuts\n")
         try await Task.sleep(for: .milliseconds(40))
         clock.advance(by: ActivityTiming.startupSubmitRecoveryDelay + .milliseconds(1))
         try await waitUntil(timeout: .seconds(2)) {
-            await pty.writtenTexts() == ["stuck", "\r"]
+            await transport.writtenTexts() == ["stuck", "\r"]
         }
 
-        #expect(await pty.writtenTexts() == ["stuck", "\r"])
+        #expect(await transport.writtenTexts() == ["stuck", "\r"])
         await h.shutdown()
     }
 
     @Test("startup submit recovery sends no Enter when first prompt was accepted")
     func startupSubmitRecoveryStaysQuietWhenAccepted() async throws {
         let clock = FakeClock()
-        let pty = ScriptedPTY()
+        let transport = ScriptedTransport()
         let adapter = RecordingMockAdapter(capabilities: .ptyTUIFallback)
         let h = try await EngineHarness.make(clock: clock,
                                              adapter: adapter,
                                              resumeSessionID: "old-session",
-                                             pty: pty)
+                                             transport: transport)
 
         try await spinUntil(clock: clock, target: 1, timeout: .seconds(2))
-        await pty.emit("❯\u{00A0}\n? for shortcuts\n")
+        await transport.emit("❯\u{00A0}\n? for shortcuts\n")
         #expect(h.adapter.emit(.sessionStarted(sessionID: "old-session",
                                               model: nil,
                                               cwd: h.workspace)))
@@ -861,15 +932,15 @@ struct AgentEngineCommandTests {
             try await Task.sleep(for: .milliseconds(40))
         }
         try await sendTask.value
-        #expect(await pty.writtenTexts() == ["accepted"])
+        #expect(await transport.writtenTexts() == ["accepted"])
 
         // Input row is empty again: Claude accepted the prompt.
-        await pty.emit("❯\u{00A0}\n? for shortcuts\n")
+        await transport.emit("❯\u{00A0}\n? for shortcuts\n")
         try await Task.sleep(for: .milliseconds(40))
         clock.advance(by: ActivityTiming.startupSubmitRecoveryDelay + .milliseconds(1))
         try await Task.sleep(for: .milliseconds(80))
 
-        #expect(await pty.writtenTexts() == ["accepted"])
+        #expect(await transport.writtenTexts() == ["accepted"])
         await h.shutdown()
     }
 
@@ -961,21 +1032,21 @@ struct AgentEngineCommandTests {
 
     private func assertPTYWrite(_ testCase: PTYWriteCase,
                                 interrupts: Bool = false) async throws {
-        let pty = ScriptedPTY()
-        let h = try await EngineHarness.make(pty: pty)
+        let transport = ScriptedTransport()
+        let h = try await EngineHarness.make(transport: transport)
 
         try await h.engine.send(testCase.command)
 
-        #expect(await pty.writtenData() == [testCase.expectedBytes],
+        #expect(await transport.writtenData() == [testCase.expectedBytes],
                 "\(testCase.name) wrote unexpected PTY bytes")
-        #expect(await pty.wasInterrupted() == interrupts,
+        #expect(await transport.wasInterrupted() == interrupts,
                 "\(testCase.name) interrupt state mismatch")
         await h.shutdown()
     }
 
     private func assertPTYWriteFailure(_ testCase: PTYWriteCase) async throws {
-        let pty = ScriptedPTY(writeSteps: [.fail(.writeFailed(errno: 5))])
-        let h = try await EngineHarness.make(pty: pty)
+        let transport = ScriptedTransport(writeSteps: [.fail(.writeFailed(errno: 5))])
+        let h = try await EngineHarness.make(transport: transport)
 
         do {
             try await h.engine.send(testCase.command)
@@ -986,9 +1057,9 @@ struct AgentEngineCommandTests {
             Issue.record("\(testCase.name) threw unexpected error: \(error)")
         }
 
-        #expect(await pty.writtenData() == [testCase.expectedBytes],
+        #expect(await transport.writtenData() == [testCase.expectedBytes],
                 "\(testCase.name) failed after writing unexpected bytes")
-        #expect(await pty.wasInterrupted() == false,
+        #expect(await transport.wasInterrupted() == false,
                 "\(testCase.name) should not interrupt after a failed write")
         await h.shutdown()
     }
@@ -1086,7 +1157,7 @@ struct EngineHarness {
     let workspace: URL
     let environment: FakeEnvironment
     let fileSystem: InMemoryFileSystem
-    let pty: ScriptedPTY?
+    let transport: ScriptedTransport?
 
     static func make(clock: any AgentClock = SystemClock(),
                      workspace: URL? = nil,
@@ -1094,8 +1165,8 @@ struct EngineHarness {
                      permissionTimeout: Duration = .seconds(300),
                      adapter: RecordingMockAdapter? = nil,
                      resumeSessionID: String? = nil,
-                     pty: ScriptedPTY? = nil,
-                     ptyFactory: AgentPTYFactory? = nil) async throws -> EngineHarness {
+                     transport: ScriptedTransport? = nil,
+                     transportFactory: AgentTransportFactory? = nil) async throws -> EngineHarness {
         let fs = InMemoryFileSystem()
         let workspace = workspace ?? URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("codemixer-engine-tests-\(UUID().uuidString)",
@@ -1104,14 +1175,14 @@ struct EngineHarness {
         let env = environment ?? FakeEnvironment(home: workspace)
         let seams = Seams.fake(environment: env, fileSystem: fs).with(clock: clock)
         let engine: AgentEngine
-        if let ptyFactory {
+        if let transportFactory {
             engine = AgentEngine(seams: seams,
                                  permissionTimeout: permissionTimeout,
-                                 ptyFactory: ptyFactory)
-        } else if let pty {
+                                 transportFactory: transportFactory)
+        } else if let transport {
             engine = AgentEngine(seams: seams,
                                  permissionTimeout: permissionTimeout,
-                                 ptyFactory: { _ in pty })
+                                 transportFactory: { _, _ in transport })
         } else {
             engine = AgentEngine(seams: seams, permissionTimeout: permissionTimeout)
         }
@@ -1130,7 +1201,7 @@ struct EngineHarness {
                              workspace: workspace,
                              environment: env,
                              fileSystem: fs,
-                             pty: pty)
+                             transport: transport)
     }
 
     func collectedSoFar() async -> [AgentEvent] { await collector.snapshot() }
@@ -1141,45 +1212,106 @@ struct EngineHarness {
     }
 }
 
-final class CapturingPTYFactory: @unchecked Sendable {
+final class CapturingTransportFactory: @unchecked Sendable {
     private let lock = NSLock()
-    private(set) var lastSpec: PTYHost.ChildSpec?
-    private let inner = ScriptedPTY()
+    private(set) var lastSpec: AgentTransportLaunchSpec?
+    private(set) var lastDescriptor: AgentTransportDescriptor?
+    private(set) var descriptors: [AgentTransportDescriptor] = []
 
-    func makePTY(_ spec: PTYHost.ChildSpec) throws -> any AgentPTY {
+    func makeTransport(_ descriptor: AgentTransportDescriptor,
+                       _ launch: AgentTransportLaunchSpec) throws -> any AgentTransport {
         lock.lock()
-        lastSpec = spec
+        lastSpec = launch
+        lastDescriptor = descriptor
+        descriptors.append(descriptor)
         lock.unlock()
-        return inner
+        return ScriptedTransport()
     }
 }
 
-final class ScriptedPTYFactory: @unchecked Sendable {
-    private let lock = NSLock()
-    private var ptys: [ScriptedPTY]
+final class RoutingTestAdapter: AgentAdapter, @unchecked Sendable {
+    let id: AgentID
+    let displayName: String
+    let iconSymbol = "ant"
+    let capabilities: AgentCapabilities
+    let transportDescriptor: AgentTransportDescriptor
+    let slashCommandCatalog: [SlashCommand] = []
+    private let sessions: [SessionSummary]
 
-    init(_ ptys: [ScriptedPTY]) {
-        self.ptys = ptys
+    init(id: AgentID,
+         descriptor: AgentTransportDescriptor,
+         sessions: [SessionSummary] = []) {
+        self.id = id
+        self.displayName = id.rawValue
+        self.transportDescriptor = descriptor
+        self.sessions = sessions
+        self.capabilities = sessions.isEmpty ? [] : [.resumableSessions]
     }
 
-    func makePTY(_ spec: PTYHost.ChildSpec) throws -> any AgentPTY {
+    func locateBinary(env: ResolvedEnvironment) async throws -> URL {
+        URL(fileURLWithPath: "/bin/cat")
+    }
+
+    func defaultEnvOverrides() -> [String: String] { [:] }
+
+    func buildLaunchArgv(context: LaunchContext) -> [String] { ["cat"] }
+
+    func authStatus(env: ResolvedEnvironment) async -> AuthStatus {
+        .authenticated(account: nil)
+    }
+
+    func makeEventStream(inputs: AgentInputs) -> AsyncStream<AgentEvent> {
+        AsyncStream { $0.finish() }
+    }
+
+    func encodeUserPrompt(_ text: String) -> Data { Data(text.utf8) }
+
+    func cancelSequence() -> Data { Data() }
+
+    func encodePermissionResponse(_ decision: PermissionDecision,
+                                  for prompt: PermissionPrompt) -> PermissionResponseDelivery {
+        .writePTY(Data())
+    }
+
+    func enumerateProjectCommands(workspace: URL) async -> [SlashCommand] { [] }
+
+    func listResumableSessions(workspace: URL) async -> [SessionSummary] {
+        sessions.filter { $0.workspace.path == workspace.path }
+    }
+
+    func resumeArgvAddition(sessionID: String) -> [String] { [] }
+}
+
+final class ScriptedTransportFactory: @unchecked Sendable {
+    private let lock = NSLock()
+    private var transports: [ScriptedTransport]
+
+    init(_ transports: [ScriptedTransport]) {
+        self.transports = transports
+    }
+
+    func makeTransport(_ descriptor: AgentTransportDescriptor,
+                       _ launch: AgentTransportLaunchSpec) throws -> any AgentTransport {
         lock.lock()
         defer { lock.unlock() }
-        guard !ptys.isEmpty else {
-            throw AgentError.internalInvariant(detail: "scripted PTY factory exhausted")
+        guard !transports.isEmpty else {
+            throw AgentError.internalInvariant(detail: "scripted transport factory exhausted")
         }
-        return ptys.removeFirst()
+        return transports.removeFirst()
     }
 }
 
-actor ScriptedPTY: AgentPTY {
+actor ScriptedTransport: AgentTransport {
     enum WriteStep: Sendable {
         case succeed
         case fail(PTYError)
     }
 
     nonisolated let outboundBytes: AsyncStream<Data>
+    nonisolated let bellEvents: AsyncStream<Void>
+    nonisolated var terminalSnapshot: (any TerminalSnapshotting)? { terminal }
 
+    private nonisolated let terminal = TerminalEngine()
     private let outboundContinuation: AsyncStream<Data>.Continuation
     private let writeSteps: [WriteStep]
     private var nextWriteIndex = 0
@@ -1196,6 +1328,10 @@ actor ScriptedPTY: AgentPTY {
         }
         self.outboundContinuation = continuation
         self.writeSteps = writeSteps
+
+        var bellCont: AsyncStream<Void>.Continuation!
+        self.bellEvents = AsyncStream { bellCont = $0 }
+        bellCont.finish()
     }
 
     func setWriteProbe(_ probe: @escaping @Sendable (Data) async -> Bool) {
@@ -1219,17 +1355,19 @@ actor ScriptedPTY: AgentPTY {
         }
     }
 
-    func interrupt() {
+    func interrupt() async {
         interrupted = true
     }
 
-    func close() {
+    func close() async {
         closed = true
         outboundContinuation.finish()
     }
 
-    func emit(_ text: String) {
-        outboundContinuation.yield(Data(text.utf8))
+    func emit(_ text: String) async {
+        let data = Data(text.utf8)
+        await terminal.feed(data)
+        outboundContinuation.yield(data)
     }
 
     func writtenTexts() -> [String] {
@@ -1261,53 +1399,50 @@ extension Seams {
     }
 }
 
-// MARK: - AgentEngine.slashLine internal helper tests
+// MARK: - Default encodeCommand (Claude slash text)
 
-@Suite("AgentEngine — slashLine helper")
-struct SlashLineTests {
-    // Exercise `slashLine(for:)` without spinning up a full engine.
-    // The method lives on the actor, so every test is async.
-    private let engine = AgentEngine(seams: .fake())
+@Suite("AgentAdapter — default encodeCommand")
+struct EncodeCommandDefaultTests {
+    private let adapter = MockAdapter()
 
     @Test("newSession produces /clear with newline")
-    func newSession() async {
-        let line = await engine.slashLine(for: .newSession)
-        #expect(line == "/clear\n")
+    func newSession() {
+        let data = adapter.encodeCommand(.newSession)
+        #expect(String(data: data ?? Data(), encoding: .utf8) == "/clear\n")
     }
 
     @Test("compact produces /compact with newline")
-    func compact() async {
-        let line = await engine.slashLine(for: .compact)
-        #expect(line == "/compact\n")
+    func compact() {
+        let data = adapter.encodeCommand(.compact)
+        #expect(String(data: data ?? Data(), encoding: .utf8) == "/compact\n")
     }
 
     @Test("selectModel encodes model id")
-    func selectModel() async {
-        let line = await engine.slashLine(for: .selectModel(id: "claude-opus-4"))
-        #expect(line == "/model claude-opus-4\n")
+    func selectModel() {
+        let data = adapter.encodeCommand(.selectModel(id: "claude-opus-4"))
+        #expect(String(data: data ?? Data(), encoding: .utf8) == "/model claude-opus-4\n")
     }
 
     @Test("toggleThinkMode on produces /think")
-    func thinkOn() async {
-        let line = await engine.slashLine(for: .toggleThinkMode(enabled: true))
-        #expect(line == "/think\n")
+    func thinkOn() {
+        let data = adapter.encodeCommand(.toggleThinkMode(enabled: true))
+        #expect(String(data: data ?? Data(), encoding: .utf8) == "/think\n")
     }
 
     @Test("toggleThinkMode off produces /think off")
-    func thinkOff() async {
-        let line = await engine.slashLine(for: .toggleThinkMode(enabled: false))
-        #expect(line == "/think off\n")
+    func thinkOff() {
+        let data = adapter.encodeCommand(.toggleThinkMode(enabled: false))
+        #expect(String(data: data ?? Data(), encoding: .utf8) == "/think off\n")
     }
 
     @Test("runSlashCommand joins name and args with spaces")
-    func runSlashCommand() async {
-        let line = await engine.slashLine(for: .runSlashCommand(name: "/memory", args: ["add", "note"]))
-        #expect(line == "/memory add note\n")
+    func runSlashCommand() {
+        let data = adapter.encodeCommand(.runSlashCommand(name: "/memory", args: ["add", "note"]))
+        #expect(String(data: data ?? Data(), encoding: .utf8) == "/memory add note\n")
     }
 
-    @Test("sendPrompt produces empty string (not a slash command)")
-    func sendPromptIsEmpty() async {
-        let line = await engine.slashLine(for: .sendPrompt(text: "hello", attachments: []))
-        #expect(line == "")
+    @Test("sendPrompt is unsupported (nil)")
+    func sendPromptIsNil() {
+        #expect(adapter.encodeCommand(.sendPrompt(text: "hello", attachments: [])) == nil)
     }
 }

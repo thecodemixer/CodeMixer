@@ -88,6 +88,8 @@ public struct WorkspaceChip: View {
 }
 
 public struct ConnectedClientsChip: View {
+    /// Toolbar badge when `RemoteControlServer` has ≥1 attached peer.
+    /// Tap opens Settings → Remote; device list and revoke live there.
     public let count: Int
     public let onTap: () -> Void
 

@@ -141,6 +141,7 @@ public struct SlashCommand: Sendable, Hashable, Identifiable {
 /// project picker's "Resume" list.
 public struct SessionSummary: Sendable, Hashable, Identifiable {
     public let id: String
+    public let agentID: AgentID
     public let workspace: URL
     public let title: String
     public let lastActivity: Date
@@ -150,12 +151,14 @@ public struct SessionSummary: Sendable, Hashable, Identifiable {
     public let gitBranch: String?
 
     public init(id: String,
+                agentID: AgentID,
                 workspace: URL,
                 title: String,
                 lastActivity: Date,
                 messageCount: Int,
                 gitBranch: String? = nil) {
         self.id = id
+        self.agentID = agentID
         self.workspace = workspace
         self.title = title
         self.lastActivity = lastActivity

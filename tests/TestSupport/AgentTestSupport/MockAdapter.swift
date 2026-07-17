@@ -11,6 +11,7 @@ public final class MockAdapter: AgentAdapter, @unchecked Sendable {
     public let displayName = "Mock"
     public let iconSymbol = "ant"
     public let capabilities: AgentCapabilities = []
+    public var transportDescriptor: AgentTransportDescriptor { .interactiveTerminal }
     public var slashCommandCatalog: [SlashCommand] { [] }
 
     public struct Script: Sendable {

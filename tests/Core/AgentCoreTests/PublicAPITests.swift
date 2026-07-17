@@ -16,9 +16,9 @@ struct AgentIDTests {
         }
     }
 
-    @Test("Only claudeCode is marked shipping in v1")
+    @Test("Claude Code and Codex are marked shipping")
     func shippingSet() {
-        #expect(AgentID.shipping == [.claudeCode])
+        #expect(AgentID.shipping == [.claudeCode, .codex])
     }
 
     @Test("AgentID round-trips through Codable")
@@ -164,15 +164,68 @@ struct SessionSummaryTests {
     func allFields() {
         let ws = URL(fileURLWithPath: "/tmp/my-project")
         let summary = SessionSummary(id: "abc123",
+                                     agentID: .codex,
                                      workspace: ws,
                                      title: "Fix the bug",
                                      lastActivity: testEpoch,
                                      messageCount: 42)
         #expect(summary.id == "abc123")
+        #expect(summary.agentID == .codex)
         #expect(summary.workspace == ws)
         #expect(summary.title == "Fix the bug")
         #expect(summary.lastActivity == testEpoch)
         #expect(summary.messageCount == 42)
+    }
+}
+
+@Suite("ProjectAgentMode — routing metadata")
+struct ProjectAgentModeTests {
+    @Test("Pinned modes expose primary agent ids and labels")
+    func pinnedModes() {
+        #expect(ProjectAgentMode.claudeCode.primaryAgentID == .claudeCode)
+        #expect(ProjectAgentMode.codex.primaryAgentID == .codex)
+        #expect(ProjectAgentMode.claudeCode.shortLabel == "Claude")
+        #expect(ProjectAgentMode.codex.shortLabel == "Codex")
+    }
+
+    @Test("Mixed mode carries optional default agent")
+    func mixedDefault() {
+        let mode = ProjectAgentMode.mixed(defaultAgent: .codex)
+        #expect(mode.primaryAgentID == .codex)
+        #expect(mode.shortLabel == "Mixed")
+    }
+
+    @Test("Custom mode stores executable metadata")
+    func customMode() {
+        let ref = CustomAgentRef(id: "local-tool",
+                                 displayName: "Local Tool",
+                                 transport: .stdioJSONRPC,
+                                 executablePath: "/usr/local/bin/local-tool",
+                                 arguments: ["serve"])
+        let mode = ProjectAgentMode.custom(ref)
+        #expect(mode.primaryAgentID == .other)
+        #expect(mode.shortLabel == "Local Tool")
+        #expect(ref.executablePath == "/usr/local/bin/local-tool")
+    }
+}
+
+@Suite("ProjectAgentRouter — adapter id resolution")
+struct ProjectAgentRouterTests {
+    @Test("Pinned modes resolve directly")
+    func pinnedModes() {
+        #expect(ProjectAgentRouter.resolveAdapterID(mode: .claudeCode) == .claudeCode)
+        #expect(ProjectAgentRouter.resolveAdapterID(mode: .codex) == .codex)
+    }
+
+    @Test("Mixed mode prefers session then explicit preference then default")
+    func mixedPrecedence() {
+        let mode = ProjectAgentMode.mixed(defaultAgent: .claudeCode)
+        #expect(ProjectAgentRouter.resolveAdapterID(mode: mode,
+                                                    sessionAgentID: .codex,
+                                                    preferredForNewChat: .claudeCode) == .codex)
+        #expect(ProjectAgentRouter.resolveAdapterID(mode: mode,
+                                                    preferredForNewChat: .codex) == .codex)
+        #expect(ProjectAgentRouter.resolveAdapterID(mode: mode) == .claudeCode)
     }
 }
 

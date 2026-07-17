@@ -88,6 +88,10 @@ Swift's serialisation protocol (`Encodable & Decodable`). Required for wire type
 
 A pure-C SPM target containing low-level POSIX wrappers — `openpty`, `posix_spawn`, `killpg`, `TIOCSWINSZ`, `FD_CLOEXEC` helpers. Swift code is fork-unsafe; the C layer keeps fork/exec out of the Swift runtime. See [posix-child-lifecycle](patterns/posix-child-lifecycle.md).
 
+### Connected remote clients **[Codemixer]**
+
+The number of WebSocket peers currently attached to `RemoteControlServer` (`connectedClientCount`). Surfaced in the GUI as `EngineViewModel.connectedRemoteClients` and the toolbar `ConnectedClientsChip`. In Mode B this count **includes** the loopback Mac GUI; in Mode A with remote access on it counts **external** peers only. Distinct from the [remote client](#remote-client-codemixer) client-role. See [architecture.md §4.1](../architecture.md).
+
 ---
 
 ## D
@@ -244,6 +248,10 @@ Swift's UI-thread global actor. SwiftUI views, view models, and any code touchin
 
 A pure function transforming an older-version persisted struct into the next version. Forward-only; never lossy. See [atomic-file-persistence](patterns/atomic-file-persistence.md).
 
+### Mode A / Mode B **[Codemixer]**
+
+The two deployment shapes for the same `AgentEngine`. **Mode A** (default): GUI hosts the engine in-process. **Mode B**: `codemixerd` owns the engine; the GUI connects via loopback WebSocket and is a [remote client](#remote-client-codemixer) in the client-role sense. Opt-in via **Settings → Remote → Enable on login** (LaunchAgent). Full diagrams: [architecture.md §4](../architecture.md).
+
 ### Multicast
 
 One event source distributed to N consumers. In Codemixer, replay-aware fan-out is implemented by [`MulticastEventBus`](#multicasteventbus-codemixer).
@@ -311,6 +319,14 @@ Pseudo-terminal. A pair of file descriptors (`master`, `slave`) where the slave 
 ---
 
 ## R
+
+### Remote client **[Codemixer]**
+
+A WebSocket peer that drives the engine through the typed wire protocol instead of holding `AgentEngine` in-process. Includes the Mac GUI in Mode B, a future iOS app, and automation scripts. **Not** the same as the [connected remote clients](#connected-remote-clients-codemixer) count — see [architecture.md §4.1](../architecture.md).
+
+### `RemoteEngineClient` **[Codemixer]**
+
+The client-role implementation of `AgentEngineCommandPort` over Codemixer's WebSocket protocol. Used by `Bootstrap.remoteClient` in Mode B and by any external tool that drives a daemon. Stored property name `Bootstrap.remoteClient` refers to this type — not the connected-peer count.
 
 ### Reaper
 

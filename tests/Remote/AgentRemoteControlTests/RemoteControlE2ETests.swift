@@ -274,7 +274,7 @@ struct RemoteControlE2ETests {
         let net = InMemoryNetwork()
         let pty = FailingRemotePTY(error: .writeFailed(errno: 5))
         let seams = Seams.fake()
-        let engine = AgentEngine(seams: seams, ptyFactory: { _ in pty })
+        let engine = AgentEngine(seams: seams, transportFactory: { _, _ in pty })
         await engine.bootstrap()
         try await engine.start(adapter: MockAdapter(),
                                workspace: URL(fileURLWithPath: NSTemporaryDirectory()))
@@ -371,7 +371,7 @@ struct RemoteControlE2ETests {
         let net = InMemoryNetwork()
         let pty = FailingRemotePTY(error: .writeFailed(errno: 5))
         let seams = seamsWithRunningClock()
-        let engine = AgentEngine(seams: seams, ptyFactory: { _ in pty })
+        let engine = AgentEngine(seams: seams, transportFactory: { _, _ in pty })
         await engine.bootstrap()
         try await engine.start(adapter: MockAdapter(),
                                workspace: URL(fileURLWithPath: NSTemporaryDirectory()))
@@ -583,7 +583,7 @@ struct RemoteControlE2ETests {
         let net = InMemoryNetwork()
         let pty = FailingRemotePTY(error: .writeFailed(errno: 5))
         let seams = Seams.fake()
-        let engine = AgentEngine(seams: seams, ptyFactory: { _ in pty })
+        let engine = AgentEngine(seams: seams, transportFactory: { _, _ in pty })
         await engine.bootstrap()
         let adapter = RecordingMockAdapter(permissionDelivery: .writePTY(Data("allow\n".utf8)))
         try await engine.start(adapter: adapter,
@@ -623,11 +623,11 @@ struct RemoteControlE2ETests {
 
     private func assertRemoteEditAndResubmitWriteFailure() async throws {
         let net = InMemoryNetwork()
-        let firstPTY = RemoteScriptedPTY()
-        let restartedPTY = RemoteScriptedPTY(writeSteps: [.fail(.writeFailed(errno: 5))])
-        let factory = RemoteScriptedPTYFactory([firstPTY, restartedPTY])
+        let firstPTY = RemoteScriptedTransport()
+        let restartedPTY = RemoteScriptedTransport(writeSteps: [.fail(.writeFailed(errno: 5))])
+        let factory = RemoteScriptedTransportFactory([firstPTY, restartedPTY])
         let seams = seamsWithRunningClock()
-        let engine = AgentEngine(seams: seams, ptyFactory: factory.makePTY)
+        let engine = AgentEngine(seams: seams, transportFactory: factory.makeTransport)
         await engine.bootstrap()
         try await engine.start(adapter: RecordingMockAdapter(),
                                workspace: URL(fileURLWithPath: NSTemporaryDirectory()))
@@ -701,8 +701,10 @@ struct RemoteControlE2ETests {
     }
 }
 
-private actor FailingRemotePTY: AgentPTY {
+private actor FailingRemotePTY: AgentTransport {
     nonisolated let outboundBytes: AsyncStream<Data>
+    nonisolated let bellEvents: AsyncStream<Void>
+    nonisolated var terminalSnapshot: (any TerminalSnapshotting)? { nil }
 
     private let continuation: AsyncStream<Data>.Continuation
     private let error: PTYError
@@ -715,6 +717,10 @@ private actor FailingRemotePTY: AgentPTY {
         }
         self.continuation = continuation
         self.error = error
+
+        var bellCont: AsyncStream<Void>.Continuation!
+        self.bellEvents = AsyncStream { bellCont = $0 }
+        bellCont.finish()
     }
 
     func write(_ data: Data) async throws {
@@ -722,9 +728,9 @@ private actor FailingRemotePTY: AgentPTY {
         throw error
     }
 
-    func interrupt() {}
+    func interrupt() async {}
 
-    func close() {
+    func close() async {
         continuation.finish()
     }
 
@@ -737,31 +743,34 @@ private actor FailingRemotePTY: AgentPTY {
     }
 }
 
-private final class RemoteScriptedPTYFactory: @unchecked Sendable {
+private final class RemoteScriptedTransportFactory: @unchecked Sendable {
     private let lock = NSLock()
-    private var ptys: [RemoteScriptedPTY]
+    private var transports: [RemoteScriptedTransport]
 
-    init(_ ptys: [RemoteScriptedPTY]) {
-        self.ptys = ptys
+    init(_ transports: [RemoteScriptedTransport]) {
+        self.transports = transports
     }
 
-    func makePTY(_ spec: PTYHost.ChildSpec) throws -> any AgentPTY {
+    func makeTransport(_ descriptor: AgentTransportDescriptor,
+                       _ launch: AgentTransportLaunchSpec) throws -> any AgentTransport {
         lock.lock()
         defer { lock.unlock() }
-        guard !ptys.isEmpty else {
-            throw AgentError.internalInvariant(detail: "remote scripted PTY factory exhausted")
+        guard !transports.isEmpty else {
+            throw AgentError.internalInvariant(detail: "remote scripted transport factory exhausted")
         }
-        return ptys.removeFirst()
+        return transports.removeFirst()
     }
 }
 
-private actor RemoteScriptedPTY: AgentPTY {
+private actor RemoteScriptedTransport: AgentTransport {
     enum WriteStep: Sendable {
         case succeed
         case fail(PTYError)
     }
 
     nonisolated let outboundBytes: AsyncStream<Data>
+    nonisolated let bellEvents: AsyncStream<Void>
+    nonisolated var terminalSnapshot: (any TerminalSnapshotting)? { nil }
 
     private let continuation: AsyncStream<Data>.Continuation
     private let writeSteps: [WriteStep]
@@ -776,6 +785,10 @@ private actor RemoteScriptedPTY: AgentPTY {
         }
         self.continuation = continuation
         self.writeSteps = writeSteps
+
+        var bellCont: AsyncStream<Void>.Continuation!
+        self.bellEvents = AsyncStream { bellCont = $0 }
+        bellCont.finish()
     }
 
     func write(_ data: Data) async throws {
@@ -791,9 +804,9 @@ private actor RemoteScriptedPTY: AgentPTY {
         }
     }
 
-    func interrupt() {}
+    func interrupt() async {}
 
-    func close() {
+    func close() async {
         closed = true
         continuation.finish()
     }

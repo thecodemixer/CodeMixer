@@ -19,15 +19,21 @@ public extension EngineViewModel {
         model.applyPreviewState(
             workspace: PreviewFixtures.workspace,
             projects: [
-                .init(path: PreviewFixtures.workspace.path, displayName: "Sample"),
-                .init(path: PreviewFixtures.workspace.appendingPathComponent("api").path, displayName: "api"),
+                .init(path: PreviewFixtures.workspace.path,
+                      displayName: "Sample",
+                      agentMode: .claudeCode),
+                .init(path: PreviewFixtures.workspace.appendingPathComponent("api").path,
+                      displayName: "api",
+                      agentMode: .codex),
             ],
             sessions: [
                 PreviewFixtures.workspace.path: [
-                    SessionSummary(id: "s1", workspace: PreviewFixtures.workspace,
+                    SessionSummary(id: "s1", agentID: .claudeCode,
+                                   workspace: PreviewFixtures.workspace,
                                    title: "Add session navigator",
                                    lastActivity: Date(), messageCount: 12),
-                    SessionSummary(id: "s2", workspace: PreviewFixtures.workspace,
+                    SessionSummary(id: "s2", agentID: .claudeCode,
+                                   workspace: PreviewFixtures.workspace,
                                    title: "Fix transcript slug bug",
                                    lastActivity: Date().addingTimeInterval(-90_000),
                                    messageCount: 5),

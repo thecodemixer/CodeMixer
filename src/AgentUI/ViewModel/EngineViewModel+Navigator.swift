@@ -10,11 +10,12 @@ extension EngineViewModel {
 
     // MARK: - Session navigator actions
 
-    /// Reload the projects for the current workspace, seeding the root project.
-    public func refreshProjects() {
+    /// Reload the projects for the current workspace. Pass `rootMode` only when
+    /// seeding a brand-new workspace that has no stored projects yet.
+    public func refreshProjects(rootMode: ProjectAgentMode? = nil) {
         guard let workspace, let store = workspaceProjects else { return }
         Task { [weak self] in
-            let refs = await store.projects(for: workspace)
+            let refs = await store.projects(for: workspace, rootMode: rootMode)
             await MainActor.run { self?.projects = refs }
         }
     }
@@ -63,12 +64,12 @@ extension EngineViewModel {
     }
 
     /// Create a new project (subfolder of the workspace) and switch to it.
-    public func createProject(name: String) {
+    public func createProject(name: String, agentMode: ProjectAgentMode) {
         guard let workspace, let store = workspaceProjects else { return }
         Task { [weak self] in
             do {
-                let ref = try await store.createProject(name: name, in: workspace)
-                let refs = await store.projects(for: workspace)
+                let ref = try await store.createProject(name: name, agentMode: agentMode, in: workspace)
+                let refs = await store.projects(for: workspace, rootMode: agentMode)
                 await MainActor.run {
                     self?.projects = refs
                     self?.newChat(in: ref.path)
@@ -80,12 +81,12 @@ extension EngineViewModel {
     }
 
     /// Register an existing folder as a project of the workspace.
-    public func addExistingProject(url: URL) {
+    public func addExistingProject(url: URL, agentMode: ProjectAgentMode) {
         guard let workspace, let store = workspaceProjects else { return }
         Task { [weak self] in
             do {
-                let ref = try await store.addExistingProject(url: url, in: workspace)
-                let refs = await store.projects(for: workspace)
+                let ref = try await store.addExistingProject(url: url, agentMode: agentMode, in: workspace)
+                let refs = await store.projects(for: workspace, rootMode: agentMode)
                 await MainActor.run {
                     self?.projects = refs
                     self?.newChat(in: ref.path)
@@ -200,5 +201,27 @@ extension EngineViewModel {
     func onWorkspaceChanged() {
         refreshProjects()
         if let workspace { loadSessions(for: workspace.path) }
+    }
+
+    /// Clears navigator + conversation chrome after File → Close Workspace.
+    public func resetForClosedWorkspace() {
+        endSessionSwitch()
+        workspace = nil
+        sessionID = nil
+        projects = []
+        sessionsByProject = [:]
+        loadingProjectPaths = []
+        removedProjectUndo = nil
+        removedProjectUndoTask?.cancel()
+        removedProjectUndoTask = nil
+        clearConversationState()
+        changedFiles = []
+        pendingPermission = nil
+        status = .idle
+        activity = .idle
+        sessionTokens = 0
+        sessionCostUSD = nil
+        availableModels = []
+        slashCommands = []
     }
 }

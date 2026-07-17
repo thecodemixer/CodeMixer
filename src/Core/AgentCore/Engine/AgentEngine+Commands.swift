@@ -10,6 +10,11 @@ extension AgentEngine {
         // or not an adapter has been bound.
         if let handled = try await handleOutOfBand(command) { _ = handled; return }
 
+        if case .openProject(let path, let resume) = command {
+            try await openProject(path: path, resumeSessionID: resume)
+            return
+        }
+
         guard let adapter else { throw AgentError.internalInvariant(detail: "no adapter bound") }
 
         switch command {
@@ -30,8 +35,10 @@ extension AgentEngine {
 
         case .cancelCurrentTurn:
             let cancelBytes = adapter.cancelSequence()
-            try await pty?.write(cancelBytes)
-            await pty?.interrupt()
+            try await transport?.write(cancelBytes)
+            if adapter.transportDescriptor.supportsOutOfBandInterrupt {
+                await transport?.interrupt()
+            }
 
         case .editAndResubmitLast(let target, let text, let attachments):
             guard target == lastUserBubbleID else {
@@ -45,9 +52,9 @@ extension AgentEngine {
             let savedAdapter = adapter
             let savedSessionID = currentSessionID
 
-            // Step 1: graceful terminate — send Ctrl-C and allow 50ms drain.
+            // Step 1: graceful terminate — send cancel bytes and allow 50ms drain.
             let cancelBytes = adapter.cancelSequence()
-            try await pty?.write(cancelBytes)
+            try await transport?.write(cancelBytes)
             try await seams.clock.sleep(for: .milliseconds(50))
 
             // Step 2: atomic transcript truncation — strip everything after the
@@ -92,21 +99,17 @@ extension AgentEngine {
              .toggleReviewMode,
              .runSlashCommand,
              .runCustomCommand:
-            try await writePromptBytes(adapter.encodeUserPrompt(slashLine(for: command)))
-
-        case .openProject(let path, let resume):
-            // The GUI layer normally owns lifecycle; over the wire we honour
-            // it by restarting against the new workspace.
-            await shutdown(reason: .userCancel)
-            try await start(adapter: adapter,
-                            workspace: URL(fileURLWithPath: path),
-                            resumeSessionID: resume,
-                            permissionMode: .default)
+            guard let bytes = adapter.encodeCommand(command) else {
+                await bus.publish(.error(.unsupportedCommand(name: String(describing: command))))
+                return
+            }
+            try await writePromptBytes(bytes)
 
         case .closeSession:
             await shutdown(reason: .userCancel)
 
-        case .speakAssistantBubble, .revertFile, .revertHunk,
+        case .openProject,
+             .speakAssistantBubble, .revertFile, .revertHunk,
              .updateAutoApprovalRules, .updateAppearancePref, .requestSnapshot:
             // Already handled in `handleOutOfBand`.
             break
@@ -155,6 +158,49 @@ extension AgentEngine {
         }
     }
 
+    private func openProject(path: String, resumeSessionID: String?) async throws {
+        let projectURL = URL(fileURLWithPath: path)
+        let store = WorkspaceProjectsStore(environment: seams.environment,
+                                           fileSystem: seams.fileSystem)
+        await store.load()
+        guard let project = await store.project(path: path) else {
+            throw AgentError.unsupportedOperation(
+                detail: "Project \(path) has no stored agent mode. Open it from the project picker and choose an agent first."
+            )
+        }
+
+        let sessionAgentID = await sessionAgentID(for: resumeSessionID,
+                                                  workspace: projectURL,
+                                                  mode: project.agentMode)
+        guard let nextAdapter = await ProjectAgentRouter.resolveAdapter(mode: project.agentMode,
+                                                                        sessionAgentID: sessionAgentID) else {
+            throw AgentError.unsupportedOperation(
+                detail: "Project \(path) needs a concrete registered agent before it can be opened."
+            )
+        }
+
+        await shutdown(reason: .userCancel)
+        try await start(adapter: nextAdapter,
+                        workspace: projectURL,
+                        resumeSessionID: resumeSessionID,
+                        permissionMode: .default)
+    }
+
+    private func sessionAgentID(for resumeSessionID: String?,
+                                workspace: URL,
+                                mode: ProjectAgentMode) async -> AgentID? {
+        guard let resumeSessionID else { return nil }
+        guard case .mixed = mode else { return nil }
+        let adapters = await AdapterRegistry.shared.all()
+        for adapter in adapters where adapter.capabilities.contains(.resumableSessions) {
+            let sessions = await adapter.listResumableSessions(workspace: workspace)
+            if let match = sessions.first(where: { $0.id == resumeSessionID }) {
+                return match.agentID
+            }
+        }
+        return nil
+    }
+
     // MARK: - Helpers
 
     private func promptText(_ text: String, attachments: [AttachmentRef]) async throws -> String {
@@ -166,7 +212,7 @@ extension AgentEngine {
 
     private func writePromptBytes(_ bytes: Data) async throws {
         await waitForResumeStartupIfNeeded()
-        try await pty?.write(bytes)
+        try await transport?.write(bytes)
         // Independent safety net for the very first real prompt of a freshly
         // started TUI session: if the readiness heuristic was fooled and the
         // submit key was swallowed, the prompt text keeps sitting in the input
@@ -176,23 +222,6 @@ extension AgentEngine {
         if startupSubmitRecoveryArmed, let turnID = currentTurnID {
             startupSubmitRecoveryArmed = false
             scheduleStartupSubmitRecovery(turnID: turnID)
-        }
-    }
-
-    func slashLine(for command: AgentCommand) -> String {
-        switch command {
-        case .newSession:          return "/clear\n"
-        case .compact:             return "/compact\n"
-        case .selectModel(let id): return "/model \(id)\n"
-        case .setPermissionMode(let m): return "/permission \(m.rawValue)\n"
-        case .toggleThinkMode(let enabled): return enabled ? "/think\n" : "/think off\n"
-        case .toggleReviewMode(let enabled): return enabled ? "/review\n" : "/review off\n"
-        case .runSlashCommand(let name, let args):
-            return ([name] + args).joined(separator: " ") + "\n"
-        case .runCustomCommand(let path, let args):
-            return ([path] + args).joined(separator: " ") + "\n"
-        default:
-            return ""
         }
     }
 }

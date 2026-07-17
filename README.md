@@ -1,6 +1,6 @@
 # Codemixer
 
-> A native macOS workspace for interactive CLI coding agents — Claude Code today, Codex / Cursor CLI / Antigravity CLI / OpenCode / Copilot tomorrow. The agent runs under a hidden pseudo-terminal; everything you see is SwiftUI driven by a typed event stream. No terminal pane, no Electron, no compromise on the "interactive subscription" billing path. The same engine also runs **headless** as `codemixerd` so a future mobile client (or your own scripts) can drive it over a typed WebSocket protocol.
+> A native macOS workspace for agentic CLI coding agents — Claude Code through a hidden interactive terminal transport, Codex through App Server stdio JSON-RPC. Everything you see is SwiftUI driven by a typed event stream. No terminal pane, no Electron, and no accidental Agent Credits usage from third-party / SDK-style Claude Code invocations. The same engine also runs **headless** as `codemixerd` so a future mobile client (or your own scripts) can drive it over a typed WebSocket protocol.
 
 ---
 
@@ -28,10 +28,10 @@
 
 The constraint set was unusual enough that none of the off-the-shelf wrappers fit:
 
-1. **Stay on the interactive subscription billing path.** Claude Code's $20× compute subsidy applies only when the binary runs interactively under a real terminal — `--input-format stream-json` switches you to the Agent SDK credit pool. The wrapper therefore *must* keep `claude` running under a pty.
-2. **Hide the terminal entirely.** TUI panes with ANSI flicker, cursor jumps, and spinner artifacts are not the experience anyone wants in 2026. The pty stays invisible; every byte is translated into typed `AgentEvent`s and rendered by native SwiftUI components.
+1. **Keep Claude Code on the interactive billing path.** When third-party clients or SDK-style entrypoints invoke Claude Code, they can route usage through Agent Credits. Codemixer runs `claude` as a real interactive terminal session instead, so Claude usage stays on the interactive subscription path rather than the Agent Credits path.
+2. **Hide the transport entirely.** TUI panes with ANSI flicker, cursor jumps, and spinner artifacts are not the experience anyone wants in 2026. Terminal transports stay invisible, and stdio transports are direct protocol peers; both become typed `AgentEvent`s rendered by native SwiftUI components.
 3. **Run with or without the UI.** The same engine has to power the GUI app, a headless daemon, and (one day soon) an iOS client connecting over Wi-Fi. There can be no UI-only feature and no API-only feature.
-4. **Stay agent-agnostic.** Claude is v1; Codex, Cursor CLI, Gemini CLI, OpenCode, and Copilot are v1.1+. Each one is a sibling adapter behind a single `AgentAdapter` protocol — the engine and the UI never grow per-agent branches.
+4. **Stay agent-agnostic.** Claude and Codex ship as sibling adapters behind a single `AgentAdapter` protocol. The engine selects an `AgentTransport` from the adapter descriptor — terminal for Claude, stdio JSON-RPC for Codex — and the UI never grows per-agent branches.
 5. **Mouse, keyboard, voice, and remote API are peer interaction surfaces.** Every UI affordance maps to exactly one `AgentCommand` case; a parity test refuses merges that add a button without wiring its case across the WebSocket protocol.
 
 That combination is what `Codemixer` solves.
@@ -44,9 +44,9 @@ That combination is what `Codemixer` solves.
 
 Engine + protocol spine:
 
-- ✅ Hidden pty pipeline: `PTYHost` actor → `ChildReaper` → headless `TerminalEngine` (SwiftTerm-backed) → adapter event stream → `MulticastEventBus` → SwiftUI.
+- ✅ Generic transport pipeline: `AgentTransport` → interactive terminal (`PTYHost` + `TerminalEngine`) or stdio JSON-RPC (`StdioJSONRPCTransport`) → adapter event stream → `MulticastEventBus` → SwiftUI.
 - ✅ Typed `AgentCommand` ↔ `AgentEvent` alphabets with a `WireCodec` boundary and parity/dispatch tests that refuse drift.
-- ✅ `AgentAdapter` protocol with the Claude adapter as its reference implementation (binary lookup, hook installer + decoder, transcript tailer, slash-command catalog, permission encoder, TUI fallback).
+- ✅ `AgentAdapter` protocol with Claude and Codex adapters (binary lookup, transport descriptor, bootstrap bytes, command encoding, event decoding, session listing).
 - ✅ Server-side `HeartbeatActivityMonitor` + `StatusPhraseResolver` so every connected client sees identical "still working" escalation.
 - ✅ `SnapshotService`, `EngineViewModel` event reduction, and a `GitReverter` for file/hunk-level revert.
 - ✅ `SilentDiagnostics` ring buffer with opt-in UI and `GET /v1/diagnostics/silent` sidecar.
@@ -76,7 +76,7 @@ Quality gates (local — no checked-in CI workflow):
 
 - Golden-fixture tests against real Claude transcript JSONL.
 - Code-signed + notarized `.app` distribution via the Xcode shell.
-- A second adapter (Codex / Cursor CLI) and an iOS client over the remote-control API.
+- Additional adapters (Cursor CLI / Gemini CLI / OpenCode) and an iOS client over the remote-control API.
 
 ---
 
@@ -112,11 +112,17 @@ twin `fake-claude` binary instead. The twin is documented in
 and serves as both a test harness and an executable specification of the
 contract Codemixer expects from Claude Code.
 
-To validate the **real** interactive PTY path (subscription billing — no
-`claude -p`), opt in with:
+To validate the **real** interactive PTY path (interactive billing, avoiding
+Agent Credits / `claude -p`), opt in with:
 
 ```bash
 CODEMIXER_LIVE_CLAUDE=1 swift test --no-parallel --filter LiveClaudeIntegrationTests
+```
+
+To validate the **real** Codex App Server stdio path (`codex app-server --stdio`):
+
+```bash
+CODEMIXER_LIVE_CODEX=1 swift test --no-parallel --filter LiveCodexIntegrationTests
 ```
 
 Full harness docs: [`tests/AgenticCLIs/README.md`](tests/AgenticCLIs/README.md).
@@ -146,33 +152,53 @@ examples), see [`scripts/README.md`](scripts/README.md).
 
 ## Architecture at a glance
 
+Codemixer has two deployment shapes. Both use the same `AgentCommand` / `AgentEvent`
+alphabets and the same `AgentEngineCommandPort` abstraction at the UI boundary.
+
+**Mode A (default)** — engine in the GUI process. Optional remote access lets
+*external* peers connect; the Mac UI does not go over the wire.
+
 ```
-                    Mac UI                Remote client (iOS, CLI, ...)
-                      │                              │
-                      ▼                              ▼
-              EngineViewModel               RemoteControlServer
-                      │                              │
-                      └──────────► AgentCommand ◄────┘   (one typed input alphabet)
-                                       │
-                                       ▼
-                       ┌─────────  AgentEngine  ──────────┐
-                       │     (actor, agent-agnostic)      │
-                       │                                  │
-                       │  • spawns PTYHost (AgentPTY seam)│
-                       │  • wires HookServer when needed  │
-                       │  • bridges adapter events        │
-                       │  • drives HeartbeatActivity      │
-                       │  • publishes to bus              │
-                       └──────────────────┬───────────────┘
-                                          │
-                                          ▼
-                                  MulticastEventBus  ──►  AgentEvent stream
-                                          │              (fan-out + 500-event replay)
-                                          ▼
-                                  N subscribers (GUI + remote clients)
+┌─────────────────────────────────────────────────────────────────────┐
+│  Codemixer.app (Mode A)                                              │
+│                                                                      │
+│   EngineViewModel ──► AgentEngine (in-process) ──► MulticastEventBus │
+│                              ▲                                       │
+│   RemoteControlServer ───────┘  (optional; Settings → Remote)        │
+│         ▲                                                            │
+│         │ WSS                                                        │
+│   external remote clients (iOS, CLI, …)                              │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-Every UI affordance — keyboard, mouse, voice, remote phone — maps to one `AgentCommand` case. Every byte the agent produces is normalised to one `AgentEvent` case. Both alphabets are typed Swift enums; the wire codec (`WireCodec`) translates the domain `AgentEvent` to its portable `AgentEventWire` mirror at the network boundary, and a parity test refuses to let them drift.
+**Mode B** — engine in `codemixerd`. The Mac GUI is a loopback WebSocket
+client (`RemoteEngineClient`) — no in-process engine, no GUI fast path.
+
+```
+┌──────────────────────────┐         ┌──────────────────────────────────┐
+│  Codemixer.app (Mode B)  │  WSS    │  codemixerd                       │
+│                          │ loopback│                                   │
+│  EngineViewModel         ├────────►│  RemoteControlServer              │
+│       ▲                  │         │       └─► AgentEngine             │
+│       │                  │         │       └─► MulticastEventBus         │
+│  RemoteEngineClient      │         │  connectedClientCount = N         │
+│  (Bootstrap.remoteClient)│         │    (includes this GUI + others)   │
+└──────────────────────────┘         └──────────────────────────────────┘
+                                              ▲
+                                              │ WSS (LAN + TLS + pairing)
+                                         phone, scripts, …
+```
+
+Every UI affordance — keyboard, mouse, voice, remote phone — maps to one
+`AgentCommand` case. Every byte the agent produces is normalised to one
+`AgentEvent` case. Both alphabets are typed Swift enums; the wire codec
+(`WireCodec`) translates the domain `AgentEvent` to its portable `AgentEventWire`
+mirror at the network boundary, and a parity test refuses to let them drift.
+
+**Terminology:** *remote client* is used in two related senses — client role
+(`RemoteEngineClient`) vs connected-peer count (`connectedRemoteClients`). See
+[`docs/architecture.md` §4.1](docs/architecture.md) and
+[`src/Remote/AgentRemoteControl/README.md`](src/Remote/AgentRemoteControl/README.md).
 
 Full treatment in [`docs/architecture.md`](docs/architecture.md).
 
@@ -203,15 +229,15 @@ src/
 ├── Core/            # agent-agnostic engine + portable wire protocol + POSIX shim
 │   ├── CPosixBridge/    # C shim: openpty, posix_spawn, FD_CLOEXEC
 │   ├── AgentProtocol/   # pure Foundation Codable DTOs — portable wire alphabet
-│   └── AgentCore/       # PTY + reaper, terminal engine, AgentPTY seam, event bus,
+│   └── AgentCore/       # AgentTransport, PTY/reaper, stdio transport, terminal engine, event bus,
 │                        # engine actor + commands, snapshot, git diff/revert,
 │                        # hooks, FSEvents, attachments, status, activity,
 │                        # network transport, persistence, paths, DI seams
 ├── AgenticCLIs/     # one folder per agent CLI — see AgenticCLIs/README.md
-│   └── ClaudeCode/  # Adapter/, Common/, digital-twin/, contract README
+│   ├── ClaudeCode/  # Adapter/, Common/, digital-twin/, contract README
+│   └── Codex/       # App Server stdio adapter, Common/, digital-twin/, contract README
 ├── Remote/          # headless daemon + WebSocket remote-control library
-│   ├── AgentRemoteControl/  # WebSocket server, pairing, paired-device store,
-│   │                        # TLS/cert manager, HTTP sidecar, Bonjour, remote client
+│   ├── AgentRemoteControl/  # WSS server, pairing, RemoteEngineClient — README.md
 │   └── CodemixerDaemon/     # headless daemon executable
 ├── AgentUI/         # SwiftUI views, Theme tokens, IntentReveal, EngineViewModel,
 │                    # conversation, composer, sidebar, palette, diff, settings,
@@ -229,9 +255,12 @@ tests/
 │   ├── AgentRemoteControlTests/
 │   └── RemoteParityTests/    # asserts wire codec + command dispatch parity
 ├── AgenticCLIs/                    # per-agent adapter + twin suites — see tests/AgenticCLIs/README.md
-│   └── ClaudeCode/
-│       ├── ClaudeAdapterTests/
-│       └── ClaudeCodeTwinTests/
+│   ├── ClaudeCode/
+│   │   ├── ClaudeAdapterTests/
+│   │   └── ClaudeCodeTwinTests/
+│   └── Codex/
+│       ├── CodexAdapterTests/
+│       └── CodexTwinTests/
 ├── AgentUITests/
 ```
 
@@ -241,13 +270,14 @@ tests/
 | --- | --- | --- | --- |
 | `CPosixBridge` | `src/Core/CPosixBridge/` | `openpty`, `posix_spawn`, `winsize`, `killpg`, `fcntl`. Nothing Swift-side. | — |
 | `AgentProtocol` | `src/Core/AgentProtocol/` | Pure value types. Wire DTOs, `AgentCommand`, `AgentEventWire`, frames, prefs, decisions, attachment refs. | Foundation only. |
-| `AgentCore` | `src/Core/AgentCore/` | PTY + reaper, `AgentPTY` test seam, terminal, hooks, FSEvents, git diff/revert, attachments, events, engine, snapshot, bus, status, activity, network transport, persistence, paths, seams. **The agent-agnostic engine.** | `CPosixBridge`, `AgentProtocol`, `SwiftTerm`. |
+| `AgentCore` | `src/Core/AgentCore/` | `AgentTransport` seam, interactive terminal transport, stdio JSON-RPC transport, PTY + reaper, terminal, hooks, FSEvents, git diff/revert, attachments, events, engine, snapshot, bus, status, activity, network transport, persistence, paths, seams. **The agent-agnostic engine.** | `CPosixBridge`, `AgentProtocol`, `SwiftTerm`. |
 | `ClaudeCode` | `src/AgenticCLIs/ClaudeCode/` (`Adapter/`, `Common/`, `digital-twin/`) | `claude` binary lookup, hooks, transcript JSONL, slash commands, TUI fallback, shared path/input helpers, and the `ClaudeCodeTwin` digital twin. | `AgentCore`, `AgentProtocol`. |
+| `Codex` | `src/AgenticCLIs/Codex/` (`Adapter/`, `Common/`, `digital-twin/`) | `codex app-server --stdio` lookup/bootstrap, JSON-RPC framing, event decoding, input encoding, thread index, model/command catalogs, and `CodexTwin`. | `AgentCore`, `AgentProtocol`. |
 | `AgentRemoteControl` | `src/Remote/AgentRemoteControl/` | WebSocket server, pairing PIN + bearer tokens, paired-device store, TLS/cert manager, HTTP sidecar, Bonjour, remote engine client. | `AgentCore`, `AgentProtocol`. |
 | `AgentUI` | `src/AgentUI/` | SwiftUI views, theme tokens, `EngineViewModel`, `IntentReveal`, conversation/composer/sidebar/palette/diff/settings/voice/export/search/notifications/auth/debug surfaces. **Agent-agnostic.** | `AgentCore`. |
 | `AgentTestSupport` | `tests/TestSupport/AgentTestSupport/` | Deterministic fakes for all four seams + `MockAdapter`. | `AgentCore`, `AgentProtocol`. |
-| `CodemixerApp` | `src/CodemixerApp/` | `@main`, root scene, bootstrap, adapter registration. Tiny. | `AgentCore`, `AgentUI`, `ClaudeCode`, `AgentRemoteControl`. |
-| `CodemixerDaemon` | `src/Remote/CodemixerDaemon/` | `@main`, signal handling, server wiring. Tinier. | `AgentCore`, `ClaudeCode`, `AgentRemoteControl`. |
+| `CodemixerApp` | `src/CodemixerApp/` | `@main`, root scene, bootstrap, adapter registration. Tiny. | `AgentCore`, `AgentUI`, `ClaudeCode`, `Codex`, `AgentRemoteControl`. |
+| `CodemixerDaemon` | `src/Remote/CodemixerDaemon/` | `@main`, signal handling, server wiring. Tinier. | `AgentCore`, `ClaudeCode`, `Codex`, `AgentRemoteControl`. |
 
 The arrows go strictly downward — `AgentUI` never imports `ClaudeCode`, `AgentCore` never imports SwiftUI, `AgentProtocol` imports only Foundation. This is what keeps the headless daemon truly headless and a future iOS client truly portable.
 
@@ -302,7 +332,9 @@ swift run codemixerd
 #     POST /v1/attachments         → stages an upload, returns { id, path }
 ```
 
-LAN exposure adds TLS through `CertificateManager` (self-signed EC identity + fingerprint pinning) and authenticated pairing via `PairingService` + `PairedDeviceStore`. A remote peer can drive the same engine through `RemoteEngineClient`. Install the daemon as a login `LaunchAgent` using the template at `src/CodemixerApp/Resources/com.codecave.Codemixer.daemon.plist`.
+LAN exposure adds TLS through `CertificateManager` (self-signed EC identity + fingerprint pinning) and authenticated pairing via `PairingService` + `PairedDeviceStore`. External peers drive the engine through the same WebSocket protocol the Mode B GUI uses (`RemoteEngineClient` on the client side, `RemoteControlServer` on the daemon). Install the daemon as a login `LaunchAgent` using the template at `src/CodemixerApp/Resources/com.codecave.Codemixer.daemon.plist`.
+
+See [`src/Remote/AgentRemoteControl/README.md`](src/Remote/AgentRemoteControl/README.md) for client-role vs connected-peer terminology.
 
 ### The wire protocol in one screen
 
@@ -342,27 +374,30 @@ A `RemoteParityTests` suite asserts that every `AgentEvent` case round-trips thr
 
 ## Adding a new agent
 
-The shape of the work for any new CLI agent (Codex, Cursor CLI, Gemini CLI, OpenCode, …) is:
+The shape of the work for any new CLI agent (Cursor CLI, Gemini CLI, OpenCode, …) is:
 
 ```swift
 public final class CodexAdapter: AgentAdapter, @unchecked Sendable {
     public let id: AgentID = .codex
     public let displayName = "Codex"
     public let iconSymbol  = "sparkle.magnifyingglass"
+    public var transportDescriptor: AgentTransportDescriptor { .stdioJSONRPC }
 
     public var capabilities: AgentCapabilities {
-        [.streamJSONStdio, .permissionPrompts]   // declare what signals you can emit
+        [.permissionPrompts, .resumableSessions]   // declare adapter features
     }
 
     public func locateBinary(env: ResolvedEnvironment) async throws -> URL { … }
     public func defaultEnvOverrides() -> [String: String] { … }
     public func buildLaunchArgv(context: LaunchContext) -> [String] { … }
+    public func sessionBootstrapBytes(context: LaunchContext) -> Data { … }
 
     public func makeEventStream(inputs: AgentInputs) -> AsyncStream<AgentEvent> {
-        // Parse Codex's NDJSON from inputs.ptyOutput, emit AgentEvent values.
+        // Parse Codex JSON-RPC bytes from inputs.outputBytes, emit AgentEvent values.
     }
 
     public func encodeUserPrompt(_ text: String) -> Data { … }
+    public func encodeCommand(_ command: AgentCommand) -> Data? { … }
     public func cancelSequence() -> Data { … }
     public func encodePermissionResponse(_ decision: PermissionDecision,
                                          for prompt: PermissionPrompt) -> PermissionResponseDelivery { … }
@@ -377,7 +412,7 @@ Register at startup:
 await AdapterRegistry.shared.register(CodexAdapter())
 ```
 
-`AgentCore` and `AgentUI` never import any specific adapter. UI surfaces resolve adapters through `AdapterRegistry`. The engine wires up only the signal sources the adapter requested via `capabilities` — no hook server unless `.hooksOverUDS`, no TUI scrape unless `.ptyTUIFallback`, etc.
+`AgentCore` and `AgentUI` never import any specific adapter. UI surfaces resolve adapters through `AdapterRegistry`. The engine selects the process/connection shape from `transportDescriptor` and wires up only the signal sources the adapter requested via `capabilities` — no hook server unless `.hooksOverUDS`, no TUI scrape unless `.ptyTUIFallback`, etc.
 
 Full recipe in [`docs/reference/patterns/plugin-adapter-protocol.md`](docs/reference/patterns/plugin-adapter-protocol.md).
 
@@ -402,7 +437,7 @@ Full per-suite index: [`AGENTS.md`](AGENTS.md) (Inside `tests/` → suites).
 | `AgentProtocolTests / WireFrameRoundTripTests` | Every `ClientFrame` / `ServerFrame` case encodes → decodes → re-encodes identically. |
 | `AgentProtocolTests / PrefsAndDecisionsCodableTests` | Prefs and permission-decision DTOs round-trip through `Codable`. |
 | `AgentCoreTests / PTYHostTests` | Spawning `/bin/echo` under a real pty emits the printed text and exits cleanly; writes after `close()` throw `.alreadyClosed`. |
-| `AgentCoreTests / AgentEngineCommandTests` | Every PTY-writing command emits exact bytes at the `AgentPTY.write` boundary; write failures propagate, including `sendPrompt`, cancel, slash commands, edit/resubmit, and permission delivery modes. |
+| `AgentCoreTests / AgentEngineCommandTests` | Every transport-writing command emits exact bytes at the `AgentTransport.write` boundary; write failures propagate, including `sendPrompt`, cancel, slash commands, edit/resubmit, and permission delivery modes. |
 | `AgentCoreTests / EngineIntegrationTests` | End-to-end engine lifecycle with a mock adapter and injected seams. |
 | `AgentCoreTests / TerminalEngineTests` | Fed bytes appear in the headless snapshot; BEL is latched and consumed once. |
 | `AgentCoreTests / MulticastEventBusTests` | Late subscribers receive the replay history first, then live events. |
@@ -433,9 +468,12 @@ Full per-suite index: [`AGENTS.md`](AGENTS.md) (Inside `tests/` → suites).
 | `ClaudeAdapterTests / TUIFallbackTests` / `TUIFallbackGateTests` | TUI scrape parsing and gating for terminal fallback. |
 | `ClaudeAdapterTests / TwinDecoderParityTests` | Hook decoder output matches the digital-twin emitter contract. |
 | `ClaudeAdapterTests / FakeClaudeIntegrationTests` | Production adapter + spawned `fake-claude` emits `assistantText` end-to-end. |
+| `ClaudeAdapterTests / LiveClaudeIntegrationTests` | Opt-in live PTY path (`CODEMIXER_LIVE_CLAUDE=1`): one `assistantText`, billing markers `entrypoint: cli`. See [`tests/AgenticCLIs/README.md`](tests/AgenticCLIs/README.md). |
 | `ClaudeCodeTwinTests / EngineDigitalTwinTests` | `ClaudeCodeTwin` drives the real engine end-to-end without a live Claude login. |
 | `ClaudeCodeTwinTests / TwinDecoderParityTests` | Twin hook payloads stay decodable by the production hook decoder. |
-| `ClaudeCodeTwinTests / LiveClaudeIntegrationTests` | Opt-in live PTY path (`CODEMIXER_LIVE_CLAUDE=1`): one `assistantText`, billing markers `entrypoint: cli`. See [`tests/AgenticCLIs/README.md`](tests/AgenticCLIs/README.md). |
+| `CodexAdapterTests / CodexAdapterTests` | Codex App Server framing, RPC, input encoding, policy mapping, catalog/index surfaces, and no-silent-failure behavior. |
+| `CodexAdapterTests / LiveCodexIntegrationTests` | Opt-in live App Server stdio path (`CODEMIXER_LIVE_CODEX=1`): one `assistantText` through `CodexAdapter`. See [`tests/AgenticCLIs/README.md`](tests/AgenticCLIs/README.md). |
+| `CodexTwinTests / CodexTwinTests` | `CodexTwin` drives fixture-backed App Server events without a live Codex login. |
 | `AgentRemoteControlTests / PairingServiceTests` | Correct PIN yields a token; five wrong PINs trigger lockout. |
 | `AgentRemoteControlTests / PairedDeviceStoreTests` | Paired-device persistence survives reload. |
 | `AgentRemoteControlTests / RemoteControlE2ETests` | In-memory WebSocket clients receive replay, command results, and PTY write failures consistently; `sendPrompt` publishes `.userTurn` before a failing command result. |
@@ -456,7 +494,7 @@ Full per-suite index: [`AGENTS.md`](AGENTS.md) (Inside `tests/` → suites).
 
 - One **suite per behaviour**, not per file. Names are sentences (`"Late subscribers receive the replay history first"`).
 - Production code never reads `Date()` or `getenv` directly — it asks one of the four DI seams (`Clock`, `RandomSource`, `Environment`, `FileSystem`). Tests inject the fakes from `AgentTestSupport`.
-- PTY command failures use the internal `AgentPTY` seam, not timing-sensitive real-process crashes, so exact bytes and thrown errors are deterministic.
+- Transport command failures use the internal `AgentTransport` seam, not timing-sensitive real-process crashes, so exact bytes and thrown errors are deterministic.
 - Anything that needs a real binary (`/bin/echo`, `/bin/cat`) uses the system tool; we don't ship test fixtures for shell utilities.
 
 Full treatment in `docs/style/code-style.md` §7 (Test aesthetic).
@@ -488,7 +526,7 @@ If you only remember five things:
 2. **One typed input alphabet (`AgentCommand`), one typed output alphabet (`AgentEvent`).** Both the in-process UI and the remote WebSocket speak them. There is no second code path that can drift.
 3. **The core is agent-agnostic; adapters carry per-vendor knowledge.** `AgentCore` and `AgentUI` never import any specific adapter; a new agent is a new module that conforms to `AgentAdapter`.
 4. **Strict concurrency, deliberate isolation.** Engines are `actor`s. The bus is an `actor`. `@MainActor` is reserved for the UI seam. `@unchecked Sendable` is quarantined to two places (the SwiftTerm delegate bridge and the `NWConnection` callback box) and explicitly justified in a comment.
-5. **Every behaviour is testable because every dependency is injected.** Four seams (`Clock`, `RandomSource`, `Environment`, `FileSystem`) plus the adapter protocol and internal `AgentPTY` seam mean the full engine runs in a unit test in milliseconds with no network, no filesystem, no real clock, and no flaky child-process failure timing.
+5. **Every behaviour is testable because every dependency is injected.** Four seams (`Clock`, `RandomSource`, `Environment`, `FileSystem`) plus the adapter protocol and internal `AgentTransport` seam mean the full engine runs in a unit test in milliseconds with no network, no filesystem, no real clock, and no flaky child-process failure timing.
 
 The first file you should read to *feel* this aesthetic is [`PTYHost.swift`](src/Core/AgentCore/PTY/PTYHost.swift) — the reference exemplar. When something feels wrong, open `PTYHost` side-by-side; the contrast usually surfaces the answer.
 
@@ -516,7 +554,7 @@ Tracked in detail in [`docs/architecture.md`](docs/architecture.md); the headlin
 
 - **Landed** — attachments, voice input + TTS, project picker, auth gate + install-Claude flow, settings pane, conversation search, session export, system notifications, git file/hunk revert, TLS + cert pinning, HTTP pairing sidecar, paired-device store, remote engine client, LaunchAgent install.
 - **Next** — golden-fixture transcript tests against real Claude JSONL; signed + notarized `.app` release via the Xcode shell.
-- **v1.0** — second adapter (Codex or Cursor CLI), iOS client v0.1 over the remote-control API.
+- **v1.0** — additional adapters (Cursor CLI / Gemini CLI / OpenCode), iOS client v0.1 over the remote-control API.
 - **v1.1+** — Gemini CLI, OpenCode, Copilot, MCP tool surfacing in the renderer, automation scripts via SDK examples.
 
 ---

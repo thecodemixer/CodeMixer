@@ -21,6 +21,7 @@ public final class RecordingMockAdapter: AgentAdapter, @unchecked Sendable {
     public let displayName = "Recording Mock"
     public let iconSymbol = "ant"
     public let capabilities: AgentCapabilities
+    public var transportDescriptor: AgentTransportDescriptor { .interactiveTerminal }
     public var slashCommandCatalog: [SlashCommand] { [] }
 
     private let lock = NSLock()

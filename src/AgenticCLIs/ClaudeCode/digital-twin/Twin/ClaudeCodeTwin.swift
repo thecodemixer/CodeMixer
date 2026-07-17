@@ -30,6 +30,7 @@ public final class ClaudeCodeTwin: AgentAdapter, @unchecked Sendable {
     public let capabilities: AgentCapabilities = [
         .hooksOverUDS, .transcriptJSONL, .permissionPrompts, .resumableSessions,
     ]
+    public var transportDescriptor: AgentTransportDescriptor { .interactiveTerminal }
 
     // MARK: - Configuration
 
@@ -292,6 +293,7 @@ public final class ClaudeCodeTwin: AgentAdapter, @unchecked Sendable {
     public func listResumableSessions(workspace: URL) async -> [SessionSummary] {
         [
             SessionSummary(id: configuration.sessionID,
+                           agentID: .claudeCode,
                            workspace: workspace,
                            title: "Twin session",
                            lastActivity: configuration.runtime.now(),

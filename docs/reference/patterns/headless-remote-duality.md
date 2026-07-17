@@ -60,6 +60,8 @@ The user toggles modes through one setting. Mode A is default; Mode B activates 
 
 There is **no GUI fast path.** The GUI sends `Command` frames over loopback the same way the phone sends them over LAN. It subscribes to `Event` frames the same way. It pays the encoding cost for every interaction.
 
+**Terminology.** *Remote client* also names connected WebSocket peers counted by `RemoteControlServer` — in Mode B that count includes the GUI itself. See [architecture.md §4.1](../../architecture.md) and [`src/Remote/AgentRemoteControl/README.md`](../../../src/Remote/AgentRemoteControl/README.md).
+
 This sounds wasteful. It pays for itself:
 
 - **Multi-client coherence is automatic.** If the GUI couldn't drop into client mode cleanly, you'd need separate paths for "in-process" vs "remote" updates, with synchronisation between them. With the duality, there's one path.

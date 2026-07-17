@@ -23,7 +23,7 @@ public actor AgentEngine: AgentEngineCommandPort {
 
     let log = Logger(subsystem: AppIdentity.logSubsystem, category: "Engine")
     let seams: Seams
-    private let ptyFactory: AgentPTYFactory
+    private let transportFactory: AgentTransportFactory
 
     /// Bus that fans out `AgentEvent` to N subscribers (Mac UI + remote
     /// clients). Exposed so the UI and remote-control server can subscribe
@@ -32,8 +32,8 @@ public actor AgentEngine: AgentEngineCommandPort {
 
     var adapter: (any AgentAdapter)?
     private var state: EngineState = .stopped
-    var pty: (any AgentPTY)?
-    private var terminal: TerminalEngine?
+    var transport: (any AgentTransport)?
+    private var terminal: (any TerminalSnapshotting)?
     var hookServer: HookServer?
     private var sessionIDContinuation: AsyncStream<String>.Continuation?
     var currentSessionID: String?
@@ -43,7 +43,7 @@ public actor AgentEngine: AgentEngineCommandPort {
     var heartbeat: HeartbeatActivityMonitor?
     private var phraseResolver: StatusPhraseResolver
     private var eventForwardingTask: Task<Void, Never>?
-    private var ptyFanoutTask: Task<Void, Never>?
+    private var bellTask: Task<Void, Never>?
     private var shutdownInFlight = false
     var workspace: URL?
     var transcript: [SnapshotService.SnapshotMessage] = []
@@ -87,15 +87,15 @@ public actor AgentEngine: AgentEngineCommandPort {
                 permissionTimeout: Duration = AgentEngine.defaultPermissionTimeout) {
         self.init(seams: seams,
                   permissionTimeout: permissionTimeout,
-                  ptyFactory: Self.livePTY)
+                  transportFactory: LiveAgentTransportFactory.make)
     }
 
     init(seams: Seams = .live,
          permissionTimeout: Duration = AgentEngine.defaultPermissionTimeout,
-         ptyFactory: @escaping AgentPTYFactory) {
+         transportFactory: @escaping AgentTransportFactory) {
         self.seams = seams
         self.permissionTimeout = permissionTimeout
-        self.ptyFactory = ptyFactory
+        self.transportFactory = transportFactory
         self.bus = MulticastEventBus(random: seams.random)
         self.phraseResolver = StatusPhraseResolver()
         let p = PrefsStore(environment: seams.environment, fileSystem: seams.fileSystem)
@@ -108,10 +108,6 @@ public actor AgentEngine: AgentEngineCommandPort {
         self.gitReverter = GitReverter()
     }
 
-    private static func livePTY(_ spec: PTYHost.ChildSpec) throws -> any AgentPTY {
-        try PTYHost(spec: spec)
-    }
-
     /// Boot the stores (no-op if their JSON doesn't exist yet).
     public func bootstrap() async {
         await prefs.load()
@@ -122,7 +118,7 @@ public actor AgentEngine: AgentEngineCommandPort {
     public var currentState: EngineState { state }
 
     /// Read-only terminal screen snapshot for the debug terminal sheet.
-    /// Returns an empty string before a PTY-backed session has started.
+    /// Returns an empty string before an interactive-terminal session has started.
     public func terminalSnapshotText() async -> String {
         await terminal?.snapshotText() ?? ""
     }
@@ -132,8 +128,9 @@ public actor AgentEngine: AgentEngineCommandPort {
     /// Start a session with `adapter` against `workspace`.
     ///
     /// Resolves the user's shell environment, optionally starts a hook server
-    /// (if the adapter declares `.hooksOverUDS`), spawns the agent under a
-    /// fresh PTY, and bridges the adapter's event stream onto the bus.
+    /// (if the adapter declares `.hooksOverUDS`), binds an `AgentTransport`
+    /// matching the adapter's descriptor, and bridges the adapter's event
+    /// stream onto the bus.
     public func start(adapter: any AgentAdapter,
                       workspace: URL,
                       resumeSessionID: String? = nil,
@@ -144,9 +141,9 @@ public actor AgentEngine: AgentEngineCommandPort {
         self.workspace = workspace
         self.transcript = []
         self.changedFiles = []
-        resumeStartupSessionID = adapter.capabilities.contains(.ptyTUIFallback)
-            ? (resumeSessionID ?? "")
-            : nil
+        let usesTerminal = adapter.transportDescriptor.requiresTerminalEmulation
+            && adapter.capabilities.contains(.ptyTUIFallback)
+        resumeStartupSessionID = usesTerminal ? (resumeSessionID ?? "") : nil
         startupSubmitRecoveryArmed = resumeStartupSessionID != nil
         resumePromptReadySampleCount = 0
         resumeStartupWaiters.removeAll()
@@ -202,40 +199,22 @@ public actor AgentEngine: AgentEngineCommandPort {
         let argv = adapter.buildLaunchArgv(context: context)
         let env = resolvedEnv.ptySpawnEnvironment(adapterOverrides: adapter.defaultEnvOverrides())
 
-        // Spawn the PTY + terminal engine.
-        let terminal = TerminalEngine()
-        self.terminal = terminal
-
-        let spec = PTYHost.ChildSpec(executable: binary,
-                                     arguments: Array(argv.dropFirst()),
-                                     environment: env,
-                                     workingDirectory: workspace)
-        let pty: any AgentPTY
+        let launch = AgentTransportLaunchSpec(
+            executable: binary,
+            arguments: Array(argv.dropFirst()),
+            environment: env,
+            workingDirectory: workspace
+        )
+        let transport: any AgentTransport
         do {
-            pty = try ptyFactory(spec)
+            transport = try transportFactory(adapter.transportDescriptor, launch)
         } catch {
             await rollbackPartialStart()
             throw AgentError.spawnFailed(errno: Self.errno(from: error),
                                          detail: String(describing: error))
         }
-        self.pty = pty
-
-        // Stream bytes from the PTY into the terminal engine while also
-        // forwarding them downstream to the adapter.
-        var ptyFanoutContinuation: AsyncStream<Data>.Continuation!
-        let ptyFanout = AsyncStream<Data>(bufferingPolicy: .bufferingOldest(StreamBufferDefaults.ptyChunks)) { c in ptyFanoutContinuation = c }
-
-        let outbound = pty.outboundBytes
-        ptyFanoutTask = Task { [weak self] in
-            for await chunk in outbound {
-                await self?.terminal?.feed(chunk)
-                if await self?.terminal?.consumeBell() == true {
-                    await self?.bus.publish(.bell)
-                }
-                ptyFanoutContinuation.yield(chunk)
-            }
-            ptyFanoutContinuation.finish()
-        }
+        self.transport = transport
+        self.terminal = transport.terminalSnapshot
 
         // Session-id discovery is hot — empty until the adapter learns it.
         var sessionIDContinuation: AsyncStream<String>.Continuation!
@@ -246,8 +225,11 @@ public actor AgentEngine: AgentEngineCommandPort {
             sessionIDContinuation.yield(resumeSessionID)
         }
 
-        let inputs = AgentInputs(ptyOutput: ptyFanout,
-                                 screen: terminal,
+        let inputs = AgentInputs(outputBytes: transport.outboundBytes,
+                                 writeBytes: { bytes in
+                                     try await transport.write(bytes)
+                                 },
+                                 terminal: transport.terminalSnapshot,
                                  hookSocket: hookHandle,
                                  workspace: workspace,
                                  resumeSessionID: resumeSessionID,
@@ -274,6 +256,25 @@ public actor AgentEngine: AgentEngineCommandPort {
             }
         }
 
+        // Bell fan-out — empty stream for non-terminal transports finishes immediately.
+        let bells = transport.bellEvents
+        bellTask = Task { [weak self] in
+            for await _ in bells {
+                await self?.bus.publish(.bell)
+            }
+        }
+
+        let bootstrap = adapter.sessionBootstrapBytes(context: context)
+        if !bootstrap.isEmpty {
+            do {
+                try await transport.write(bootstrap)
+            } catch {
+                await rollbackPartialStart()
+                throw AgentError.spawnFailed(errno: Self.errno(from: error),
+                                             detail: "bootstrap write failed: \(error)")
+            }
+        }
+
         if let startupGateID = resumeStartupSessionID {
             startResumePromptReadyWait(sessionID: startupGateID)
             startResumeStartupWatchdog(sessionID: startupGateID)
@@ -290,8 +291,8 @@ public actor AgentEngine: AgentEngineCommandPort {
 
         eventForwardingTask?.cancel()
         eventForwardingTask = nil
-        ptyFanoutTask?.cancel()
-        ptyFanoutTask = nil
+        bellTask?.cancel()
+        bellTask = nil
         await stopFSWatcher()
         cancelResumeStartupWatchdog()
         cancelResumePromptReadyWait()
@@ -299,8 +300,8 @@ public actor AgentEngine: AgentEngineCommandPort {
         startupSubmitRecoveryTask = nil
         startupSubmitRecoveryArmed = false
         finishResumeStartupGate()
-        await pty?.close()
-        pty = nil
+        await transport?.close()
+        transport = nil
         await hookServer?.stop()
         hookServer = nil
         sessionIDContinuation?.finish()
@@ -327,8 +328,8 @@ public actor AgentEngine: AgentEngineCommandPort {
     private func rollbackPartialStart() async {
         eventForwardingTask?.cancel()
         eventForwardingTask = nil
-        ptyFanoutTask?.cancel()
-        ptyFanoutTask = nil
+        bellTask?.cancel()
+        bellTask = nil
         await stopFSWatcher()
         cancelResumeStartupWatchdog()
         cancelResumePromptReadyWait()
@@ -336,8 +337,8 @@ public actor AgentEngine: AgentEngineCommandPort {
         startupSubmitRecoveryTask = nil
         startupSubmitRecoveryArmed = false
         finishResumeStartupGate()
-        await pty?.close()
-        pty = nil
+        await transport?.close()
+        transport = nil
         await hookServer?.stop()
         hookServer = nil
         sessionIDContinuation?.finish()
@@ -577,7 +578,7 @@ public actor AgentEngine: AgentEngineCommandPort {
         guard let terminal,
               Self.rowsShowUnsubmittedPrompt(await terminal.snapshotRows()) else { return }
         log.warning("startup submit recovery: re-sending Enter turn=\(turnID, privacy: .public)")
-        try? await pty?.write(Data("\r".utf8))
+        try? await transport?.write(Data("\r".utf8))
     }
 
     static func rowsContainClaudeReadyPrompt(_ rows: [String]) -> Bool {
@@ -667,11 +668,11 @@ public actor AgentEngine: AgentEngineCommandPort {
         guard let adapter else { return }
         switch adapter.encodePermissionResponse(decision, for: prompt) {
         case .writePTY(let data):
-            try await pty?.write(data)
+            try await transport?.write(data)
         case .respondToHookProcess(let json):
             await hookServer?.respond(to: id, with: json)
         case .both(let ptyBytes, let hookOut):
-            try await pty?.write(ptyBytes)
+            try await transport?.write(ptyBytes)
             await hookServer?.respond(to: id, with: hookOut)
         }
     }
@@ -746,13 +747,19 @@ public actor AgentEngine: AgentEngineCommandPort {
     }
 
     private static func errno(from error: any Error) -> Int32 {
-        switch error as? PTYError {
-        case .spawnFailed(let e, _): return e
-        case .openptyFailed(let e): return e
-        case .setWinsizeFailed(let e): return e
-        case .writeFailed(let e): return e
-        case .alreadyClosed, nil: return -1
+        if let pty = error as? PTYError {
+            switch pty {
+            case .spawnFailed(let e, _): return e
+            case .openptyFailed(let e): return e
+            case .setWinsizeFailed(let e): return e
+            case .writeFailed(let e): return e
+            case .alreadyClosed: return -1
+            }
         }
+        if error is AgentTransportError {
+            return -1
+        }
+        return -1
     }
 
 }

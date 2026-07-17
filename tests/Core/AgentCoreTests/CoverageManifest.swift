@@ -94,7 +94,8 @@ private let _sc = SlashCommand(id: "/help", name: "/help", summary: "Help")
 
 // SessionSummary
 private let _ss = SessionSummary(
-    id: "x", workspace: URL(fileURLWithPath: "/"), title: "t",
+    id: "x", agentID: .claudeCode,
+    workspace: URL(fileURLWithPath: "/"), title: "t",
     lastActivity: Date(), messageCount: 0
 )
 
@@ -241,6 +242,10 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // AgentID
 // AgentInputs
 // AgentModelOption
+// AgentTransportDescriptor
+// AgentTransportError
+// AgentTransportKind
+// AgentTransportLaunchSpec
 // AppIdentity
 // AppSupportPaths
 // AppearancePrefKey
@@ -253,6 +258,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // AuthStatus
 // AutoApprovalRule
 // Badge
+// Batch
 // BindHost
 // BonjourAdvertiser
 // BonjourBroadcaster
@@ -290,9 +296,27 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // ClientFrame
 // CodeBlock
 // CodemixerResources
+// CodexAdapter
+// CodexAgentError
+// CodexAppServerFraming
+// CodexAppServerIncoming
+// CodexApprovalPolicy
+// CodexBinaryLocator
+// CodexCommandCatalog
+// CodexEventDecoder
+// CodexInputEncoding
+// CodexModelCatalog
+// CodexPolicyMapping
+// CodexRPCCodec
+// CodexSandboxMode
+// CodexSessionState
+// CodexThreadIndex
+// CodexTwin
+// CodexUserInput
 // CommandPaletteView
 // CommandShape
 // Configuration
+// ConfigureProjectSheet
 // ConnectedClientsChip
 // ContentBlock
 // Context
@@ -300,6 +324,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // ConversationSnapshot
 // ConversationView
 // CostBadgeView
+// CustomAgentRef
 // DaemonDefaults
 // DebugTerminalSheet
 // DensityMode
@@ -347,6 +372,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // InstallError
 // IntentReveal
 // InteractionCoverage
+// JSONValue
 // KbdKey
 // KeychainError
 // KeychainStore
@@ -380,14 +406,21 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // PermissionPrompt
 // PermissionResponseDelivery
 // Pill
+// Policy
 // PrefsSnapshot
 // PrefsStore
 // ProcessError
 // ProcessRunner
+// ProjectAgentMode
+// ProjectAgentRouter
+// ProjectLocalState
+// ProjectLocalStateStore
+// ProjectPaths
 // ProjectPickerView
 // ProjectRecord
 // ProjectRef
 // PromptComposerView
+// RPCError
 // RandomSource
 // RawEvent
 // ReconnectPolicy
@@ -430,6 +463,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // StatusPhraseResolver
 // StatusPhraseSource
 // StatusPill
+// StdioJSONRPCTransport
 // StopReason
 // StoreError
 // StreamBufferDefaults
@@ -476,10 +510,13 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // WireToolProgress
 // WireVersion
 // WorkspaceChip
+// WorkspaceLocalState
+// WorkspaceLocalStateStore
 // WorkspaceProjectsStore
 // WorkspaceScene
 // account
 // action
+// activeWorkspaceURL
 // activityDotSize
 // activityDotsHeight
 // adapter
@@ -488,7 +525,10 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // addition
 // additions
 // address
+// agentClientProtocol
+// agentError
 // agentID
+// agentMode
 // agentPickerMinHeight
 // agentPickerMinWidth
 // all
@@ -498,8 +538,10 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // appearance
 // append
 // appendLines
+// approval
 // arguments
 // argumentsSummary
+// arrayValue
 // arriving
 // assistantTextLine
 // assistantThinkingLine
@@ -522,11 +564,13 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // banner
 // bearerToken
 // bell
+// bellEvents
 // bind
 // body
 // bonjourServiceName
 // bonjourServiceType
 // bonjourTXTVersion
+// boolValue
 // bootstrap
 // boundPort
 // bubble
@@ -556,16 +600,22 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // chooseDirectoryPanel
 // claudeDirectory
 // clear
+// clearActiveWorkspace
 // clearPendingExport
 // clientCount
 // clock
 // close
 // code
 // codeTheme
+// codexThreadsFileName
+// codexThreadsURL
 // cols
 // commandPaletteMaxWidth
 // commandPaletteMinWidth
+// compact
 // compactControlMinWidth
+// composerModelPickerMinWidth
+// concatenate
 // configuration
 // connect
 // connectedClientCount
@@ -605,6 +655,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // densityMode
 // description
 // design
+// detail
 // details
 // deviceName
 // dictionary
@@ -613,6 +664,8 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // diffSidebarIdealWidth
 // diffSidebarMaxWidth
 // diffSidebarMinWidth
+// directoryName
+// directoryURL
 // disabled
 // disconnect
 // displayName
@@ -631,6 +684,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // enableRemote
 // enabled
 // encode
+// encodeCommand
 // encodePermissionResponse
 // encodeUserPrompt
 // encoded
@@ -643,6 +697,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // env
 // environment
 // errorMessage
+// errorResponse
 // event
 // eventHistory
 // eventLogMinHeight
@@ -650,6 +705,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // eventName
 // events
 // executable
+// executablePath
 // execute
 // exitCode
 // exitStatus
@@ -668,6 +724,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // focus
 // fontFamily
 // fontSizeScale
+// frame
 // gentle
 // git
 // gitBranch
@@ -716,6 +773,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // installMaxWidth
 // installMinWidth
 // instant
+// interactiveTerminal
 // interrupt
 // isCurrentSession
 // isDirectory
@@ -766,12 +824,14 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // makeEventStream
 // makeHandle
 // makePairing
+// markActiveWorkspace
 // markdown
 // match
 // matchCount
 // matchingRule
 // maxAttempts
 // maxDelay
+// maximumFrameBytes
 // medium
 // message
 // messageCount
@@ -798,12 +858,15 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // notification
 // notify
 // now
+// numberValue
+// objectValue
 // observeClientCount
 // observedAt
 // oldLineNumber
 // oldRange
 // onCancel
 // onClose
+// onConfirm
 // onDismiss
 // onNext
 // onOpen
@@ -819,6 +882,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // outboundBytes
 // outboundReplies
 // output
+// outputBytes
 // output_tokens
 // owner
 // pairedAt
@@ -840,6 +904,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // pinTTL
 // plainTCP
 // plainWebSocket
+// policy
 // popUp
 // port
 // post
@@ -849,21 +914,26 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // prefsFileName
 // prefsURL
 // primary
+// primaryAgentID
 // probablyStuckThreshold
 // processEnvironment
 // progress
+// project
+// projectCommands
 // projectDirectory
+// projectFileName
 // projectPickerMaxHeight
 // projectPickerMinHeight
 // projectPickerMinWidth
 // projectSlug
+// projectStateURL
+// projectURL
 // projects
 // prompt
 // promptReady
 // promptWithShortcutFooter
 // prose
 // ptyChunks
-// ptyOutput
 // ptyReadQueueLabel
 // ptySpawnEnvironment
 // ptyTUIFallback
@@ -886,6 +956,8 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // reconnect
 // record
 // recordOpen
+// recordThread
+// recordTurn
 // recordUUID
 // reduceMotion
 // ref
@@ -903,17 +975,25 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // remove
 // removeProject
 // renameProject
+// replies
 // reply
+// request
 // requestAuthorization
 // requestPermission
 // requestedAt
 // requests
 // requireAuth
+// requiresTerminalEmulation
 // reset
+// resetForClosedWorkspace
 // resize
 // resolve
+// resolveAdapter
+// resolveAdapterID
+// resolveAgentMode
 // resolvedSessionID
 // respond
+// response
 // restoreProject
 // resumableSessions
 // resume
@@ -922,6 +1002,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // resumeSessionID
 // resumeStartupStallTimeout
 // revealInFinder
+// review
 // revoke
 // revokeToken
 // role
@@ -938,14 +1019,16 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // s48
 // s64
 // s8
+// sandbox
 // save
 // savePanel
 // scenario
-// screen
+// schemaVersion
 // secondary
 // send
 // sendPrompt
 // serviceType
+// sessionBootstrapBytes
 // sessionID
 // sessionId
 // sessionLister
@@ -957,6 +1040,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // sessions
 // sessionsFileName
 // sessionsURL
+// setAgentMode
 // setConnectedRemoteClients
 // setLANEnabled
 // settingsMinHeight
@@ -969,6 +1053,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // shimmer
 // shimmerPhaseStep
 // shipping
+// shortLabel
 // showSilentRecoveryLog
 // showUsageChip
 // shutdown
@@ -998,6 +1083,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // startListening
 // startNewPairing
 // startPairing
+// startThread
 // startTurn
 // startupPromptReady
 // startupSubmitRecoveryDelay
@@ -1006,6 +1092,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // statusPillMaxWidth
 // statusWorking
 // stderr
+// stdioJSONRPC
 // stdout
 // stepDelay
 // stillWorkingPhrase
@@ -1014,6 +1101,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // stopListening
 // store
 // stream
+// stringValue
 // stroke
 // subagentAssistantLine
 // subagentLines
@@ -1030,6 +1118,8 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // summaries
 // summary
 // sunken
+// supersede
+// supportsOutOfBandInterrupt
 // supportsResumableSessions
 // surface
 // syncAutoApprovalRules
@@ -1038,14 +1128,17 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // tactile
 // tail
 // tailByteBudget
+// terminal
 // terminalApp
 // terminalReplies
+// terminalSnapshot
 // terminalSnapshotText
 // tertiary
 // text
 // textContent
 // theme
 // thinkingPhrase
+// threadID
 // timestamp
 // tint
 // title
@@ -1062,8 +1155,10 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // transcriptPath
 // transcriptURL
 // transport
+// transportDescriptor
 // truncateTranscript
 // tts
+// turnStart
 // turns
 // txt
 // type
@@ -1105,14 +1200,17 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // workingDirectory
 // workingPhrase
 // workspace
+// workspaceFileName
 // workspaceProjects
 // workspaceSidebarMinWidth
+// workspaceStateURL
 // workspaceTrust
 // workspacesFileName
 // workspacesURL
 // write
 // writeAtomically
+// writeBytes
 // MANIFEST_SYMBOLS_END
 
-// Total: 887 unique public symbols
+// Total: 952 unique public symbols
 

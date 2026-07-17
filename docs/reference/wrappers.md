@@ -55,6 +55,35 @@ public actor ProcessRunner {
 
 ---
 
+## `StdioJSONRPCTransport`
+
+**File**: `src/Core/AgentCore/External/StdioJSONRPCTransport.swift`
+**Wraps**: `Foundation.Process` for a long-lived stdin/stdout/stderr agent session.
+**Consumers**:
+- `AgentEngine` through `LiveAgentTransportFactory` when an adapter declares `.stdioJSONRPC` (Codex App Server).
+
+**Public API**: internal `AgentTransport` conformance.
+
+```swift
+public actor StdioJSONRPCTransport: AgentTransport {
+    public nonisolated let outboundBytes: AsyncStream<Data>
+    public nonisolated let bellEvents: AsyncStream<Void>
+    public nonisolated var terminalSnapshot: (any TerminalSnapshotting)? { nil }
+
+    public init(launch: AgentTransportLaunchSpec) throws
+    public func write(_ data: Data) async throws
+    public func interrupt() async
+    public func close() async
+}
+```
+
+**Lifetime**: one long-lived process per agent session. Stdout is the adapter
+input stream; stderr is kept as a bounded diagnostic tail and never surfaced as
+agent output.
+**Threading**: actor; readability handlers bounce into actor methods.
+
+---
+
 ## `CertificateIdentityImporter`
 
 **File**: `src/Remote/AgentRemoteControl/External/CertificateIdentityImporter.swift`

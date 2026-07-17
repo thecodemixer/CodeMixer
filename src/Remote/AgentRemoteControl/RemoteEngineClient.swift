@@ -4,6 +4,11 @@ import AgentProtocol
 
 /// Remote `AgentEngineCommandPort` backed by Codemixer's WebSocket protocol.
 ///
+/// **Client role** — any wire consumer (Mode B Mac GUI, iOS app, scripts).
+/// Not to be confused with `RemoteControlServer.connectedClientCount` (how many
+/// peers are attached to the server). See `Remote/AgentRemoteControl/README.md`
+/// and `docs/architecture.md` §4.1.
+///
 /// The GUI can bind `EngineViewModel` to this client exactly as it binds to an
 /// in-process `AgentEngine`: commands go out as `ClientFrame.command`, events
 /// are decoded and republished on `bus`.

@@ -3,13 +3,12 @@ import Foundation
 /// Stable identifier for an agent CLI. Used to look up adapters in the
 /// `AdapterRegistry` and to tag persisted sessions with their origin.
 ///
-/// Only `.claudeCode` ships in v1. Other cases are reserved for wire/session
-/// compatibility and future adapters — they must not appear in UI pickers until
-/// an adapter registers.
+/// Shipping cases appear in UI pickers only after their adapter registers.
+/// Other cases remain reserved for wire/session compatibility.
 public enum AgentID: String, Sendable, Hashable, Codable {
     /// v1 shipping adapter.
     case claudeCode
-    /// Roadmap — no adapter registered.
+    /// Codex App Server adapter.
     case codex
     /// Roadmap — no adapter registered.
     case cursorCLI
@@ -23,7 +22,7 @@ public enum AgentID: String, Sendable, Hashable, Codable {
     case other
 
     /// Adapters with a registered implementation in this build.
-    public static let shipping: Set<AgentID> = [.claudeCode]
+    public static let shipping: Set<AgentID> = [.claudeCode, .codex]
 }
 
 /// Capabilities an adapter declares. The engine wires up only the matching

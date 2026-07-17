@@ -150,7 +150,8 @@ struct EngineViewModelNavigatorTests {
         let path = "/Users/me/ws"
         vm.supportsResumableSessions = true
         vm.sessionLister = { url in
-            [SessionSummary(id: "s1", workspace: url, title: "First",
+            [SessionSummary(id: "s1", agentID: .claudeCode,
+                            workspace: url, title: "First",
                             lastActivity: Date(), messageCount: 3, gitBranch: "main")]
         }
         vm.loadSessions(for: path)
@@ -260,6 +261,37 @@ struct EngineViewModelNavigatorTests {
 
         #expect(!vm.isSwitchingSession)
         #expect(vm.messages.count == 1)
+
+        await bus.shutdown()
+    }
+
+    @Test("createProject persists the selected mixed default and opens the new project")
+    func createProjectPersistsMixedDefault() async {
+        let port = RecordingPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
+        let fileSystem = InMemoryFileSystem()
+        let environment = FakeEnvironment(home: URL(fileURLWithPath: "/Users/me"))
+        let store = WorkspaceProjectsStore(environment: environment, fileSystem: fileSystem)
+        vm.workspaceProjects = store
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        let workspace = URL(fileURLWithPath: "/Users/me/ws")
+        await bus.publish(.sessionStarted(sessionID: "s1", model: nil, cwd: workspace))
+        await drain()
+
+        vm.createProject(name: "mixed", agentMode: .mixed(defaultAgent: .claudeCode))
+        try? await Task.sleep(for: .milliseconds(80))
+
+        let project = await store.project(path: workspace.appendingPathComponent("mixed").path)
+        #expect(project?.agentMode == .mixed(defaultAgent: .claudeCode))
+        #expect(port.commands.contains {
+            if case .openProject(let path, let resume) = $0 {
+                return path == project?.path && resume == nil
+            }
+            return false
+        })
 
         await bus.shutdown()
     }

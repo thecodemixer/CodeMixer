@@ -15,6 +15,7 @@ let package = Package(
         .library(name: "AgentProtocol", targets: ["AgentProtocol"]),
         .library(name: "AgentCore", targets: ["AgentCore"]),
         .library(name: "ClaudeCode", targets: ["ClaudeCode"]),
+        .library(name: "Codex", targets: ["Codex"]),
         .library(name: "AgentRemoteControl", targets: ["AgentRemoteControl"]),
         .library(name: "AgentUI", targets: ["AgentUI"]),
         .library(name: "AgentTestSupport", targets: ["AgentTestSupport"]),
@@ -59,9 +60,17 @@ let package = Package(
             swiftSettings: swiftSettings
         ),
         .target(
+            name: "Codex",
+            dependencies: ["AgentCore", "AgentProtocol"],
+            path: "src/AgenticCLIs/Codex",
+            exclude: ["README.md"],
+            swiftSettings: swiftSettings
+        ),
+        .target(
             name: "AgentRemoteControl",
             dependencies: ["AgentCore", "AgentProtocol"],
             path: "src/Remote/AgentRemoteControl",
+            exclude: ["README.md"],
             swiftSettings: swiftSettings
         ),
         .target(
@@ -84,13 +93,13 @@ let package = Package(
         ),
         .executableTarget(
             name: "CodemixerDaemon",
-            dependencies: ["AgentCore", "ClaudeCode", "AgentRemoteControl"],
+            dependencies: ["AgentCore", "ClaudeCode", "Codex", "AgentRemoteControl"],
             path: "src/Remote/CodemixerDaemon",
             swiftSettings: swiftSettings
         ),
         .executableTarget(
             name: "CodemixerApp",
-            dependencies: ["AgentCore", "AgentUI", "ClaudeCode", "AgentRemoteControl"],
+            dependencies: ["AgentCore", "AgentUI", "ClaudeCode", "Codex", "AgentRemoteControl"],
             path: "src/CodemixerApp",
             exclude: [
                 "Info.plist",
@@ -123,6 +132,13 @@ let package = Package(
             swiftSettings: swiftSettings
         ),
         .testTarget(
+            name: "CodexAdapterTests",
+            dependencies: ["Codex", "AgentTestSupport"],
+            path: "tests/AgenticCLIs/Codex/CodexAdapterTests",
+            exclude: ["Fixtures"],
+            swiftSettings: swiftSettings
+        ),
+        .testTarget(
             name: "AgentRemoteControlTests",
             dependencies: ["AgentRemoteControl", "AgentTestSupport"],
             path: "tests/Remote/AgentRemoteControlTests",
@@ -144,6 +160,12 @@ let package = Package(
             name: "ClaudeCodeTwinTests",
             dependencies: ["ClaudeCode", "AgentCore", "AgentProtocol", "AgentTestSupport"],
             path: "tests/AgenticCLIs/ClaudeCode/ClaudeCodeTwinTests",
+            swiftSettings: swiftSettings
+        ),
+        .testTarget(
+            name: "CodexTwinTests",
+            dependencies: ["Codex", "AgentCore", "AgentProtocol", "AgentTestSupport"],
+            path: "tests/AgenticCLIs/Codex/CodexTwinTests",
             swiftSettings: swiftSettings
         ),
         .testTarget(

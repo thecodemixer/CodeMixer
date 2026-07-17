@@ -63,10 +63,14 @@ This directory contains local automation and validation helpers for Codemixer.
 ### Live Spikes (Manual Validation)
 
 Prefer the **SPM live harness** for automated opt-in checks when a logged-in
-`claude` is available:
+agent binary is available:
 
 ```bash
+# Claude — interactive PTY billing path
 CODEMIXER_LIVE_CLAUDE=1 swift test --no-parallel --filter LiveClaudeIntegrationTests
+
+# Codex — App Server stdio JSON-RPC path
+CODEMIXER_LIVE_CODEX=1 swift test --no-parallel --filter LiveCodexIntegrationTests
 ```
 
 See [`tests/AgenticCLIs/README.md`](../tests/AgenticCLIs/README.md). The spikes

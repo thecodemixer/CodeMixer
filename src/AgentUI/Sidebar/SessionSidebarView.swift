@@ -1,5 +1,4 @@
 import SwiftUI
-import AppKit
 import AgentCore
 
 /// The session navigator: a calm, collapsible rail listing the loaded
@@ -21,9 +20,6 @@ public struct SessionSidebarView: View {
 
     @State private var searchText: String = ""
     @State private var expandedProjects: Set<String> = []
-    @State private var newProjectName: String = ""
-    @State private var showNewProjectPrompt = false
-    @State private var showFolderPicker = false
     @State private var renameTargetPath: String?
     @State private var renameText: String = ""
     @State private var showRenamePrompt = false
@@ -55,7 +51,6 @@ public struct SessionSidebarView: View {
         .onChange(of: model.projects.map(\.path)) { _, _ in expandCurrentProject() }
         .toolbar {
             ToolbarItemGroup(placement: .navigation) {
-                projectMenu
                 Button {
                     model.newChat(in: model.workspace?.path ?? "")
                 } label: {
@@ -66,20 +61,13 @@ public struct SessionSidebarView: View {
                 .accessibilityLabel("New chat")
             }
         }
-        .alert("New Project", isPresented: $showNewProjectPrompt) {
-            TextField("Project name", text: $newProjectName)
-                .accessibilityLabel("Project name")
-            Button("Create") { createProject() }
-            Button("Cancel", role: .cancel) { newProjectName = "" }
+        .alert("Rename Project", isPresented: $showRenamePrompt) {
+            TextField("Display name", text: $renameText)
+                .accessibilityLabel("Project display name")
+            Button("Rename") { commitRename() }
+            Button("Cancel", role: .cancel) { renameTargetPath = nil; renameText = "" }
         } message: {
-            Text("Creates a subfolder in the current workspace.")
-        }
-        .fileImporter(
-            isPresented: $showFolderPicker,
-            allowedContentTypes: [.folder]
-        ) { result in
-            guard case .success(let url) = result else { return }
-            model.addExistingProject(url: url)
+            Text("Changes the label shown here. The folder on disk is unchanged.")
         }
         .animation(Theme.motion.resolve(Theme.motion.changing, reduceMotion: reduceMotion),
                    value: focusMode)
@@ -91,14 +79,6 @@ public struct SessionSidebarView: View {
                 searchField
             }
             projectList
-        }
-        .alert("Rename Project", isPresented: $showRenamePrompt) {
-            TextField("Display name", text: $renameText)
-                .accessibilityLabel("Project display name")
-            Button("Rename") { commitRename() }
-            Button("Cancel", role: .cancel) { renameTargetPath = nil; renameText = "" }
-        } message: {
-            Text("Changes the label shown here. The folder on disk is unchanged.")
         }
     }
 
@@ -173,25 +153,6 @@ public struct SessionSidebarView: View {
         .padding(.vertical, Theme.spacing.s8)
     }
 
-    @ViewBuilder
-    private var projectMenu: some View {
-        Menu {
-            Button("New Project…") {
-                newProjectName = ""
-                showNewProjectPrompt = true
-            }
-            Button("Add Existing Project…") { showFolderPicker = true }
-        } label: {
-            Image(systemName: "folder.badge.plus")
-                .imageScale(.medium)
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help("Add a project")
-        .accessibilityLabel("Add a project")
-    }
-
     // MARK: - Project list
 
     private var projectList: some View {
@@ -228,6 +189,11 @@ public struct SessionSidebarView: View {
                 .fontWeight(.semibold)
                 .foregroundStyle(Theme.text.secondary)
                 .lineLimit(1)
+            Text(project.agentMode.shortLabel)
+                .font(Theme.typography.caption)
+                .foregroundStyle(Theme.text.tertiary)
+                .padding(.horizontal, Theme.spacing.s4)
+                .background(Theme.surface.bubble, in: .capsule)
             Spacer(minLength: 0)
             Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                 .font(Theme.typography.iconSmall)
@@ -372,13 +338,6 @@ public struct SessionSidebarView: View {
         renameTargetPath = project.path
         renameText = project.displayName
         showRenamePrompt = true
-    }
-
-    private func createProject() {
-        let name = newProjectName.trimmingCharacters(in: .whitespacesAndNewlines)
-        newProjectName = ""
-        guard !name.isEmpty else { return }
-        model.createProject(name: name)
     }
 
     private func commitRename() {

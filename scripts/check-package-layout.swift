@@ -50,6 +50,7 @@ let requiredPaths = [
     "src/AgenticCLIs/README.md",
     "src/Core/CPosixBridge/CPosixBridge.c",
     "src/AgenticCLIs/ClaudeCode/README.md",
+    "src/AgenticCLIs/Codex/README.md",
     "tests/AgenticCLIs/README.md",
 ]
 
@@ -60,7 +61,11 @@ let requiredDirectories = [
     "src/AgenticCLIs/ClaudeCode/Adapter",
     "src/AgenticCLIs/ClaudeCode/Common",
     "src/AgenticCLIs/ClaudeCode/digital-twin/Twin",
+    "src/AgenticCLIs/Codex/Adapter",
+    "src/AgenticCLIs/Codex/Common",
+    "src/AgenticCLIs/Codex/digital-twin/Twin",
     "tests/AgenticCLIs/ClaudeCode",
+    "tests/AgenticCLIs/Codex",
 ]
 
 let requiredTestSuites = [
@@ -68,10 +73,12 @@ let requiredTestSuites = [
     "tests/Core/AgentProtocolTests",
     "tests/Core/AgentCoreTests",
     "tests/AgenticCLIs/ClaudeCode/ClaudeAdapterTests",
+    "tests/AgenticCLIs/Codex/CodexAdapterTests",
     "tests/Remote/AgentRemoteControlTests",
     "tests/AgentUITests",
     "tests/Remote/RemoteParityTests",
     "tests/AgenticCLIs/ClaudeCode/ClaudeCodeTwinTests",
+    "tests/AgenticCLIs/Codex/CodexTwinTests",
     "tests/TestSupport/AgentTestSupportTests",
 ]
 

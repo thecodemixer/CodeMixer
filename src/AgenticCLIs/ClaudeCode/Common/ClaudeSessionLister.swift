@@ -34,6 +34,7 @@ public enum ClaudeSessionLister {
                 let meta = metadata(at: url, fileSystem: fileSystem, data: data)
                 let activity = data.map { lastActivity(in: $0, fallback: mtime) } ?? mtime
                 return SessionSummary(id: id,
+                                      agentID: .claudeCode,
                                       workspace: workspace,
                                       title: meta.title ?? id,
                                       lastActivity: activity,

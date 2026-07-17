@@ -1,9 +1,10 @@
 # Agentic CLIs
 
-This folder holds **one Swift package target per interactive coding-agent CLI**
-that Codemixer drives under a hidden PTY (`claude` in v1; Codex, Cursor CLI,
-Gemini CLI, etc. later). Each agent is a leaf module: `AgentCore` and `AgentUI`
-stay agent-agnostic; nothing here imports SwiftUI.
+This folder holds **one Swift package target per agentic CLI** that Codemixer
+drives through an `AgentTransport`. Claude Code uses an interactive terminal
+transport backed by a hidden PTY; Codex uses App Server stdio JSON-RPC. Each
+agent is a leaf module: `AgentCore` and `AgentUI` stay agent-agnostic; nothing
+here imports SwiftUI.
 
 Read [`docs/reference/patterns/plugin-adapter-protocol.md`](../../docs/reference/patterns/plugin-adapter-protocol.md)
 for the `AgentAdapter` contract and
@@ -22,7 +23,7 @@ and `Package.swift` in the same PR.
 src/AgenticCLIs/
 ├── README.md                 # this file — the convention
 └── <AgentName>/              # one SPM library target (e.g. ClaudeCode)
-    ├── README.md             # executable contract for that CLI (hooks, transcript, PTY)
+    ├── README.md             # executable contract for that CLI (transport, events, sessions)
     ├── Adapter/              # production `AgentAdapter` + parsers/installers
     ├── Common/               # code shared by Adapter/ and digital-twin/ only
     └── digital-twin/
@@ -32,8 +33,9 @@ src/AgenticCLIs/
 
 ### `Adapter/`
 
-Production integration: binary discovery, hook decode, transcript tailing, TUI
-fallback, settings injection, and the type that conforms to `AgentAdapter`.
+Production integration: binary discovery, transport descriptor, bootstrap and
+command encoding, event decode, session listing, and the type that conforms to
+`AgentAdapter`.
 
 - May import `AgentCore`, `AgentProtocol`, and types from `Common/`.
 - Must not import another agent's folder or `AgentUI` / `AgentRemoteControl`.
@@ -57,7 +59,7 @@ executable form of our explicit understanding of the vendor contract.
 | Subfolder | Purpose |
 | --- | --- |
 | `Twin/` | Deterministic in-process `AgentAdapter` for `swift test` without the real binary. |
-| `<fake-binary>/` | Optional minimal executable (e.g. `fake-claude`) resolved when `CODEMIXER_FAKE_*=1`. Excluded from the library target; declared as its own `executableTarget` in `Package.swift`. |
+| `<fake-binary>/` | Optional minimal executable (e.g. `fake-claude`) resolved when `CODEMIXER_FAKE_*=1`. Excluded from the library target; declared as its own `executableTarget` in `Package.swift`. Codex intentionally has no fake binary; it uses fixtures and scripted transports. |
 
 **Why we maintain twins**
 
@@ -88,14 +90,15 @@ JSONL, or PTY semantics; then update `Twin/`, then `Adapter/`.
 
 ## SPM wiring checklist
 
-Adding `src/AgenticCLIs/CodexCLI/` (example):
+Adding `src/AgenticCLIs/CursorCLI/` (example):
 
-1. **Library target** — `path: "src/AgenticCLIs/CodexCLI"`, `exclude: ["README.md", "digital-twin/fake-codex"]` (adjust fake path).
-2. **Product** — `.library(name: "CodexCLI", targets: ["CodexCLI"])`.
-3. **Fake executable** (if any) — separate `executableTarget` under `digital-twin/`.
-4. **Register at startup** — `await AdapterRegistry.shared.register(CodexAdapter())` in `CodemixerApp` / `CodemixerDaemon` only; never from `AgentCore` or `AgentUI`.
-5. **Tests** — `tests/AgenticCLIs/<AgentName>/<Agent>AdapterTests/`, optional `<Agent>TwinTests/`; depend on the new library, not on other agents. See [`tests/AgenticCLIs/README.md`](../../tests/AgenticCLIs/README.md).
-6. **Docs** — agent contract `README.md`, row in root `README.md` module map, pointer in this file's inventory below.
+1. **Library target** — `path: "src/AgenticCLIs/CursorCLI"`, `exclude: ["README.md", "digital-twin/fake-cursor"]` only if a fake binary exists.
+2. **Product** — `.library(name: "CursorCLI", targets: ["CursorCLI"])`.
+3. **Transport descriptor** — `.interactiveTerminal` for terminal/TUI agents, `.stdioJSONRPC` for App Server style agents, or a real future ACP descriptor.
+4. **Fake executable** (if any) — separate `executableTarget` under `digital-twin/`.
+5. **Register at startup** — `await AdapterRegistry.shared.register(CodexAdapter())` in `CodemixerApp` / `CodemixerDaemon` only; never from `AgentCore` or `AgentUI`.
+6. **Tests** — `tests/AgenticCLIs/<AgentName>/<Agent>AdapterTests/`, optional `<Agent>TwinTests/`; depend on the new library, not on other agents. See [`tests/AgenticCLIs/README.md`](../../tests/AgenticCLIs/README.md).
+7. **Docs** — agent contract `README.md`, row in root `README.md` module map, pointer in this file's inventory below.
 
 ---
 
@@ -104,6 +107,7 @@ Adding `src/AgenticCLIs/CodexCLI/` (example):
 | Folder | SPM target | Real binary | Fake executable |
 | --- | --- | --- | --- |
 | [`ClaudeCode/`](ClaudeCode/README.md) | `ClaudeCode` | `claude` | `fake-claude` |
+| [`Codex/`](Codex/README.md) | `Codex` | `codex` | none |
 
 ---
 
@@ -112,4 +116,4 @@ Adding `src/AgenticCLIs/CodexCLI/` (example):
 - Claude Code contract (v1 reference): [`ClaudeCode/README.md`](ClaudeCode/README.md)
 - Claude Code executable spec: [`ClaudeCode/CONTRACT.md`](ClaudeCode/CONTRACT.md)
 - Adapter / twin / live test catalog: [`tests/AgenticCLIs/README.md`](../../tests/AgenticCLIs/README.md)
-  (includes opt-in `CODEMIXER_LIVE_CLAUDE=1` harness and assistant-text fusion policy)
+  (includes opt-in `CODEMIXER_LIVE_CLAUDE=1` and `CODEMIXER_LIVE_CODEX=1` harnesses)
