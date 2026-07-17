@@ -76,7 +76,7 @@ public struct SessionSidebarView: View {
 
     private var fullNavigator: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if model.supportsResumableSessions {
+            if model.hasResumableSessionProjects {
                 searchField
             }
             projectList
@@ -177,7 +177,7 @@ public struct SessionSidebarView: View {
         let isExpanded = expandedProjects.contains(project.path)
         VStack(alignment: .leading, spacing: Theme.spacing.s4) {
             projectRow(project, isExpanded: isExpanded)
-            if isExpanded && model.supportsResumableSessions {
+            if isExpanded && model.supportsResumableSessions(for: project) {
                 sessionRows(for: project)
             }
         }
@@ -315,7 +315,7 @@ public struct SessionSidebarView: View {
     private func expandCurrentProject() {
         guard let path = model.workspace?.path else { return }
         expandedProjects.insert(path)
-        if model.supportsResumableSessions {
+        if model.supportsResumableSessions(forProjectPath: path) {
             model.loadSessions(for: path)
         }
     }
@@ -331,7 +331,7 @@ public struct SessionSidebarView: View {
                 expandedProjects.remove(project.path)
             } else {
                 expandedProjects.insert(project.path)
-                if model.supportsResumableSessions {
+                if model.supportsResumableSessions(for: project) {
                     model.loadSessions(for: project.path)
                 }
             }

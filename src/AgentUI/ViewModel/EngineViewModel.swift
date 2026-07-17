@@ -95,6 +95,10 @@ public final class EngineViewModel {
     /// Resumable sessions per project path, lazily loaded on expand.
     public internal(set) var sessionsByProject: [String: [SessionSummary]] = [:]
 
+    /// Whether each project can list resumable sessions. This is project-specific
+    /// because the active project's adapter should not decide every sidebar row.
+    public internal(set) var projectResumableSessionSupport: [String: Bool] = [:]
+
     /// Project paths whose session list is currently loading (drives skeletons).
     public internal(set) var loadingProjectPaths: Set<String> = []
 
@@ -148,6 +152,7 @@ public final class EngineViewModel {
     var removedProjectUndoTask: Task<Void, Never>?
     var sessionSwitchingTask: Task<Void, Never>?
     var composerResumeUnlockTask: Task<Void, Never>?
+    var adapterCapabilitiesGeneration = 0
     var stalledToastFiredThisTurn = false
     var isAwaitingFirstReplyForPrompt = false
     var pendingOptimisticBubbleID: UUID?

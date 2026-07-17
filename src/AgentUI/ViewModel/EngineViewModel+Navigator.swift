@@ -38,7 +38,9 @@ extension EngineViewModel {
     /// an empty navigator before the project list is ready.
     public func reloadProjects(rootProjectType: ProjectType? = nil) async {
         guard let workspaceRoot, let store = workspaceProjects else { return }
-        projects = await store.projects(for: workspaceRoot, rootProjectType: rootProjectType)
+        let refs = await store.projects(for: workspaceRoot, rootProjectType: rootProjectType)
+        projects = refs
+        projectResumableSessionSupport = await Self.resumableSessionSupport(for: refs)
     }
 
     /// Lazily list the resumable sessions for a project. A non-resumable agent
@@ -46,7 +48,7 @@ extension EngineViewModel {
     /// Subsequent refreshes update the list silently (no skeleton) so the
     /// navigator doesn't flash on every session switch.
     public func loadSessions(for projectPath: String) {
-        guard supportsResumableSessions, let lister = sessionLister else {
+        guard supportsResumableSessions(forProjectPath: projectPath), let lister = sessionLister else {
             sessionsByProject[projectPath] = []
             return
         }
@@ -125,8 +127,10 @@ extension EngineViewModel {
             do {
                 let ref = try await store.createProject(name: name, projectType: projectType, in: workspaceRoot)
                 let refs = await store.projects(for: workspaceRoot, rootProjectType: projectType)
+                let support = await Self.resumableSessionSupport(for: refs)
                 await MainActor.run {
                     self?.projects = refs
+                    self?.projectResumableSessionSupport = support
                     self?.applyAdapterCapabilities(for: projectType, projectURL: URL(fileURLWithPath: ref.path))
                     self?.newChat(in: ref.path)
                 }
@@ -143,8 +147,10 @@ extension EngineViewModel {
             do {
                 let ref = try await store.addExistingProject(url: url, projectType: projectType, in: workspaceRoot)
                 let refs = await store.projects(for: workspaceRoot, rootProjectType: projectType)
+                let support = await Self.resumableSessionSupport(for: refs)
                 await MainActor.run {
                     self?.projects = refs
+                    self?.projectResumableSessionSupport = support
                     self?.applyAdapterCapabilities(for: projectType, projectURL: URL(fileURLWithPath: ref.path))
                     self?.newChat(in: ref.path)
                 }
@@ -161,7 +167,11 @@ extension EngineViewModel {
             do {
                 try await store.renameProject(path: path, to: newName, in: workspaceRoot)
                 let refs = await store.projects(for: workspaceRoot)
-                await MainActor.run { self?.projects = refs }
+                let support = await Self.resumableSessionSupport(for: refs)
+                await MainActor.run {
+                    self?.projects = refs
+                    self?.projectResumableSessionSupport = support
+                }
             } catch {
                 await MainActor.run { self?.recordProjectError(error) }
             }
@@ -176,8 +186,10 @@ extension EngineViewModel {
             do {
                 let removed = try await store.removeProject(path: path, in: workspaceRoot)
                 let refs = await store.projects(for: workspaceRoot)
+                let support = await Self.resumableSessionSupport(for: refs)
                 await MainActor.run {
                     self?.projects = refs
+                    self?.projectResumableSessionSupport = support
                     if let removed { self?.armRemovedProjectUndo(removed) }
                 }
             } catch {
@@ -197,7 +209,11 @@ extension EngineViewModel {
             do {
                 try await store.restoreProject(removed, in: workspaceRoot)
                 let refs = await store.projects(for: workspaceRoot)
-                await MainActor.run { self?.projects = refs }
+                let support = await Self.resumableSessionSupport(for: refs)
+                await MainActor.run {
+                    self?.projects = refs
+                    self?.projectResumableSessionSupport = support
+                }
             } catch {
                 await MainActor.run { self?.recordProjectError(error) }
             }
@@ -213,18 +229,28 @@ extension EngineViewModel {
     /// slash / resumable capabilities used by the composer and sidebar.
     public func applyAdapterCapabilities(for projectType: ProjectType, projectURL: URL? = nil) {
         let url = projectURL ?? workspace
+        let expectedPath = url.map {
+            URL(fileURLWithPath: $0.path).standardizedFileURL.path
+        }
+        adapterCapabilitiesGeneration += 1
+        let generation = adapterCapabilitiesGeneration
         Task { [weak self] in
+            guard let self else { return }
             guard let adapter = await ProjectAgentRouter.resolveAdapter(projectType: projectType) else {
                 await MainActor.run {
-                    self?.availableModels = []
-                    self?.availableAgentModes = []
-                    self?.selectedAgentModeID = ""
-                    self?.supportsResumableSessions = false
-                    self?.slashCommands = []
+                    guard self.shouldApplyAdapterCapabilities(
+                        generation: generation,
+                        expectedPath: expectedPath
+                    ) else { return }
+                    self.availableModels = []
+                    self.availableAgentModes = []
+                    self.selectedAgentModeID = ""
+                    self.supportsResumableSessions = false
+                    self.slashCommands = []
                 }
                 return
             }
-            let models = adapter.availableModels()
+            var models = adapter.availableModels()
             let agentModes = adapter.availableAgentModes()
             let resumable = adapter.capabilities.contains(.resumableSessions)
             let builtIn = adapter.slashCommandCatalog
@@ -234,22 +260,35 @@ extension EngineViewModel {
             } else {
                 projectCommands = []
             }
+            // Cursor fills its model cache asynchronously from `cursor-agent
+            // models`. One short retry picks that up without blocking start.
+            // Use wall-clock sleep so FakeClock-driven unit tests don't hang.
+            if models.isEmpty {
+                try? await Task.sleep(for: .milliseconds(750))
+                models = adapter.availableModels()
+            }
             await MainActor.run {
-                self?.availableModels = models
-                self?.availableAgentModes = agentModes
-                if let current = self?.selectedAgentModeID,
-                   agentModes.contains(where: { $0.id == current }) {
+                guard self.shouldApplyAdapterCapabilities(
+                    generation: generation,
+                    expectedPath: expectedPath
+                ) else { return }
+                self.availableModels = models
+                self.availableAgentModes = agentModes
+                if agentModes.contains(where: { $0.id == self.selectedAgentModeID }) {
                     // Keep the user's selection when the adapter still offers it.
                 } else {
-                    self?.selectedAgentModeID = agentModes.first?.id ?? ""
+                    self.selectedAgentModeID = agentModes.first?.id ?? ""
                 }
-                self?.supportsResumableSessions = resumable
-                self?.slashCommands = builtIn + projectCommands
+                self.supportsResumableSessions = resumable
+                self.slashCommands = builtIn + projectCommands
             }
         }
     }
 
     func applyAdapterCapabilities(forProjectPath path: String) {
+        let expectedPath = URL(fileURLWithPath: path).standardizedFileURL.path
+        adapterCapabilitiesGeneration += 1
+        let generation = adapterCapabilitiesGeneration
         Task { [weak self] in
             guard let self, let store = workspaceProjects else { return }
             let url = URL(fileURLWithPath: path)
@@ -261,9 +300,20 @@ extension EngineViewModel {
             }
             guard let projectType else { return }
             await MainActor.run {
+                guard self.shouldApplyAdapterCapabilities(
+                    generation: generation,
+                    expectedPath: expectedPath
+                ) else { return }
                 self.applyAdapterCapabilities(for: projectType, projectURL: url)
             }
         }
+    }
+
+    func shouldApplyAdapterCapabilities(generation: Int, expectedPath: String?) -> Bool {
+        guard generation == adapterCapabilitiesGeneration else { return false }
+        guard let expectedPath else { return true }
+        guard let current = workspace?.path else { return false }
+        return URL(fileURLWithPath: current).standardizedFileURL.path == expectedPath
     }
 
     func armRemovedProjectUndo(_ removed: WorkspaceProjectsStore.RemovedProject) {
@@ -361,6 +411,18 @@ extension EngineViewModel {
         return false
     }
 
+    public var hasResumableSessionProjects: Bool {
+        supportsResumableSessions || projectResumableSessionSupport.values.contains(true)
+    }
+
+    public func supportsResumableSessions(for project: WorkspaceProjectsStore.ProjectRef) -> Bool {
+        supportsResumableSessions(forProjectPath: project.path)
+    }
+
+    func supportsResumableSessions(forProjectPath path: String) -> Bool {
+        projectResumableSessionSupport[path] ?? supportsResumableSessions
+    }
+
     func recordProjectError(_ error: any Error) {
         let message = (error as? AgentError)?.userMessage ?? error.localizedDescription
         diagnostics.append(diagnostic(level: .error, message: message))
@@ -392,6 +454,7 @@ extension EngineViewModel {
         sessionID = nil
         projects = []
         sessionsByProject = [:]
+        projectResumableSessionSupport = [:]
         loadingProjectPaths = []
         removedProjectUndo = nil
         removedProjectUndoTask?.cancel()
@@ -419,6 +482,7 @@ extension EngineViewModel {
         sessionID = nil
         projects = []
         sessionsByProject = [:]
+        projectResumableSessionSupport = [:]
         loadingProjectPaths = []
         removedProjectUndo = nil
         removedProjectUndoTask?.cancel()
@@ -435,5 +499,26 @@ extension EngineViewModel {
         availableAgentModes = []
         selectedAgentModeID = ""
         slashCommands = []
+    }
+
+    private static func resumableSessionSupport(
+        for refs: [WorkspaceProjectsStore.ProjectRef]
+    ) async -> [String: Bool] {
+        var support: [String: Bool] = [:]
+        for ref in refs {
+            support[ref.path] = await projectTypeSupportsResumableSessions(ref.projectType)
+        }
+        return support
+    }
+
+    private static func projectTypeSupportsResumableSessions(_ projectType: ProjectType) async -> Bool {
+        if case .mixed = projectType {
+            let adapters = await AdapterRegistry.shared.all()
+            return adapters.contains { $0.capabilities.contains(.resumableSessions) }
+        }
+        guard let adapter = await ProjectAgentRouter.resolveAdapter(projectType: projectType) else {
+            return false
+        }
+        return adapter.capabilities.contains(.resumableSessions)
     }
 }

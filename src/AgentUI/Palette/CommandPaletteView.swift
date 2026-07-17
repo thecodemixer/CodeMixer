@@ -166,7 +166,7 @@ public struct CommandPaletteView: View {
             })
         }
 
-        if model.supportsResumableSessions {
+        if model.hasResumableSessionProjects {
             for (path, sessions) in model.sessionsByProject {
                 let name = model.projects.first(where: { $0.path == path })?.displayName
                     ?? URL(fileURLWithPath: path).lastPathComponent

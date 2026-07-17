@@ -9,7 +9,8 @@ import AgentProtocol
 /// always presented in a sheet so built-in / Mixed / Custom controls are
 /// actually reachable.
 struct ProjectTypeForm: View {
-    @Binding var selectedKind: ProjectTypeKind
+    @Binding var category: ProjectTypeCategory
+    @Binding var builtInAgent: AgentID
     @Binding var mixedDefault: AgentID
     @Binding var customDisplayName: String
     @Binding var customExecutable: String
@@ -18,17 +19,23 @@ struct ProjectTypeForm: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.spacing.s16) {
-            Picker("Project type", selection: $selectedKind) {
-                ForEach(ProjectTypeKind.allCases) { kind in
+            Picker("Project type", selection: $category) {
+                ForEach(ProjectTypeCategory.allCases) { kind in
                     Text(kind.label).tag(kind)
                 }
             }
             .pickerStyle(.menu)
             .accessibilityLabel("Project type")
 
-            switch selectedKind {
-            case .builtIn:
-                EmptyView()
+            switch category {
+            case .singleAgent:
+                Picker("Agent", selection: $builtInAgent) {
+                    ForEach(SupportedBuiltInAgent.shipping) { agent in
+                        Text(agent.displayLabel).tag(agent.id)
+                    }
+                }
+                .pickerStyle(.menu)
+                .accessibilityLabel("Agent CLI")
             case .mixed:
                 Picker("Default agent for new chats", selection: $mixedDefault) {
                     ForEach(SupportedBuiltInAgent.shipping) { agent in
@@ -71,6 +78,23 @@ struct ProjectTypeForm: View {
     }
 }
 
+/// Top-level New / Configure Project choice before agent-specific fields.
+enum ProjectTypeCategory: String, CaseIterable, Hashable, Identifiable {
+    case singleAgent
+    case mixed
+    case custom
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .singleAgent: return "Single agent"
+        case .mixed: return "Mixed"
+        case .custom: return "Custom"
+        }
+    }
+}
+
 /// Discrete picker cases for `ProjectType`.
 ///
 /// Built-in agents come from `SupportedBuiltInAgent.shipping` so adding a new
@@ -88,6 +112,27 @@ enum ProjectTypeKind: Hashable, Identifiable {
         }
     }
 
+    var category: ProjectTypeCategory {
+        switch self {
+        case .builtIn: return .singleAgent
+        case .mixed: return .mixed
+        case .custom: return .custom
+        }
+    }
+
+    var builtInAgentID: AgentID? {
+        if case .builtIn(let id) = self { return id }
+        return nil
+    }
+
+    static func from(category: ProjectTypeCategory, builtInAgent: AgentID) -> ProjectTypeKind {
+        switch category {
+        case .singleAgent: return .builtIn(builtInAgent)
+        case .mixed: return .mixed
+        case .custom: return .custom
+        }
+    }
+
     var label: String {
         switch self {
         case .builtIn(let id):
@@ -101,7 +146,7 @@ enum ProjectTypeKind: Hashable, Identifiable {
         SupportedBuiltInAgent.shipping.map { .builtIn($0.id) } + [.mixed, .custom]
     }
 
-    func resolvedMode(mixedDefault: AgentID,
+    func resolvedProjectType(mixedDefault: AgentID,
                       customDisplayName: String,
                       customExecutable: String,
                       customArguments: String,
@@ -238,7 +283,8 @@ public struct NewProjectSheet: View {
     public let onCreate: (String, ProjectType) -> Void
 
     @State private var name: String = ""
-    @State private var kind: ProjectTypeKind = .builtIn(.claudeCode)
+    @State private var category: ProjectTypeCategory = .singleAgent
+    @State private var builtInAgent: AgentID = .claudeCode
     @State private var mixedDefault: AgentID = .claudeCode
     @State private var customDisplayName: String = ""
     @State private var customExecutable: String = ""
@@ -251,8 +297,9 @@ public struct NewProjectSheet: View {
         self.onCreate = onCreate
     }
 
-    private var resolvedMode: ProjectType? {
-        kind.resolvedMode(
+    private var resolvedProjectType: ProjectType? {
+        ProjectTypeKind.from(category: category, builtInAgent: builtInAgent)
+            .resolvedProjectType(
             mixedDefault: mixedDefault,
             customDisplayName: customDisplayName,
             customExecutable: customExecutable,
@@ -263,7 +310,7 @@ public struct NewProjectSheet: View {
     }
 
     private var canCreate: Bool {
-        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && resolvedMode != nil
+        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && resolvedProjectType != nil
     }
 
     public var body: some View {
@@ -284,7 +331,8 @@ public struct NewProjectSheet: View {
             }
 
             ProjectTypeForm(
-                selectedKind: $kind,
+                category: $category,
+                builtInAgent: $builtInAgent,
                 mixedDefault: $mixedDefault,
                 customDisplayName: $customDisplayName,
                 customExecutable: $customExecutable,
@@ -293,9 +341,9 @@ public struct NewProjectSheet: View {
             )
 
             sheetFooter(primaryTitle: "Create", primaryEnabled: canCreate, onCancel: onCancel) {
-                guard let mode = resolvedMode else { return }
+                guard let projectType = resolvedProjectType else { return }
                 let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-                onCreate(trimmed, mode)
+                onCreate(trimmed, projectType)
             }
         }
         .padding(Theme.spacing.s24)
@@ -310,7 +358,8 @@ public struct ConfigureProjectSheet: View {
     public let onCancel: () -> Void
     public let onConfirm: (ProjectType) -> Void
 
-    @State private var kind: ProjectTypeKind = .builtIn(.claudeCode)
+    @State private var category: ProjectTypeCategory = .singleAgent
+    @State private var builtInAgent: AgentID = .claudeCode
     @State private var mixedDefault: AgentID = .claudeCode
     @State private var customDisplayName: String = ""
     @State private var customExecutable: String = ""
@@ -325,8 +374,9 @@ public struct ConfigureProjectSheet: View {
         self.onConfirm = onConfirm
     }
 
-    private var resolvedMode: ProjectType? {
-        kind.resolvedMode(
+    private var resolvedProjectType: ProjectType? {
+        ProjectTypeKind.from(category: category, builtInAgent: builtInAgent)
+            .resolvedProjectType(
             mixedDefault: mixedDefault,
             customDisplayName: customDisplayName,
             customExecutable: customExecutable,
@@ -344,7 +394,8 @@ public struct ConfigureProjectSheet: View {
             )
 
             ProjectTypeForm(
-                selectedKind: $kind,
+                category: $category,
+                builtInAgent: $builtInAgent,
                 mixedDefault: $mixedDefault,
                 customDisplayName: $customDisplayName,
                 customExecutable: $customExecutable,
@@ -352,9 +403,9 @@ public struct ConfigureProjectSheet: View {
                 customTransport: $customTransport
             )
 
-            sheetFooter(primaryTitle: "Open", primaryEnabled: resolvedMode != nil, onCancel: onCancel) {
-                guard let mode = resolvedMode else { return }
-                onConfirm(mode)
+            sheetFooter(primaryTitle: "Open", primaryEnabled: resolvedProjectType != nil, onCancel: onCancel) {
+                guard let projectType = resolvedProjectType else { return }
+                onConfirm(projectType)
             }
         }
         .padding(Theme.spacing.s24)

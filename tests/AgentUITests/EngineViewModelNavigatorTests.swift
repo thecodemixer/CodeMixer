@@ -525,6 +525,34 @@ struct EngineViewModelNavigatorTests {
         await bus.shutdown()
     }
 
+    @Test("sessionStarted for a previous project does not auto-switch the active project")
+    func sessionStartedIgnoresStaleProject() async {
+        let (vm, bus, _) = makeModel()
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        let cursor = URL(fileURLWithPath: "/Users/me/ws/cursor")
+        let claude = URL(fileURLWithPath: "/Users/me/ws/claude")
+        vm.workspaceRoot = URL(fileURLWithPath: "/Users/me/ws")
+        vm.workspace = claude
+        vm.sessionID = "claude-1"
+        vm.availableModels = [AgentModelOption(id: "sonnet", label: "Sonnet")]
+        vm.availableAgentModes = [
+            AgentModeOption(id: "think", label: "Think", selectCommands: []),
+        ]
+
+        // Late SessionStart from the Cursor project the user already left.
+        await bus.publish(.sessionStarted(sessionID: "cursor-late", model: "auto", cwd: cursor))
+        await drain()
+
+        #expect(vm.workspace?.path == claude.path)
+        #expect(vm.sessionID == "claude-1")
+        #expect(vm.availableModels.map(\.id) == ["sonnet"])
+        #expect(vm.availableAgentModes.map(\.id) == ["think"])
+
+        await bus.shutdown()
+    }
+
     @Test("sessionStarted for a subproject keeps workspaceRoot and project sections")
     func sessionStartedSubprojectKeepsWorkspaceProjects() async {
         let port = RecordingPort()

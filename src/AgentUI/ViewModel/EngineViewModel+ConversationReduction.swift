@@ -9,7 +9,17 @@ extension EngineViewModel {
     func apply(_ event: AgentEvent) {
         switch event {
         case .sessionStarted(let id, let model, let cwd):
-            let projectChanged = workspace?.path != cwd.path
+            let selectedPath = workspace.map {
+                URL(fileURLWithPath: $0.path).standardizedFileURL.path
+            }
+            let eventPath = cwd.standardizedFileURL.path
+            // Project selection is owned by the navigator (`newChat` /
+            // `openSession`). A late SessionStart from a project the user
+            // already left must never yank the sidebar / composer back.
+            if let selectedPath, selectedPath != eventPath {
+                return
+            }
+            let projectChanged = selectedPath == nil
             let previousSessionID = sessionID
             let sessionChanged = previousSessionID != id
             let shouldResetConversation = projectChanged || (sessionChanged && activity == .idle)
@@ -18,7 +28,9 @@ extension EngineViewModel {
             if workspaceRoot == nil {
                 workspaceRoot = cwd
             }
-            workspace = cwd
+            if projectChanged {
+                workspace = cwd
+            }
             if shouldResetConversation {
                 clearConversationState()
             }
@@ -41,8 +53,10 @@ extension EngineViewModel {
                 // Codex (and similar adapters) record the resumable thread only
                 // after `thread/start` succeeds — after the engine's empty
                 // bootstrap `sessionStarted`. Refresh so New Chat / first open
-                // appear in the sidebar.
+                // appear in the sidebar. ACP agents (Cursor) publish their model
+                // catalog on the same live session-open response.
                 loadSessions(for: cwd.path)
+                applyAdapterCapabilities(forProjectPath: cwd.path)
             }
         case .userTurn(let id, let text):
             finishSessionSwitchIfNeeded()
