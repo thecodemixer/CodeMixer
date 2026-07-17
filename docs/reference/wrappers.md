@@ -392,6 +392,34 @@ public final class SystemNotifications {
 
 ---
 
+## `PanelWindowChrome`
+
+**File**: `src/AgentUI/External/PanelWindowChrome.swift`
+**Wraps**: `AppKit.NSWindow` title, movability, centering, and traffic-light visibility for floating panels.
+**Consumers**:
+- Settings, debug terminal, event log, silent diagnostics, and form windows via `.movablePanelTitle(_:)`.
+
+**Public API**:
+
+```swift
+public enum PanelWindowChrome {
+    @MainActor
+    public static func apply(to window: NSWindow?, title: String?)
+    @MainActor
+    public static func center(_ window: NSWindow?)
+}
+
+extension View {
+    /// Titled, movable, screen-centered panel chrome without traffic-light buttons.
+    public func movablePanelTitle(_ title: String? = nil) -> some View
+}
+```
+
+**Lifetime**: applied once per hosting update.
+**Threading**: `@MainActor`.
+
+---
+
 ## What "wrapper" does not mean
 
 These wrappers are not protocol seams. They have one production implementation each. Tests exercise them against the real OS via happy paths. If a test needs to assert behaviour without the OS, it tests the consumer of the wrapper, not a fake of the wrapper.

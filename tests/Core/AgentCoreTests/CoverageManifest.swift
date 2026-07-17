@@ -440,6 +440,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // PairingService
 // PairingState
 // PaletteCommand
+// PanelWindowChrome
 // PermissionDecision
 // PermissionMode
 // PermissionPrompt
@@ -456,7 +457,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // ProjectMemoryFile
 // ProjectMemoryFileKind
 // ProjectPaths
-// ProjectPickerView
+// WorkspacePickerView
 // ProjectRecord
 // ProjectRef
 // ProjectType
@@ -582,7 +583,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // agentError
 // agentID
 // agentModes
-// agentPickerMinHeight
+// agentPickerMaxWidth
 // agentPickerMinWidth
 // all
 // allPaired
@@ -591,6 +592,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // appearance
 // append
 // appendLines
+// apply
 // applyAdapterCapabilities
 // approval
 // arguments
@@ -650,6 +652,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // caption
 // card
 // catalogSummary
+// center
 // certificateDER
 // certificateFingerprint
 // changedFiles
@@ -928,6 +931,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // monoSmall
 // monotonic
 // motion
+// movablePanelTitle
 // move
 // muted
 // name
@@ -961,6 +965,8 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // opacity
 // openEmptyWorkspace
 // openFilePanel
+// openProjectMaxWidth
+// openProjectMinWidth
 // openSession
 // openURL
 // openssl
@@ -1020,8 +1026,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // projectDirectory
 // projectFileName
 // projectPickerMaxHeight
-// projectPickerMinHeight
-// projectPickerMinWidth
+// projectPickerWidth
 // projectSlug
 // projectStateURL
 // projectType
@@ -1140,6 +1145,10 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // scenario
 // schemaVersion
 // secondary
+// secondaryAction
+// secondaryButtonTitle
+// secondaryKeyboardModifiers
+// secondaryKeyboardShortcut
 // seedModelCatalog
 // selectAgentMode
 // selectCommands

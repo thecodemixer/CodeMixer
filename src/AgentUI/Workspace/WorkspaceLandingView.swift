@@ -13,6 +13,10 @@ public struct WorkspaceLandingView: View {
     public let primaryAction: () -> Void
     public var primaryKeyboardShortcut: KeyEquivalent?
     public var primaryKeyboardModifiers: EventModifiers = .command
+    public var secondaryButtonTitle: String?
+    public var secondaryAction: (() -> Void)?
+    public var secondaryKeyboardShortcut: KeyEquivalent?
+    public var secondaryKeyboardModifiers: EventModifiers = .command
 
     public init(systemImage: String,
                 prominentName: String? = nil,
@@ -21,7 +25,11 @@ public struct WorkspaceLandingView: View {
                 primaryButtonTitle: String,
                 primaryAction: @escaping () -> Void,
                 primaryKeyboardShortcut: KeyEquivalent? = nil,
-                primaryKeyboardModifiers: EventModifiers = .command) {
+                primaryKeyboardModifiers: EventModifiers = .command,
+                secondaryButtonTitle: String? = nil,
+                secondaryAction: (() -> Void)? = nil,
+                secondaryKeyboardShortcut: KeyEquivalent? = nil,
+                secondaryKeyboardModifiers: EventModifiers = .command) {
         self.systemImage = systemImage
         self.prominentName = prominentName
         self.title = title
@@ -30,6 +38,10 @@ public struct WorkspaceLandingView: View {
         self.primaryAction = primaryAction
         self.primaryKeyboardShortcut = primaryKeyboardShortcut
         self.primaryKeyboardModifiers = primaryKeyboardModifiers
+        self.secondaryButtonTitle = secondaryButtonTitle
+        self.secondaryAction = secondaryAction
+        self.secondaryKeyboardShortcut = secondaryKeyboardShortcut
+        self.secondaryKeyboardModifiers = secondaryKeyboardModifiers
     }
 
     public var body: some View {
@@ -59,11 +71,21 @@ public struct WorkspaceLandingView: View {
                     .frame(maxWidth: Theme.layout.messageMaxWidth)
             }
 
-            primaryButton
+            actionButtons
         }
         .padding(Theme.spacing.s24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.surface.canvas)
+    }
+
+    @ViewBuilder
+    private var actionButtons: some View {
+        HStack(spacing: Theme.spacing.s12) {
+            if let secondaryButtonTitle, let secondaryAction {
+                secondaryButton(title: secondaryButtonTitle, action: secondaryAction)
+            }
+            primaryButton
+        }
     }
 
     @ViewBuilder
@@ -72,9 +94,25 @@ public struct WorkspaceLandingView: View {
             Button(primaryButtonTitle, action: primaryAction)
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(primaryKeyboardShortcut, modifiers: primaryKeyboardModifiers)
+                .accessibilityLabel(primaryButtonTitle)
         } else {
             Button(primaryButtonTitle, action: primaryAction)
                 .buttonStyle(.borderedProminent)
+                .accessibilityLabel(primaryButtonTitle)
+        }
+    }
+
+    @ViewBuilder
+    private func secondaryButton(title: String, action: @escaping () -> Void) -> some View {
+        if let secondaryKeyboardShortcut {
+            Button(title, action: action)
+                .buttonStyle(.bordered)
+                .keyboardShortcut(secondaryKeyboardShortcut, modifiers: secondaryKeyboardModifiers)
+                .accessibilityLabel(title)
+        } else {
+            Button(title, action: action)
+                .buttonStyle(.bordered)
+                .accessibilityLabel(title)
         }
     }
 }

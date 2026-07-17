@@ -29,8 +29,10 @@ public struct SettingsView: View {
             ClaudeSettingsTab()
                 .tabItem { Label("Claude", systemImage: "sparkles") }
         }
-        .frame(minWidth: Theme.layout.settingsMinWidth, minHeight: Theme.layout.settingsMinHeight)
+        .frame(minWidth: Theme.layout.settingsMinWidth,
+               minHeight: Theme.layout.settingsMinHeight)
         .padding(Theme.spacing.s16)
+        .movablePanelTitle("Settings")
     }
 }
 

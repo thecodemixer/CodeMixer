@@ -130,18 +130,24 @@ public enum Theme {
         public static let diffSidebarMaxWidth: CGFloat = 320
         public static let installMinWidth: CGFloat = 480
         public static let installMaxWidth: CGFloat = 560
-        public static let settingsMinWidth: CGFloat = 560
-        public static let settingsMinHeight: CGFloat = 420
-        public static let debugTerminalMinWidth: CGFloat = 720
-        public static let debugTerminalMinHeight: CGFloat = 480
-        public static let projectPickerMinWidth: CGFloat = 520
-        public static let projectPickerMinHeight: CGFloat = 480
-        public static let projectPickerMaxHeight: CGFloat = 320
+        public static let settingsMinWidth: CGFloat = 440
+        public static let settingsMinHeight: CGFloat = 360
+        public static let debugTerminalMinWidth: CGFloat = 560
+        public static let debugTerminalMinHeight: CGFloat = 360
+        /// Fixed width for the Open Workspace recents picker.
+        public static let projectPickerWidth: CGFloat = 320
+        /// Recents list viewport cap inside the project picker.
+        public static let projectPickerMaxHeight: CGFloat = 240
+        /// Fixed width for the Open Project folder-chooser dialog.
+        public static let openProjectWidth: CGFloat = 280
         public static let authGateMinWidth: CGFloat = 540
         public static let authGateMinHeight: CGFloat = 360
         public static let authGateContentMaxWidth: CGFloat = 480
-        public static let agentPickerMinWidth: CGFloat = 420
-        public static let agentPickerMinHeight: CGFloat = 320
+        public static let agentPickerMinWidth: CGFloat = 360
+        public static let agentPickerMaxWidth: CGFloat = 420
+        /// Configure Project (first-open / open-project flow).
+        public static let openProjectMinWidth: CGFloat = 180
+        public static let openProjectMaxWidth: CGFloat = 210
         public static let workspaceSidebarMinWidth: CGFloat = 480
         public static let sessionSidebarMinWidth: CGFloat = 220
         public static let sessionSidebarIdealWidth: CGFloat = 260
@@ -152,8 +158,8 @@ public enum Theme {
         public static let activityDotSize: CGFloat = 5
         public static let activityDotsHeight: CGFloat = 8
         public static let statusPillMaxWidth: CGFloat = 360
-        public static let eventLogMinWidth: CGFloat = 600
-        public static let eventLogMinHeight: CGFloat = 400
+        public static let eventLogMinWidth: CGFloat = 480
+        public static let eventLogMinHeight: CGFloat = 280
         public static let remoteSettingsMinHeight: CGFloat = 180
     }
 }

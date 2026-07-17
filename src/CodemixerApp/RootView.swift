@@ -8,6 +8,9 @@ import AgentUI
 struct RootView: View {
     @Bindable var bootstrap: Bootstrap
     @State private var diffPanelVisible: Bool = true
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismissWindow) private var dismissWindow
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         ZStack {
@@ -33,7 +36,7 @@ struct RootView: View {
                                 }
                                 changesPanelToggle(for: model)
                                 ConnectedClientsChip(count: model.connectedRemoteClients,
-                                                     onTap: { bootstrap.showSettings = true })
+                                                     onTap: { openSettings() })
                                 toolbarOverflow(for: model)
                             }
                         }
@@ -46,61 +49,29 @@ struct RootView: View {
             }
         }
         .codemixerAppearance(bootstrap.viewModel?.appearancePrefs ?? AppearancePrefs())
-        .sheet(isPresented: $bootstrap.showProjectPicker) {
-            ProjectPickerView(recent: bootstrap.recents) { url, resume in
-                Task { await bootstrap.openWorkspace(url, resumeSessionID: resume) }
-            }
+        .onChange(of: bootstrap.showProjectPicker) { _, show in
+            syncUtilityWindow(UtilityWindowID.projectPicker, show: show)
         }
-        .sheet(isPresented: $bootstrap.showNewProjectSheet) {
-            if let model = bootstrap.viewModel {
-                NewProjectSheet(
-                    onCancel: { bootstrap.showNewProjectSheet = false },
-                    onCreate: { name, mode in
-                        await model.createProject(name: name, projectType: mode)
-                        bootstrap.showNewProjectSheet = false
-                    }
-                )
-            }
+        .onChange(of: bootstrap.showOpenProject) { _, show in
+            syncUtilityWindow(UtilityWindowID.openProject, show: show)
         }
-        .sheet(isPresented: $bootstrap.showNewWorkspaceSheet) {
-            NewWorkspaceSheet(
-                onCancel: { bootstrap.showNewWorkspaceSheet = false },
-                onCreate: { name, parent in
-                    Task {
-                        await bootstrap.createWorkspace(name: name, parentDirectory: parent)
-                    }
-                }
-            )
+        .onChange(of: bootstrap.showNewProjectSheet) { _, show in
+            syncUtilityWindow(UtilityWindowID.newProject, show: show)
         }
-        .sheet(isPresented: Binding(
-            get: { bootstrap.pendingConfigureURL != nil },
-            set: { if !$0 { bootstrap.cancelPendingProjectConfiguration() } }
-        )) {
-            if let url = bootstrap.pendingConfigureURL {
-                ConfigureProjectSheet(
-                    projectURL: url,
-                    onCancel: { bootstrap.cancelPendingProjectConfiguration() },
-                    onConfirm: { mode in
-                        Task { await bootstrap.confirmPendingProjectConfiguration(mode: mode) }
-                    }
-                )
-            }
+        .onChange(of: bootstrap.showNewWorkspaceSheet) { _, show in
+            syncUtilityWindow(UtilityWindowID.newWorkspace, show: show)
         }
-        .sheet(isPresented: $bootstrap.showSettings) {
-            if let model = bootstrap.viewModel {
-                SettingsView(model: model,
-                             remoteActions: bootstrap.remoteSettingsActions())
-            }
+        .onChange(of: bootstrap.pendingConfigureURL) { _, url in
+            syncUtilityWindow(UtilityWindowID.configureProject, show: url != nil)
         }
-        .sheet(isPresented: $bootstrap.showDebugTerminal) {
-            DebugTerminalSheet(snapshotText: bootstrap.debugTerminalSnapshotText,
-                               onClose: { bootstrap.showDebugTerminal = false })
+        .onChange(of: bootstrap.showDebugTerminal) { _, show in
+            syncUtilityWindow(UtilityWindowID.debugTerminal, show: show)
         }
-        .sheet(isPresented: $bootstrap.showEventLog) {
-            if let bus = bootstrap.bus { EventLogView(bus: bus) }
+        .onChange(of: bootstrap.showEventLog) { _, show in
+            syncUtilityWindow(UtilityWindowID.eventLog, show: show)
         }
-        .sheet(isPresented: $bootstrap.showSilentDiagnostics) {
-            SilentDiagnosticsView()
+        .onChange(of: bootstrap.showSilentDiagnostics) { _, show in
+            syncUtilityWindow(UtilityWindowID.silentDiagnostics, show: show)
         }
         .alert("Could not start agent",
                isPresented: Binding(
@@ -120,6 +91,14 @@ struct RootView: View {
         }
     }
 
+    private func syncUtilityWindow(_ id: String, show: Bool) {
+        if show {
+            openWindow(id: id)
+        } else {
+            dismissWindow(id: id)
+        }
+    }
+
     private var startupLoading: some View {
         Theme.surface.canvas
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -135,11 +114,14 @@ struct RootView: View {
     private var noWorkspaceLanding: some View {
         WorkspaceLandingView(
             systemImage: "folder.badge.plus",
-            title: "Create a workspace",
+            title: "Open or create a workspace",
             subtitle: "A workspace is a folder that holds your projects and sessions.",
             primaryButtonTitle: "New Workspace…",
             primaryAction: { bootstrap.presentNewWorkspaceSheet() },
-            primaryKeyboardShortcut: "n"
+            primaryKeyboardShortcut: "n",
+            secondaryButtonTitle: "Open Workspace…",
+            secondaryAction: { bootstrap.presentProjectPicker() },
+            secondaryKeyboardShortcut: "o"
         )
     }
 
@@ -238,8 +220,7 @@ struct RootView: View {
             if model.showSilentRecoveryLog {
                 Button("Show Silent Recovery Log") { bootstrap.showSilentDiagnostics = true }
             }
-            Button("Settings…") { bootstrap.showSettings = true }
-                .keyboardShortcut(",", modifiers: .command)
+            Button("Settings…") { openSettings() }
         } label: {
             Image(systemName: "ellipsis.circle")
                 .imageScale(.large)

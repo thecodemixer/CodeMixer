@@ -6,8 +6,8 @@ import AgentProtocol
 /// for folders that do not yet have `.codemixer/project.json`.
 ///
 /// Alerts cannot host pickers / text fields reliably on macOS — this form is
-/// always presented in a sheet so built-in / Mixed / Custom controls are
-/// actually reachable.
+/// always presented in a titled window so built-in / Mixed / Custom controls
+/// are actually reachable.
 struct ProjectTypeForm: View {
     @Binding var category: ProjectTypeCategory
     @Binding var builtInAgent: AgentID
@@ -272,7 +272,9 @@ public struct NewWorkspaceSheet: View {
             }
         }
         .padding(Theme.spacing.s24)
-        .frame(minWidth: Theme.layout.agentPickerMinWidth)
+        .frame(minWidth: Theme.layout.agentPickerMinWidth,
+               maxWidth: Theme.layout.agentPickerMaxWidth)
+        .fixedSize(horizontal: false, vertical: true)
         .background(Theme.surface.canvas)
     }
 }
@@ -359,7 +361,9 @@ public struct NewProjectSheet: View {
             }
         }
         .padding(Theme.spacing.s24)
-        .frame(minWidth: Theme.layout.agentPickerMinWidth, minHeight: Theme.layout.agentPickerMinHeight)
+        .frame(minWidth: Theme.layout.agentPickerMinWidth,
+               maxWidth: Theme.layout.agentPickerMaxWidth)
+        .fixedSize(horizontal: false, vertical: true)
         .background(Theme.surface.canvas)
         .interactiveDismissDisabled(isCreating)
     }
@@ -422,7 +426,9 @@ public struct ConfigureProjectSheet: View {
             }
         }
         .padding(Theme.spacing.s24)
-        .frame(minWidth: Theme.layout.agentPickerMinWidth, minHeight: Theme.layout.agentPickerMinHeight)
+        .frame(minWidth: Theme.layout.openProjectMinWidth,
+               maxWidth: Theme.layout.openProjectMaxWidth)
+        .fixedSize(horizontal: false, vertical: true)
         .background(Theme.surface.canvas)
     }
 }

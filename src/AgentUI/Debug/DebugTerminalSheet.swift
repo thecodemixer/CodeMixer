@@ -18,16 +18,7 @@ public struct DebugTerminalSheet: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: Theme.spacing.s8) {
-            HStack {
-                Text("Debug terminal").font(Theme.typography.title)
-                Spacer()
-                Button("Done", action: onClose)
-                    .keyboardShortcut(.cancelAction)
-            }
-            .padding(.horizontal, Theme.spacing.s16)
-            .padding(.top, Theme.spacing.s16)
-
+        Group {
             if snapshotText == nil {
                 EmptyState(system: "terminal",
                            title: "No local terminal",
@@ -49,8 +40,17 @@ public struct DebugTerminalSheet: View {
                 .background(Theme.surface.card)
             }
         }
-        .frame(minWidth: Theme.layout.debugTerminalMinWidth, minHeight: Theme.layout.debugTerminalMinHeight)
+        .frame(minWidth: Theme.layout.debugTerminalMinWidth,
+               minHeight: Theme.layout.debugTerminalMinHeight)
         .background(Theme.surface.canvas)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Done", action: onClose)
+                    .keyboardShortcut(.cancelAction)
+                    .accessibilityLabel("Close debug terminal")
+            }
+        }
+        .movablePanelTitle("Debug Terminal")
         .task { await refreshLoop() }
     }
 

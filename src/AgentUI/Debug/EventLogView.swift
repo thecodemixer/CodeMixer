@@ -14,37 +14,34 @@ public struct EventLogView: View {
     public init(bus: MulticastEventBus) { self.bus = bus }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("Event log").font(Theme.typography.title)
-                Spacer()
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 2) {
+                ForEach(lines) { line in
+                    HStack(spacing: Theme.spacing.s8) {
+                        Text(line.timestamp).font(Theme.typography.caption)
+                            .foregroundStyle(Theme.text.tertiary)
+                            .monospacedDigit()
+                        Pill(label: line.kind, tint: line.tint)
+                        Text(line.body).font(Theme.typography.monoSmall)
+                            .fontDesign(.monospaced)
+                            .textSelection(.enabled)
+                            .lineLimit(2)
+                    }
+                    .padding(.horizontal, Theme.spacing.s12)
+                }
+            }
+            .padding(.vertical, Theme.spacing.s8)
+        }
+        .background(Theme.surface.canvas)
+        .frame(minWidth: Theme.layout.eventLogMinWidth,
+               minHeight: Theme.layout.eventLogMinHeight)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
                 Button("Clear") { lines.removeAll() }
-                    .buttonStyle(.bordered).controlSize(.small)
                     .accessibilityLabel("Clear event log")
             }
-            .padding(Theme.spacing.s12)
-
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
-                    ForEach(lines) { line in
-                        HStack(spacing: Theme.spacing.s8) {
-                            Text(line.timestamp).font(Theme.typography.caption)
-                                .foregroundStyle(Theme.text.tertiary)
-                                .monospacedDigit()
-                            Pill(label: line.kind, tint: line.tint)
-                            Text(line.body).font(Theme.typography.monoSmall)
-                                .fontDesign(.monospaced)
-                                .textSelection(.enabled)
-                                .lineLimit(2)
-                        }
-                        .padding(.horizontal, Theme.spacing.s12)
-                    }
-                }
-                .padding(.vertical, Theme.spacing.s8)
-            }
-            .background(Theme.surface.canvas)
         }
-        .frame(minWidth: Theme.layout.eventLogMinWidth, minHeight: Theme.layout.eventLogMinHeight)
+        .movablePanelTitle("Event Log")
         .onAppear { startTailing() }
         .onDisappear { subscriptionTask?.cancel() }
     }

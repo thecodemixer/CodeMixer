@@ -9,20 +9,7 @@ public struct SilentDiagnosticsView: View {
     public init() {}
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: Theme.spacing.s12) {
-            HStack {
-                Text("Silent recovery log")
-                    .font(Theme.typography.title)
-                Spacer()
-                Button("Clear") {
-                    Task {
-                        await SilentDiagnostics.shared.clear()
-                        records = await SilentDiagnostics.shared.snapshot()
-                    }
-                }
-                .accessibilityLabel("Clear silent recovery log")
-            }
-
+        Group {
             if records.isEmpty {
                 Text("No silent recoveries recorded.")
                     .font(Theme.typography.body)
@@ -66,6 +53,18 @@ public struct SilentDiagnosticsView: View {
         .frame(minWidth: Theme.layout.eventLogMinWidth,
                minHeight: Theme.layout.eventLogMinHeight)
         .background(Theme.surface.canvas)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button("Clear") {
+                    Task {
+                        await SilentDiagnostics.shared.clear()
+                        records = await SilentDiagnostics.shared.snapshot()
+                    }
+                }
+                .accessibilityLabel("Clear silent recovery log")
+            }
+        }
+        .movablePanelTitle("Silent Recovery Log")
         .onAppear { startPolling() }
         .onDisappear {
             refreshTask?.cancel()

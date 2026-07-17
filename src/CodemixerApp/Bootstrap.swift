@@ -17,9 +17,9 @@ final class Bootstrap {
     var remoteFingerprint: String?
     var remoteHost: RemoteControlServer.BindHost = .loopback
     var showProjectPicker: Bool = false
+    var showOpenProject: Bool = false
     var showNewProjectSheet: Bool = false
     var showNewWorkspaceSheet: Bool = false
-    var showSettings: Bool = false
     var showDebugTerminal: Bool = false
     var showEventLog: Bool = false
     var showSilentDiagnostics: Bool = false
@@ -112,7 +112,7 @@ final class Bootstrap {
         startAppEventBridge(bus: engine.bus)
 
         // Restore the last open workspace when the user did not Close Workspace.
-        // Otherwise show the blank landing (File → Open Project remains available).
+        // Otherwise show the blank landing (File → Open Workspace remains available).
         if let active = await projectsStore.activeWorkspaceURL() {
             await openWorkspace(active, resumeSessionID: nil)
         }
@@ -122,13 +122,19 @@ final class Bootstrap {
         // intrusive for a local-only chat launch.
     }
 
-    /// Reliable entry point for File → Open Project. Mutating the flag through
-    /// a method (rather than a menu closure capturing `@State`) keeps SwiftUI
-    /// observation wired when the sheet was previously dismissed.
+    /// File → Open Workspace: shows the recents picker so the user can switch
+    /// to an existing workspace or choose a new folder.
     func presentProjectPicker() {
         pendingConfigureURL = nil
         pendingConfigureResumeSessionID = nil
         showProjectPicker = true
+    }
+
+    /// File → Open Project: shows the same project picker dialog.
+    func presentOpenProject() {
+        pendingConfigureURL = nil
+        pendingConfigureResumeSessionID = nil
+        showOpenProject = true
     }
 
     /// File → New Workspace: dedicated sheet for name + parent folder + project type.

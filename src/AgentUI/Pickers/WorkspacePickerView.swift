@@ -2,23 +2,26 @@ import SwiftUI
 import AgentCore
 import AgentProtocol
 
-/// Project picker shown when the workspace isn't set yet, or via File → Open Project.
+/// Workspace picker shown when no workspace is open, or via File → Open Workspace.
 ///
 /// Recents only — agent mode is resolved from `<project>/.codemixer/project.json`
 /// (or the workspace index). Folders without a stored mode are handed back to
 /// the caller so they can present a configuration sheet.
-public struct ProjectPickerView: View {
+public struct WorkspacePickerView: View {
     private let memoryFiles = ProjectMemoryFile()
 
     public let recent: [SessionStore.ProjectRecord]
     public let onOpen: (URL, _ resumeSessionID: String?) -> Void
+    public let onCancel: () -> Void
 
     @State private var selection: SessionStore.ProjectRecord?
     @State private var searchText: String = ""
 
     public init(recent: [SessionStore.ProjectRecord],
+                onCancel: @escaping () -> Void = {},
                 onOpen: @escaping (URL, _ resumeSessionID: String?) -> Void) {
         self.recent = recent
+        self.onCancel = onCancel
         self.onOpen = onOpen
     }
 
@@ -38,7 +41,7 @@ public struct ProjectPickerView: View {
                     .accessibilityHidden(true)
                     .font(Theme.typography.heroIcon)
                     .foregroundStyle(Theme.text.tertiary)
-                Text("Open a project")
+                Text("Open a workspace")
                     .font(Theme.typography.title)
                 Text("Pick a recent folder, or choose one from disk.")
                     .font(Theme.typography.caption)
@@ -127,6 +130,9 @@ public struct ProjectPickerView: View {
             }
 
             HStack(spacing: Theme.spacing.s12) {
+                Button("Cancel", action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                    .accessibilityLabel("Cancel open workspace")
                 Button("Choose Folder…") { chooseFolder() }
                     .buttonStyle(.bordered)
                 if let sel = selection {
@@ -144,7 +150,8 @@ public struct ProjectPickerView: View {
             }
             .padding(.bottom, Theme.spacing.s24)
         }
-        .frame(minWidth: Theme.layout.projectPickerMinWidth, minHeight: Theme.layout.projectPickerMinHeight)
+        .frame(width: Theme.layout.projectPickerWidth)
+        .fixedSize(horizontal: true, vertical: true)
         .background(Theme.surface.canvas)
     }
 
@@ -163,14 +170,14 @@ public struct ProjectPickerView: View {
 }
 
 #if DEBUG
-#Preview("Project picker – Light") {
-    ProjectPickerView(recent: PreviewFixtures.recentProjects) { _, _ in }
+#Preview("Workspace picker – Light") {
+    WorkspacePickerView(recent: PreviewFixtures.recentProjects) { _, _ in }
         .frame(width: 480, height: 420)
         .preferredColorScheme(.light)
 }
 
-#Preview("Project picker – Dark") {
-    ProjectPickerView(recent: PreviewFixtures.recentProjects) { _, _ in }
+#Preview("Workspace picker – Dark") {
+    WorkspacePickerView(recent: PreviewFixtures.recentProjects) { _, _ in }
         .frame(width: 480, height: 420)
         .preferredColorScheme(.dark)
 }
