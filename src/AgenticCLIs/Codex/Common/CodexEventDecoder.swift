@@ -65,10 +65,13 @@ public actor CodexEventDecoder {
             let queued = CodexInputEncoding.queuedTurns(state: state)
             let replies = queued.isEmpty ? [] : [queued]
             let model = result?["thread"]?["model"]?.stringValue
-            return Batch(
-                events: [.sessionStarted(sessionID: threadID, model: model, cwd: workspace)],
-                replies: replies
-            )
+            var events: [AgentEvent] = [
+                .sessionStarted(sessionID: threadID, model: model, cwd: workspace),
+            ]
+            if let turns = result?["thread"]?["turns"]?.arrayValue, !turns.isEmpty {
+                events.append(contentsOf: CodexThreadHistoryReplay.events(from: turns, random: random))
+            }
+            return Batch(events: events, replies: replies)
 
         case .turnStart(let title):
             guard let turnID = result?["turn"]?["id"]?.stringValue else {

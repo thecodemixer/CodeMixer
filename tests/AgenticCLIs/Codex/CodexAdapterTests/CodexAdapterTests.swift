@@ -63,6 +63,57 @@ struct CodexAdapterTests {
         #expect(!adapter.buildLaunchArgv(context: context).contains("thr_123"))
     }
 
+    @Test("Thread resume replays reconstructed turn history into Codemixer events")
+    func threadResumeReplaysHistory() async throws {
+        let adapter = CodexAdapter(
+            environment: FakeEnvironment(),
+            fileSystem: InMemoryFileSystem(),
+            clock: FakeClock(),
+            random: FakeRandomSource()
+        )
+        let context = LaunchContext(
+            workspace: URL(fileURLWithPath: "/tmp/project"),
+            resumeSessionID: "thread-1"
+        )
+        _ = adapter.sessionBootstrapBytes(context: context)
+        var outputContinuation: AsyncStream<Data>.Continuation!
+        let output = AsyncStream<Data> { outputContinuation = $0 }
+        let stream = adapter.makeEventStream(inputs: AgentInputs(
+            outputBytes: output,
+            writeBytes: { _ in },
+            terminal: nil,
+            hookSocket: nil,
+            workspace: context.workspace,
+            sessionID: AsyncStream { $0.finish() }
+        ))
+        var iterator = stream.makeAsyncIterator()
+
+        outputContinuation.yield(Self.frame(
+            #"{"id":2,"result":{"thread":{"id":"thread-1","turns":[{"id":"turn-1","items":[{"type":"userMessage","id":"u1","content":[{"type":"text","text":"hello"}]},{"type":"agentMessage","id":"a1","text":"hi there"}]}]}}}"#
+        ))
+
+        guard case .sessionStarted(let id, _, _) = await iterator.next() else {
+            Issue.record("Expected sessionStarted")
+            return
+        }
+        #expect(id == "thread-1")
+
+        guard case .userTurn(_, let userText) = await iterator.next() else {
+            Issue.record("Expected userTurn")
+            return
+        }
+        #expect(userText == "hello")
+
+        guard case .assistantText(_, _, let assistantText, let isFinal) = await iterator.next() else {
+            Issue.record("Expected assistantText")
+            return
+        }
+        #expect(assistantText == "hi there")
+        #expect(isFinal)
+
+        outputContinuation.finish()
+    }
+
     @Test("Binary override wins over PATH and fallback directories")
     func binaryOverridePrecedence() throws {
         let fileSystem = InMemoryFileSystem()
