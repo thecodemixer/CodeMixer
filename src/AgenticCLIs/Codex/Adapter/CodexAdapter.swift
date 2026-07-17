@@ -26,6 +26,7 @@ public final class CodexAdapter: AgentAdapter {
     private let binaryLocator: CodexBinaryLocator
     private let state: CodexSessionState
     private let threadIndex: CodexThreadIndex
+    private let modelCache: CodexModelCache
 
     private static let clientVersion = "0.1.0"
 
@@ -33,7 +34,8 @@ public final class CodexAdapter: AgentAdapter {
                 fileSystem: any FileSystem = SystemFileSystem(),
                 clock: any AgentClock = SystemClock(),
                 random: any RandomSource = SystemRandomSource(),
-                processRunner: ProcessRunner = ProcessRunner()) {
+                processRunner: ProcessRunner = ProcessRunner(),
+                initialModels: [AgentModelOption] = []) {
         self.environment = environment
         self.fileSystem = fileSystem
         self.clock = clock
@@ -49,6 +51,7 @@ public final class CodexAdapter: AgentAdapter {
             fileSystem: fileSystem,
             clock: clock
         )
+        self.modelCache = CodexModelCache(models: initialModels)
     }
 
     public func locateBinary(env: ResolvedEnvironment) async throws -> URL {
@@ -197,7 +200,11 @@ public final class CodexAdapter: AgentAdapter {
                 state: state
             )
         case .selectModel(let id):
-            state.selectModel(id)
+            if let option = availableModels().first(where: { $0.code == id }) {
+                state.selectModel(option)
+            } else {
+                state.selectModel(code: id, thinkingEffort: nil)
+            }
             return Data()
         case .setPermissionMode, .toggleThinkMode:
             return nil
@@ -240,7 +247,17 @@ public final class CodexAdapter: AgentAdapter {
     }
 
     public func availableModels() -> [AgentModelOption] {
-        CodexModelCatalog.builtIn
+        let cached = modelCache.snapshot()
+        if !cached.isEmpty { return cached }
+        let loaded = CodexModelCatalog.load(
+            codexHome: environment.homeDirectory
+                .appendingPathComponent(".codex", isDirectory: true),
+            fileSystem: fileSystem
+        )
+        if !loaded.isEmpty {
+            modelCache.replace(with: loaded)
+        }
+        return loaded
     }
 
     public func availableAgentModes() -> [AgentModeOption] {
@@ -286,5 +303,27 @@ public final class CodexAdapter: AgentAdapter {
             summary: "Codex auth status unknown",
             details: hint
         )
+    }
+}
+
+/// Thread-safe snapshot of Codex models loaded from `models_cache.json`.
+private final class CodexModelCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private var models: [AgentModelOption]
+
+    init(models: [AgentModelOption]) {
+        self.models = models
+    }
+
+    func snapshot() -> [AgentModelOption] {
+        lock.lock()
+        defer { lock.unlock() }
+        return models
+    }
+
+    func replace(with models: [AgentModelOption]) {
+        lock.lock()
+        defer { lock.unlock() }
+        self.models = models
     }
 }

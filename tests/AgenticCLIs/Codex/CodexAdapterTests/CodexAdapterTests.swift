@@ -2,6 +2,7 @@ import Foundation
 import Testing
 
 import AgentCore
+import AgentProtocol
 import AgentTestSupport
 import Codex
 
@@ -470,6 +471,140 @@ struct CodexAdapterTests {
         let modes = CodexAdapter().availableAgentModes()
         #expect(modes.map(\.id) == ["agent", "review"])
         #expect(modes.map(\.label) == ["Agent", "Review"])
+    }
+
+    @Test("Model catalog parses models_cache.json into code name and efforts")
+    func modelCatalogParsesCache() {
+        let json = """
+        {
+          "models": [
+            {
+              "slug": "gpt-5.6-sol",
+              "display_name": "GPT-5.6-Sol",
+              "default_reasoning_level": "medium",
+              "priority": 1,
+              "visibility": "list",
+              "supported_reasoning_levels": [
+                {"effort": "low", "description": "Fast"},
+                {"effort": "medium", "description": "Balanced"},
+                {"effort": "high", "description": "Deep"}
+              ]
+            },
+            {
+              "slug": "hidden-model",
+              "display_name": "Hidden",
+              "visibility": "hide",
+              "priority": 0,
+              "supported_reasoning_levels": []
+            },
+            {
+              "slug": "gpt-5.6-terra",
+              "display_name": "GPT-5.6-Terra",
+              "default_reasoning_level": "high",
+              "priority": 2,
+              "visibility": "list",
+              "supported_reasoning_levels": [
+                {"effort": "high", "description": "Deep"}
+              ]
+            }
+          ]
+        }
+        """
+        let models = CodexModelCatalog.parseCache(Data(json.utf8))
+        #expect(models.map(\.code) == ["gpt-5.6-sol", "gpt-5.6-terra"])
+        #expect(models.map(\.name) == ["GPT-5.6 Sol", "GPT-5.6 Terra"])
+        #expect(models.map(\.thinkingEffort) == ["medium", "high"])
+        #expect(models[0].supportedThinkingEfforts.map(\.code) == ["low", "medium", "high"])
+        #expect(models[0].id == "gpt-5.6-sol")
+        #expect(models[0].label == "GPT-5.6 Sol")
+    }
+
+    @Test("availableModels loads from Codex models_cache.json")
+    func availableModelsLoadsCache() throws {
+        let env = FakeEnvironment()
+        let fs = InMemoryFileSystem()
+        let codexHome = env.homeDirectory.appendingPathComponent(".codex", isDirectory: true)
+        try fs.createDirectory(at: codexHome, withIntermediates: true)
+        let cache = """
+        {
+          "models": [
+            {
+              "slug": "gpt-5.6-sol",
+              "display_name": "GPT-5.6-Sol",
+              "default_reasoning_level": "medium",
+              "priority": 1,
+              "visibility": "list",
+              "supported_reasoning_levels": [
+                {"effort": "medium", "description": "Balanced"}
+              ]
+            }
+          ]
+        }
+        """
+        try fs.writeAtomically(
+            Data(cache.utf8),
+            to: codexHome.appendingPathComponent("models_cache.json")
+        )
+
+        let adapter = CodexAdapter(
+            environment: env,
+            fileSystem: fs,
+            clock: FakeClock(),
+            random: FakeRandomSource()
+        )
+        let models = adapter.availableModels()
+        #expect(models.map(\.code) == ["gpt-5.6-sol"])
+        #expect(models.first?.thinkingEffort == "medium")
+    }
+
+    @Test("Selecting a cached model sends code and thinking effort on turn/start")
+    func selectModelSendsEffort() async throws {
+        let option = AgentModelOption(
+            code: "gpt-5.6-sol",
+            name: "GPT-5.6 Sol",
+            thinkingEffort: "medium",
+            supportedThinkingEfforts: [
+                .init(code: "medium", summary: "Balanced"),
+            ]
+        )
+        let adapter = CodexAdapter(
+            environment: FakeEnvironment(),
+            fileSystem: InMemoryFileSystem(),
+            clock: FakeClock(),
+            random: FakeRandomSource(),
+            initialModels: [option]
+        )
+        let context = LaunchContext(workspace: URL(fileURLWithPath: "/tmp/project"))
+        _ = adapter.sessionBootstrapBytes(context: context)
+        let recorder = DataRecorder()
+        var outputContinuation: AsyncStream<Data>.Continuation!
+        let output = AsyncStream<Data> { outputContinuation = $0 }
+        let stream = adapter.makeEventStream(inputs: AgentInputs(
+            outputBytes: output,
+            writeBytes: { await recorder.append($0) },
+            terminal: nil,
+            hookSocket: nil,
+            workspace: context.workspace,
+            sessionID: AsyncStream { $0.finish() }
+        ))
+        var iterator = stream.makeAsyncIterator()
+
+        #expect(adapter.encodeCommand(.selectModel(id: "gpt-5.6-sol"))?.isEmpty == true)
+        #expect(adapter.encodeUserPrompt("go").isEmpty)
+        outputContinuation.yield(Self.frame(
+            #"{"id":2,"result":{"thread":{"id":"thread-1","model":"gpt-5.6-sol"}}}"#
+        ))
+
+        guard case .sessionStarted = await iterator.next() else {
+            Issue.record("Expected sessionStarted")
+            return
+        }
+        let replies = await recorder.snapshot()
+        #expect(replies.count == 1)
+        let turn = try Self.decodeSingleFrame(replies[0])
+        #expect(turn["params"]?["model"]?.stringValue == "gpt-5.6-sol")
+        #expect(turn["params"]?["effort"]?.stringValue == "medium")
+        outputContinuation.finish()
     }
 
     private static func frame(_ json: String) -> Data {

@@ -112,7 +112,11 @@ public final class CodexTwin: AgentAdapter {
         case .compact:
             return CodexInputEncoding.compact(state: state)
         case .selectModel(let id):
-            state.selectModel(id)
+            if let option = availableModels().first(where: { $0.code == id }) {
+                state.selectModel(option)
+            } else {
+                state.selectModel(code: id, thinkingEffort: nil)
+            }
             return Data()
         case .toggleReviewMode(let enabled):
             return enabled ? CodexInputEncoding.review(state: state) : nil
@@ -174,7 +178,7 @@ public final class CodexTwin: AgentAdapter {
     public func resumeArgvAddition(sessionID: String) -> [String] { [] }
 
     public func availableModels() -> [AgentModelOption] {
-        CodexModelCatalog.builtIn
+        []
     }
 
     public func truncateTranscript(afterUserTurnID turnID: String,

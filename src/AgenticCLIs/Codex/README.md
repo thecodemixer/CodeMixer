@@ -14,6 +14,10 @@ linked.
   `thread/start` or `thread/resume`.
 - Fresh threads send `cwd`, `approvalPolicy`, and `sandbox`. The adapter does
   not send the experimental `permissions` field alongside `sandbox`.
+- Model picker options come from `~/.codex/models_cache.json` (same catalog as
+  the Codex TUI). Each `AgentModelOption` carries `code`, `name`, default
+  `thinkingEffort`, and `supportedThinkingEfforts`. Selected model + effort are
+  sent on `turn/start` as `model` and `effort`.
 
 ## Input and lifecycle
 

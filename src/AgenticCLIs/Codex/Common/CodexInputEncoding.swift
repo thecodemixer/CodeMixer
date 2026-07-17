@@ -48,6 +48,9 @@ public enum CodexInputEncoding {
         if let model = state.selectedModel() {
             params["model"] = .string(model)
         }
+        if let effort = state.selectedThinkingEffort() {
+            params["effort"] = .string(effort)
+        }
         return CodexRPCCodec.request(
             id: requestID,
             method: "turn/start",
@@ -107,14 +110,18 @@ public enum CodexInputEncoding {
                                    state: CodexSessionState) -> Data {
         let id = state.nextRequestID(for: .threadStart)
         let policy = CodexPolicyMapping.policy(for: context.permissionMode)
+        var params: [String: JSONValue] = [
+            "cwd": .string(context.workspace.path),
+            "approvalPolicy": .string(policy.approval.rawValue),
+            "sandbox": .string(policy.sandbox.rawValue),
+        ]
+        if let model = state.selectedModel() {
+            params["model"] = .string(model)
+        }
         return CodexRPCCodec.request(
             id: id,
             method: "thread/start",
-            params: .object([
-                "cwd": .string(context.workspace.path),
-                "approvalPolicy": .string(policy.approval.rawValue),
-                "sandbox": .string(policy.sandbox.rawValue),
-            ])
+            params: .object(params)
         )
     }
 

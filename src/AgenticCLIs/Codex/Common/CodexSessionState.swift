@@ -43,7 +43,8 @@ public final class CodexSessionState: @unchecked Sendable {
     private var itemIDs: [String: UUID] = [:]
     private var itemStartedAt: [String: Date] = [:]
     private var assistantTextByItemID: [String: String] = [:]
-    private var selectedModelStorage: String?
+    private var selectedModelCodeStorage: String?
+    private var selectedThinkingEffortStorage: String?
 
     public init() {}
 
@@ -63,7 +64,8 @@ public final class CodexSessionState: @unchecked Sendable {
             itemIDs.removeAll()
             itemStartedAt.removeAll()
             assistantTextByItemID.removeAll()
-            selectedModelStorage = nil
+            selectedModelCodeStorage = nil
+            selectedThinkingEffortStorage = nil
         }
     }
 
@@ -189,12 +191,23 @@ public final class CodexSessionState: @unchecked Sendable {
         _ = withLock { assistantTextByItemID.removeValue(forKey: itemID) }
     }
 
-    func selectModel(_ id: String) {
-        withLock { selectedModelStorage = id }
+    func selectModel(_ option: AgentModelOption) {
+        selectModel(code: option.code, thinkingEffort: option.thinkingEffort)
+    }
+
+    func selectModel(code: String, thinkingEffort: String?) {
+        withLock {
+            selectedModelCodeStorage = code
+            selectedThinkingEffortStorage = thinkingEffort
+        }
     }
 
     func selectedModel() -> String? {
-        withLock { selectedModelStorage }
+        withLock { selectedModelCodeStorage }
+    }
+
+    func selectedThinkingEffort() -> String? {
+        withLock { selectedThinkingEffortStorage }
     }
 
     private func withLock<Value>(_ operation: () -> Value) -> Value {
