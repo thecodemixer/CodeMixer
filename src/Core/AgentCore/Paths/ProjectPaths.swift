@@ -2,7 +2,7 @@ import Foundation
 
 /// On-disk layout for Codemixer state inside a project or workspace folder.
 ///
-/// - `<root>/.codemixer/project.json` — per-project agent mode + display name
+/// - `<root>/.codemixer/project.json` — per-project type + display name
 /// - `<root>/.codemixer/workspace.json` — workspace catalog of member projects
 ///
 /// These travel with the folder (clone, zip, move) rather than living only in

@@ -465,6 +465,13 @@ struct CodexAdapterTests {
         #expect(success)
     }
 
+    @Test("agent modes expose agent and review for composer")
+    func agentModes() {
+        let modes = CodexAdapter().availableAgentModes()
+        #expect(modes.map(\.id) == ["agent", "review"])
+        #expect(modes.map(\.label) == ["Agent", "Review"])
+    }
+
     private static func frame(_ json: String) -> Data {
         CodexAppServerFraming.frame(Data(json.utf8))
     }

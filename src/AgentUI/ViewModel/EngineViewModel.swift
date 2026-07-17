@@ -48,6 +48,10 @@ public final class EngineViewModel {
     public internal(set) var appearancePrefs: AppearancePrefs = .init()
     public internal(set) var autoApprovalRules: [AutoApprovalRule] = []
     public var availableModels: [AgentModelOption] = []
+    /// Session modes published by the active adapter for the composer dropdown.
+    public var availableAgentModes: [AgentModeOption] = []
+    /// Currently selected composer session mode id (from `availableAgentModes`).
+    public var selectedAgentModeID: String = ""
 
     public var showUsageChip: Bool { appearancePrefs.showUsageChip }
     public var showSilentRecoveryLog: Bool { appearancePrefs.showSilentRecoveryLog }

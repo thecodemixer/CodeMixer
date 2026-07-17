@@ -257,6 +257,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // AgentEventWire
 // AgentID
 // AgentInputs
+// AgentModeOption
 // AgentModelOption
 // AgentTransportDescriptor
 // AgentTransportError
@@ -432,7 +433,6 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // PrefsStore
 // ProcessError
 // ProcessRunner
-// ProjectAgentMode
 // ProjectAgentRouter
 // ProjectLocalState
 // ProjectLocalStateStore
@@ -440,6 +440,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // ProjectPickerView
 // ProjectRecord
 // ProjectRef
+// ProjectType
 // PromptComposerView
 // RPCError
 // RandomSource
@@ -555,7 +556,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // agentClientProtocol
 // agentError
 // agentID
-// agentMode
+// agentModes
 // agentPickerMinHeight
 // agentPickerMinWidth
 // all
@@ -589,6 +590,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // authURL
 // authenticate
 // autoApprovalRules
+// availableAgentModes
 // availableModels
 // banner
 // bearerToken
@@ -971,12 +973,12 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // projectCommands
 // projectDirectory
 // projectFileName
-// projectMode
 // projectPickerMaxHeight
 // projectPickerMinHeight
 // projectPickerMinWidth
 // projectSlug
 // projectStateURL
+// projectType
 // projectURL
 // projects
 // prominentName
@@ -1046,7 +1048,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // resolve
 // resolveAdapter
 // resolveAdapterID
-// resolveAgentMode
+// resolveProjectType
 // resolvedSessionID
 // respond
 // response
@@ -1084,7 +1086,9 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // scenario
 // schemaVersion
 // secondary
+// selectCommands
 // selectProject
+// selectedAgentModeID
 // send
 // sendPrompt
 // serviceType
@@ -1102,10 +1106,10 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // sessions
 // sessionsFileName
 // sessionsURL
-// setAgentMode
 // setConnectedRemoteClients
 // setLANEnabled
 // setMode
+// setProjectType
 // settingsMinHeight
 // settingsMinWidth
 // settingsURL

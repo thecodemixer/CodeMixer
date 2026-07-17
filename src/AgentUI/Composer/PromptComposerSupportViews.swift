@@ -11,8 +11,6 @@ private enum WorkspaceFilePickerLimits {
 
 struct ComposerModeModelMenus: View {
     @Bindable var model: EngineViewModel
-    @Binding var thinkOn: Bool
-    @Binding var reviewOn: Bool
     @Binding var selectedModelID: String
 
     @State private var showModeMenu = false
@@ -23,15 +21,25 @@ struct ComposerModeModelMenus: View {
     /// Vertical gap between the dropdown panel and its trigger button.
     private static let dropdownGap: CGFloat = Theme.spacing.s4
 
+    private var selectedModeLabel: String {
+        model.availableAgentModes.first { $0.id == model.selectedAgentModeID }?.label
+            ?? model.availableAgentModes.first?.label
+            ?? "Mode"
+    }
+
     var body: some View {
         HStack(spacing: Theme.spacing.s24) {
-            modeMenu
-            ComposerModelMenu(
-                model: model,
-                selectedModelID: $selectedModelID,
-                isOpen: $showModelMenu,
-                closeOtherMenus: { showModeMenu = false }
-            )
+            if !model.availableAgentModes.isEmpty {
+                modeMenu
+            }
+            if !model.availableModels.isEmpty {
+                ComposerModelMenu(
+                    model: model,
+                    selectedModelID: $selectedModelID,
+                    isOpen: $showModelMenu,
+                    closeOtherMenus: { showModeMenu = false }
+                )
+            }
         }
     }
 
@@ -43,34 +51,23 @@ struct ComposerModeModelMenus: View {
         }
         .buttonStyle(.plain)
         .fixedSize()
-        .accessibilityLabel("Mode \(thinkOn ? "Think" : (reviewOn ? "Review" : "Agent"))")
+        .accessibilityLabel("Mode \(selectedModeLabel)")
         .overlay(alignment: .top) {
             if showModeMenu {
                 ComposerDropdownPanel(
-                    options: [
-                        ComposerDropdownOption(id: "agent", title: "Agent",
-                                              isSelected: !thinkOn && !reviewOn) {
-                            thinkOn = false
-                            reviewOn = false
-                            model.send(.toggleThinkMode(enabled: false))
-                            model.send(.toggleReviewMode(enabled: false))
+                    options: model.availableAgentModes.map { option in
+                        ComposerDropdownOption(
+                            id: option.id,
+                            title: option.label,
+                            isSelected: option.id == model.selectedAgentModeID
+                        ) {
+                            model.selectedAgentModeID = option.id
+                            for command in option.selectCommands {
+                                model.send(command)
+                            }
                             showModeMenu = false
-                        },
-                        ComposerDropdownOption(id: "think", title: "Think",
-                                              isSelected: thinkOn) {
-                            thinkOn = true
-                            reviewOn = false
-                            model.send(.toggleThinkMode(enabled: true))
-                            showModeMenu = false
-                        },
-                        ComposerDropdownOption(id: "review", title: "Review",
-                                              isSelected: reviewOn) {
-                            thinkOn = false
-                            reviewOn = true
-                            model.send(.toggleReviewMode(enabled: true))
-                            showModeMenu = false
-                        },
-                    ],
+                        }
+                    },
                     onDismiss: { showModeMenu = false }
                 )
                 .positionedAboveAnchor(height: $modeMenuHeight, gap: Self.dropdownGap)
@@ -94,7 +91,7 @@ struct ComposerModeModelMenus: View {
         HStack(spacing: Theme.spacing.s4) {
             Image(systemName: "infinity")
                 .accessibilityHidden(true)
-            Text(thinkOn ? "Think" : (reviewOn ? "Review" : "Agent"))
+            Text(selectedModeLabel)
             Image(systemName: "chevron.down")
                 .accessibilityHidden(true)
                 .font(Theme.typography.iconSmall)

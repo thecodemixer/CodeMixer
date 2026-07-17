@@ -129,6 +129,12 @@ extension EngineViewModel {
             pendingPermission = nil
         case .statusPhraseChanged(_, let phrase):
             status = .working(phrase: phrase)
+            if phrase.hasPrefix("Mode: ") {
+                let modeID = String(phrase.dropFirst("Mode: ".count))
+                if availableAgentModes.contains(where: { $0.id == modeID }) {
+                    selectedAgentModeID = modeID
+                }
+            }
         case .activityStateChanged(let substate):
             activity = substate
             if substate == .idle { settleTurnIdle() }

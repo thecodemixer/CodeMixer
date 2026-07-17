@@ -4,7 +4,7 @@ import OSLog
 /// Versioned workspace catalog stored inside the workspace folder.
 ///
 /// Lists the projects belonging to this workspace so the membership travels
-/// with the folder. Per-project agent mode still lives in each project's
+/// with the folder. Per-project type still lives in each project's
 /// `.codemixer/project.json`; this file is the ordered index.
 public struct WorkspaceLocalState: Sendable, Codable, Hashable {
     public static let currentSchemaVersion = 1

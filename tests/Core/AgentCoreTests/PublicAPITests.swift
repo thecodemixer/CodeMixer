@@ -178,34 +178,34 @@ struct SessionSummaryTests {
     }
 }
 
-@Suite("ProjectAgentMode — routing metadata")
-struct ProjectAgentModeTests {
-    @Test("Pinned modes expose primary agent ids and labels")
-    func pinnedModes() {
-        #expect(ProjectAgentMode.claudeCode.primaryAgentID == .claudeCode)
-        #expect(ProjectAgentMode.codex.primaryAgentID == .codex)
-        #expect(ProjectAgentMode.cursorCLI.primaryAgentID == .cursorCLI)
-        #expect(ProjectAgentMode.claudeCode.shortLabel == "Claude")
-        #expect(ProjectAgentMode.codex.shortLabel == "Codex")
-        #expect(ProjectAgentMode.cursorCLI.shortLabel == "Cursor")
+@Suite("ProjectType — routing metadata")
+struct ProjectTypeTests {
+    @Test("Pinned project types expose primary agent ids and labels")
+    func pinnedTypes() {
+        #expect(ProjectType.claudeCode.primaryAgentID == .claudeCode)
+        #expect(ProjectType.codex.primaryAgentID == .codex)
+        #expect(ProjectType.cursorCLI.primaryAgentID == .cursorCLI)
+        #expect(ProjectType.claudeCode.shortLabel == "Claude")
+        #expect(ProjectType.codex.shortLabel == "Codex")
+        #expect(ProjectType.cursorCLI.shortLabel == "Cursor")
         #expect(SupportedBuiltInAgent.shipping.map(\.id) == [.claudeCode, .codex, .cursorCLI])
     }
 
-    @Test("Mixed mode carries optional default agent")
+    @Test("Mixed project type carries optional default agent")
     func mixedDefault() {
-        let mode = ProjectAgentMode.mixed(defaultAgent: .codex)
+        let mode = ProjectType.mixed(defaultAgent: .codex)
         #expect(mode.primaryAgentID == .codex)
         #expect(mode.shortLabel == "Mixed")
     }
 
-    @Test("Custom mode stores executable metadata")
-    func customMode() {
+    @Test("Custom project type stores executable metadata")
+    func customType() {
         let ref = CustomAgentRef(id: "local-tool",
                                  displayName: "Local Tool",
                                  transport: .stdioJSONRPC,
                                  executablePath: "/usr/local/bin/local-tool",
                                  arguments: ["serve"])
-        let mode = ProjectAgentMode.custom(ref)
+        let mode = ProjectType.custom(ref)
         #expect(mode.primaryAgentID == .other)
         #expect(mode.shortLabel == "Local Tool")
         #expect(ref.executablePath == "/usr/local/bin/local-tool")
@@ -214,22 +214,37 @@ struct ProjectAgentModeTests {
 
 @Suite("ProjectAgentRouter — adapter id resolution")
 struct ProjectAgentRouterTests {
-    @Test("Pinned modes resolve directly")
-    func pinnedModes() {
-        #expect(ProjectAgentRouter.resolveAdapterID(mode: .claudeCode) == .claudeCode)
-        #expect(ProjectAgentRouter.resolveAdapterID(mode: .codex) == .codex)
-        #expect(ProjectAgentRouter.resolveAdapterID(mode: .cursorCLI) == .cursorCLI)
+    @Test("Pinned project types resolve directly")
+    func pinnedTypes() {
+        #expect(ProjectAgentRouter.resolveAdapterID(projectType: .claudeCode) == .claudeCode)
+        #expect(ProjectAgentRouter.resolveAdapterID(projectType: .codex) == .codex)
+        #expect(ProjectAgentRouter.resolveAdapterID(projectType: .cursorCLI) == .cursorCLI)
     }
 
-    @Test("Mixed mode prefers session then explicit preference then default")
+    @Test("Mixed project type prefers session then explicit preference then default")
     func mixedPrecedence() {
-        let mode = ProjectAgentMode.mixed(defaultAgent: .claudeCode)
-        #expect(ProjectAgentRouter.resolveAdapterID(mode: mode,
+        let mode = ProjectType.mixed(defaultAgent: .claudeCode)
+        #expect(ProjectAgentRouter.resolveAdapterID(projectType: mode,
                                                     sessionAgentID: .codex,
                                                     preferredForNewChat: .claudeCode) == .codex)
-        #expect(ProjectAgentRouter.resolveAdapterID(mode: mode,
+        #expect(ProjectAgentRouter.resolveAdapterID(projectType: mode,
                                                     preferredForNewChat: .codex) == .codex)
-        #expect(ProjectAgentRouter.resolveAdapterID(mode: mode) == .claudeCode)
+        #expect(ProjectAgentRouter.resolveAdapterID(projectType: mode) == .claudeCode)
+    }
+}
+
+@Suite("AgentModeOption — provider-owned composer modes")
+struct AgentModeOptionTests {
+    @Test("option carries id label and select commands")
+    func fields() {
+        let option = AgentModeOption(
+            id: "plan",
+            label: "Plan",
+            selectCommands: [.setPermissionMode(.plan)]
+        )
+        #expect(option.id == "plan")
+        #expect(option.label == "Plan")
+        #expect(option.selectCommands == [.setPermissionMode(.plan)])
     }
 }
 

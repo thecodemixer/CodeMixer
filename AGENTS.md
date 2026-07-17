@@ -280,8 +280,9 @@ tests/
 2. New SPM library target + product under that path; top-level type conforming to `AgentAdapter`.
 3. Declare `transportDescriptor` (`.interactiveTerminal`, `.stdioJSONRPC`, or a real future ACP descriptor) and the relevant `AgentCapabilities`.
 4. Implement `sessionBootstrapBytes(context:)` and `encodeCommand(_:)` when the agent is not Claude slash-text compatible.
-5. Register at startup: `await AdapterRegistry.shared.register(CodexAdapter())`.
-6. Add a test target under `tests/AgenticCLIs/<AgentName>/` with at least a smoke test that the adapter constructs — see [`tests/AgenticCLIs/README.md`](tests/AgenticCLIs/README.md).
+5. If the CLI has selectable chat modes (Claude Think/Review, Cursor agent/plan/ask, …), override `availableAgentModes()` returning `[AgentModeOption]` — never hardcode the vendor's modes in `AgentUI`; the composer bottom-bar dropdown renders whatever the active adapter publishes.
+6. Register at startup: `await AdapterRegistry.shared.register(CodexAdapter())`.
+7. Add a test target under `tests/AgenticCLIs/<AgentName>/` with at least a smoke test that the adapter constructs — see [`tests/AgenticCLIs/README.md`](tests/AgenticCLIs/README.md).
 7. **Do not** add any import of the new adapter inside `AgentCore` or `AgentUI`.
 
 Full recipe in `docs/reference/patterns/plugin-adapter-protocol.md`.
@@ -507,4 +508,4 @@ If any of those isn't true, you aren't ready to merge yet. That's the bar.
 
 ---
 
-*Last revised after the generic transport + Codex surface landed (AgentTransport, Codex App Server stdio, project agent modes, required agent selection). Update this file in the same PR as any change to module layout, top-level types, or merge gates.*
+*Last revised after the generic transport + Codex surface landed (AgentTransport, Codex App Server stdio, project types, required agent selection). Update this file in the same PR as any change to module layout, top-level types, or merge gates.*

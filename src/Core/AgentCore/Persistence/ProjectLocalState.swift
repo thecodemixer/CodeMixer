@@ -3,26 +3,34 @@ import OSLog
 
 /// Versioned project metadata stored inside the project folder itself.
 ///
-/// Source of truth for `agentMode` when opening a folder: prefer this file over
-/// app-support `workspaces.json` so mode survives moves and is shareable with
-/// the repo. Schema bumps refuse newer files rather than corrupt them.
+/// Source of truth for `projectType` when opening a folder: prefer this file
+/// over app-support `workspaces.json` so the type survives moves and is
+/// shareable with the repo. Schema bumps refuse newer files rather than
+/// corrupt them.
+///
+/// On disk the field is still keyed `agentMode` (schema v1) for compatibility.
 public struct ProjectLocalState: Sendable, Codable, Hashable {
     public static let currentSchemaVersion = 1
 
     public var schemaVersion: Int
     public var displayName: String
-    public var agentMode: ProjectAgentMode
+    public var projectType: ProjectType
 
     public init(schemaVersion: Int = Self.currentSchemaVersion,
                 displayName: String,
-                agentMode: ProjectAgentMode) {
+                projectType: ProjectType) {
         self.schemaVersion = schemaVersion
         self.displayName = displayName
-        self.agentMode = agentMode
+        self.projectType = projectType
     }
 
     public init(ref: WorkspaceProjectsStore.ProjectRef) {
-        self.init(displayName: ref.displayName, agentMode: ref.agentMode)
+        self.init(displayName: ref.displayName, projectType: ref.projectType)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case schemaVersion, displayName
+        case projectType = "agentMode"
     }
 }
 

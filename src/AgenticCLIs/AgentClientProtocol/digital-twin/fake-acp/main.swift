@@ -161,6 +161,29 @@ private struct FakeACPServer {
         return []
     }
 
+    private func modesPayload() -> JSONValue {
+        .object([
+            "currentModeId": .string(currentModeID),
+            "availableModes": .array([
+                .object([
+                    "id": .string("agent"),
+                    "name": .string("Agent"),
+                    "description": .string("Full agent capabilities with tool access"),
+                ]),
+                .object([
+                    "id": .string("plan"),
+                    "name": .string("Plan"),
+                    "description": .string("Read-only planning"),
+                ]),
+                .object([
+                    "id": .string("ask"),
+                    "name": .string("Ask"),
+                    "description": .string("Q&A mode"),
+                ]),
+            ]),
+        ])
+    }
+
     private mutating func handleInitialize(id: JSONValue) -> [Data] {
         var result: [String: JSONValue] = [
             "protocolVersion": .number(1),

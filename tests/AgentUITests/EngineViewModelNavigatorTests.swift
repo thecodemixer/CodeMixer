@@ -238,8 +238,8 @@ struct EngineViewModelNavigatorTests {
         let bus = MulticastEventBus()
         let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
         vm.projects = [
-            .init(path: "/Users/me/ws/api", displayName: "API", agentMode: .codex),
-            .init(path: "/Users/me/ws/web", displayName: "Web", agentMode: .claudeCode),
+            .init(path: "/Users/me/ws/api", displayName: "API", projectType: .codex),
+            .init(path: "/Users/me/ws/web", displayName: "Web", projectType: .claudeCode),
         ]
         vm.subscribe()
         defer { vm.unsubscribe() }
@@ -487,11 +487,11 @@ struct EngineViewModelNavigatorTests {
         vm.adoptEmptyWorkspace(workspace)
         try? await Task.sleep(for: .milliseconds(40))
 
-        vm.createProject(name: "mixed", agentMode: .mixed(defaultAgent: .claudeCode))
+        vm.createProject(name: "mixed", projectType: .mixed(defaultAgent: .claudeCode))
         try? await Task.sleep(for: .milliseconds(80))
 
         let project = await store.project(path: workspace.appendingPathComponent("mixed").path)
-        #expect(project?.agentMode == .mixed(defaultAgent: .claudeCode))
+        #expect(project?.projectType == .mixed(defaultAgent: .claudeCode))
         #expect(vm.projects.contains { $0.path == project?.path })
         #expect(vm.workspaceRoot?.path == workspace.path)
         #expect(port.commands.contains {
@@ -521,7 +521,7 @@ struct EngineViewModelNavigatorTests {
         vm.adoptEmptyWorkspace(workspace)
         try? await Task.sleep(for: .milliseconds(40))
 
-        let ref = try! await store.createProject(name: "api", agentMode: .claudeCode, in: workspace)
+        let ref = try! await store.createProject(name: "api", projectType: .claudeCode, in: workspace)
         let refs = await store.projects(for: workspace)
         vm.projects = refs
 

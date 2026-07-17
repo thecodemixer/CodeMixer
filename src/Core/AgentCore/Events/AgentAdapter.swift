@@ -152,6 +152,13 @@ public protocol AgentAdapter: Sendable {
     /// empty — adapters with a `/model` command override.
     func availableModels() -> [AgentModelOption]
 
+    // MARK: Agent modes
+
+    /// Agent modes for the composer bottom-bar dropdown (Cursor agent/plan/ask,
+    /// Claude Think/Review, …). Default empty — each shipping adapter publishes
+    /// its own list. Distinct from `ProjectType`.
+    func availableAgentModes() -> [AgentModeOption]
+
     // MARK: Hook configuration (optional)
 
     /// Called after the engine starts a `HookServer` but before the agent is
@@ -187,6 +194,8 @@ public extension AgentAdapter {
                             workspace: URL) async -> Bool { false }
 
     func availableModels() -> [AgentModelOption] { [] }
+
+    func availableAgentModes() -> [AgentModeOption] { [] }
 
     func sessionBootstrapBytes(context: LaunchContext) -> Data { Data() }
 

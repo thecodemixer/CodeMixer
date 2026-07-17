@@ -29,3 +29,13 @@ struct ClaudeAdapterLaunchArgvTests {
         #expect(!argv.contains("stream-json"))
     }
 }
+
+@Suite("ClaudeAdapter agent modes")
+struct ClaudeAdapterAgentModesTests {
+    @Test("agent modes expose agent think and review for composer")
+    func agentModes() {
+        let modes = ClaudeAdapter().availableAgentModes()
+        #expect(modes.map(\.id) == ["agent", "think", "review"])
+        #expect(modes.map(\.label) == ["Agent", "Think", "Review"])
+    }
+}

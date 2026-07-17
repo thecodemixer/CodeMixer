@@ -21,10 +21,10 @@ public extension EngineViewModel {
             projects: [
                 .init(path: PreviewFixtures.workspace.path,
                       displayName: "Sample",
-                      agentMode: .claudeCode),
+                      projectType: .claudeCode),
                 .init(path: PreviewFixtures.workspace.appendingPathComponent("api").path,
                       displayName: "api",
-                      agentMode: .codex),
+                      projectType: .codex),
             ],
             sessions: [
                 PreviewFixtures.workspace.path: [
@@ -44,6 +44,14 @@ public extension EngineViewModel {
             AgentModelOption(id: "sonnet", label: "Sonnet"),
             AgentModelOption(id: "opus", label: "Opus"),
         ]
+        model.availableAgentModes = [
+            AgentModeOption(id: "agent", label: "Agent", selectCommands: []),
+            AgentModeOption(id: "think", label: "Think",
+                                   selectCommands: [.toggleThinkMode(enabled: true)]),
+            AgentModeOption(id: "review", label: "Review",
+                                   selectCommands: [.toggleReviewMode(enabled: true)]),
+        ]
+        model.selectedAgentModeID = "agent"
         return model
     }
 

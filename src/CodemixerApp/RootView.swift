@@ -55,7 +55,7 @@ struct RootView: View {
                     onCancel: { bootstrap.showNewProjectSheet = false },
                     onCreate: { name, mode in
                         bootstrap.showNewProjectSheet = false
-                        model.createProject(name: name, agentMode: mode)
+                        model.createProject(name: name, projectType: mode)
                     }
                 )
             }

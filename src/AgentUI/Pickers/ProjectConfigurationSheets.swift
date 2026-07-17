@@ -2,14 +2,14 @@ import SwiftUI
 import AgentCore
 import AgentProtocol
 
-/// Shared agent-mode editor used by New Project and first-open configuration
+/// Shared project-type editor used by New Project and first-open configuration
 /// for folders that do not yet have `.codemixer/project.json`.
 ///
 /// Alerts cannot host pickers / text fields reliably on macOS — this form is
-/// always presented in a sheet so Claude / Codex / Mixed / Custom controls are
+/// always presented in a sheet so built-in / Mixed / Custom controls are
 /// actually reachable.
-struct ProjectAgentModeForm: View {
-    @Binding var selectedKind: ProjectAgentModeKind
+struct ProjectTypeForm: View {
+    @Binding var selectedKind: ProjectTypeKind
     @Binding var mixedDefault: AgentID
     @Binding var customDisplayName: String
     @Binding var customExecutable: String
@@ -18,23 +18,24 @@ struct ProjectAgentModeForm: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.spacing.s16) {
-            Picker("Agent mode", selection: $selectedKind) {
-                ForEach(ProjectAgentModeKind.allCases) { kind in
+            Picker("Project type", selection: $selectedKind) {
+                ForEach(ProjectTypeKind.allCases) { kind in
                     Text(kind.label).tag(kind)
                 }
             }
-            .pickerStyle(.segmented)
-            .accessibilityLabel("Project agent mode")
+            .pickerStyle(.menu)
+            .accessibilityLabel("Project type")
 
             switch selectedKind {
-            case .claudeCode, .codex:
+            case .builtIn:
                 EmptyView()
             case .mixed:
                 Picker("Default agent for new chats", selection: $mixedDefault) {
-                    Text("Claude Code").tag(AgentID.claudeCode)
-                    Text("Codex").tag(AgentID.codex)
+                    ForEach(SupportedBuiltInAgent.shipping) { agent in
+                        Text(agent.displayLabel).tag(agent.id)
+                    }
                 }
-                .accessibilityLabel("Default agent for mixed mode")
+                .accessibilityLabel("Default agent for mixed project type")
             case .custom:
                 customFields
             }
@@ -70,23 +71,34 @@ struct ProjectAgentModeForm: View {
     }
 }
 
-/// Discrete picker cases for `ProjectAgentMode` (associated values live in
-/// sibling bindings, not in the selection enum).
-enum ProjectAgentModeKind: String, CaseIterable, Identifiable, Hashable {
-    case claudeCode
-    case codex
+/// Discrete picker cases for `ProjectType`.
+///
+/// Built-in agents come from `SupportedBuiltInAgent.shipping` so adding a new
+/// shipping CLI does not require rewriting New/Configure Project sheets.
+enum ProjectTypeKind: Hashable, Identifiable {
+    case builtIn(AgentID)
     case mixed
     case custom
 
-    var id: String { rawValue }
+    var id: String {
+        switch self {
+        case .builtIn(let id): return "builtin-\(id.rawValue)"
+        case .mixed: return "mixed"
+        case .custom: return "custom"
+        }
+    }
 
     var label: String {
         switch self {
-        case .claudeCode: return "Claude"
-        case .codex: return "Codex"
+        case .builtIn(let id):
+            return SupportedBuiltInAgent.entry(for: id)?.displayLabel ?? id.rawValue
         case .mixed: return "Mixed"
         case .custom: return "Custom"
         }
+    }
+
+    static var allCases: [ProjectTypeKind] {
+        SupportedBuiltInAgent.shipping.map { .builtIn($0.id) } + [.mixed, .custom]
     }
 
     func resolvedMode(mixedDefault: AgentID,
@@ -94,12 +106,10 @@ enum ProjectAgentModeKind: String, CaseIterable, Identifiable, Hashable {
                       customExecutable: String,
                       customArguments: String,
                       customTransport: AgentTransportKind,
-                      idFactory: () -> String) -> ProjectAgentMode? {
+                      idFactory: () -> String) -> ProjectType? {
         switch self {
-        case .claudeCode:
-            return .claudeCode
-        case .codex:
-            return .codex
+        case .builtIn(let id):
+            return SupportedBuiltInAgent.entry(for: id)?.projectType
         case .mixed:
             return .mixed(defaultAgent: mixedDefault)
         case .custom:
@@ -129,7 +139,7 @@ enum ProjectAgentModeKind: String, CaseIterable, Identifiable, Hashable {
 /// Creates a new workspace folder on disk and opens it.
 ///
 /// Collects a display/folder name and a parent location via Choose Folder….
-/// Agent mode is chosen later via **New Project** (or Configure when opening
+/// Project type is chosen later via **New Project** (or Configure when opening
 /// an existing folder that has no `.codemixer/project.json`).
 public struct NewWorkspaceSheet: View {
     public let onCancel: () -> Void
@@ -167,7 +177,7 @@ public struct NewWorkspaceSheet: View {
         VStack(alignment: .leading, spacing: Theme.spacing.s24) {
             sheetHeader(
                 title: "New Workspace",
-                subtitle: "Creates a folder at the chosen location and opens it. Add projects (with agent mode) via File → New Project…"
+                subtitle: "Creates a folder at the chosen location and opens it. Add projects (with a project type) via File → New Project…"
             )
 
             VStack(alignment: .leading, spacing: Theme.spacing.s4) {
@@ -225,10 +235,10 @@ public struct NewWorkspaceSheet: View {
 /// Creates a subfolder project inside the current workspace.
 public struct NewProjectSheet: View {
     public let onCancel: () -> Void
-    public let onCreate: (String, ProjectAgentMode) -> Void
+    public let onCreate: (String, ProjectType) -> Void
 
     @State private var name: String = ""
-    @State private var kind: ProjectAgentModeKind = .claudeCode
+    @State private var kind: ProjectTypeKind = .builtIn(.claudeCode)
     @State private var mixedDefault: AgentID = .claudeCode
     @State private var customDisplayName: String = ""
     @State private var customExecutable: String = ""
@@ -236,12 +246,12 @@ public struct NewProjectSheet: View {
     @State private var customTransport: AgentTransportKind = .agentClientProtocol
 
     public init(onCancel: @escaping () -> Void,
-                onCreate: @escaping (String, ProjectAgentMode) -> Void) {
+                onCreate: @escaping (String, ProjectType) -> Void) {
         self.onCancel = onCancel
         self.onCreate = onCreate
     }
 
-    private var resolvedMode: ProjectAgentMode? {
+    private var resolvedMode: ProjectType? {
         kind.resolvedMode(
             mixedDefault: mixedDefault,
             customDisplayName: customDisplayName,
@@ -260,7 +270,7 @@ public struct NewProjectSheet: View {
         VStack(alignment: .leading, spacing: Theme.spacing.s24) {
             sheetHeader(
                 title: "New Project",
-                subtitle: "Creates a subfolder in the current workspace and writes agent mode to `.codemixer/project.json`."
+                subtitle: "Creates a subfolder in the current workspace and writes project type to `.codemixer/project.json`."
             )
 
             VStack(alignment: .leading, spacing: Theme.spacing.s4) {
@@ -273,7 +283,7 @@ public struct NewProjectSheet: View {
                     .accessibilityLabel("Project name")
             }
 
-            ProjectAgentModeForm(
+            ProjectTypeForm(
                 selectedKind: $kind,
                 mixedDefault: $mixedDefault,
                 customDisplayName: $customDisplayName,
@@ -294,13 +304,13 @@ public struct NewProjectSheet: View {
     }
 }
 
-/// First-open configuration when a chosen folder has no stored agent mode.
+/// First-open configuration when a chosen folder has no stored project type.
 public struct ConfigureProjectSheet: View {
     public let projectURL: URL
     public let onCancel: () -> Void
-    public let onConfirm: (ProjectAgentMode) -> Void
+    public let onConfirm: (ProjectType) -> Void
 
-    @State private var kind: ProjectAgentModeKind = .claudeCode
+    @State private var kind: ProjectTypeKind = .builtIn(.claudeCode)
     @State private var mixedDefault: AgentID = .claudeCode
     @State private var customDisplayName: String = ""
     @State private var customExecutable: String = ""
@@ -309,13 +319,13 @@ public struct ConfigureProjectSheet: View {
 
     public init(projectURL: URL,
                 onCancel: @escaping () -> Void,
-                onConfirm: @escaping (ProjectAgentMode) -> Void) {
+                onConfirm: @escaping (ProjectType) -> Void) {
         self.projectURL = projectURL
         self.onCancel = onCancel
         self.onConfirm = onConfirm
     }
 
-    private var resolvedMode: ProjectAgentMode? {
+    private var resolvedMode: ProjectType? {
         kind.resolvedMode(
             mixedDefault: mixedDefault,
             customDisplayName: customDisplayName,
@@ -330,10 +340,10 @@ public struct ConfigureProjectSheet: View {
         VStack(alignment: .leading, spacing: Theme.spacing.s24) {
             sheetHeader(
                 title: "Configure Project",
-                subtitle: "\(projectURL.lastPathComponent) has no saved agent mode yet. Pick one to write `.codemixer/project.json` and open."
+                subtitle: "\(projectURL.lastPathComponent) has no saved project type yet. Pick a project type to write `.codemixer/project.json` and open."
             )
 
-            ProjectAgentModeForm(
+            ProjectTypeForm(
                 selectedKind: $kind,
                 mixedDefault: $mixedDefault,
                 customDisplayName: $customDisplayName,

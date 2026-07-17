@@ -28,17 +28,17 @@ extension EngineViewModel {
 
     // MARK: - Session navigator actions
 
-    /// Reload the projects for the current workspace. Pass `rootMode` only when
+    /// Reload the projects for the current workspace. Pass `rootProjectType` only when
     /// seeding a brand-new workspace that has no stored projects yet.
-    public func refreshProjects(rootMode: ProjectAgentMode? = nil) {
-        Task { await reloadProjects(rootMode: rootMode) }
+    public func refreshProjects(rootProjectType: ProjectType? = nil) {
+        Task { await reloadProjects(rootProjectType: rootProjectType) }
     }
 
     /// Awaitable variant for startup restore and other flows that must not flash
     /// an empty navigator before the project list is ready.
-    public func reloadProjects(rootMode: ProjectAgentMode? = nil) async {
+    public func reloadProjects(rootProjectType: ProjectType? = nil) async {
         guard let workspaceRoot, let store = workspaceProjects else { return }
-        projects = await store.projects(for: workspaceRoot, rootMode: rootMode)
+        projects = await store.projects(for: workspaceRoot, rootProjectType: rootProjectType)
     }
 
     /// Lazily list the resumable sessions for a project. A non-resumable agent
@@ -119,15 +119,15 @@ extension EngineViewModel {
     }
 
     /// Create a new project (subfolder of the workspace) and switch to it.
-    public func createProject(name: String, agentMode: ProjectAgentMode) {
+    public func createProject(name: String, projectType: ProjectType) {
         guard let workspaceRoot, let store = workspaceProjects else { return }
         Task { [weak self] in
             do {
-                let ref = try await store.createProject(name: name, agentMode: agentMode, in: workspaceRoot)
-                let refs = await store.projects(for: workspaceRoot, rootMode: agentMode)
+                let ref = try await store.createProject(name: name, projectType: projectType, in: workspaceRoot)
+                let refs = await store.projects(for: workspaceRoot, rootProjectType: projectType)
                 await MainActor.run {
                     self?.projects = refs
-                    self?.applyAdapterCapabilities(for: agentMode, projectURL: URL(fileURLWithPath: ref.path))
+                    self?.applyAdapterCapabilities(for: projectType, projectURL: URL(fileURLWithPath: ref.path))
                     self?.newChat(in: ref.path)
                 }
             } catch {
@@ -137,15 +137,15 @@ extension EngineViewModel {
     }
 
     /// Register an existing folder as a project of the workspace.
-    public func addExistingProject(url: URL, agentMode: ProjectAgentMode) {
+    public func addExistingProject(url: URL, projectType: ProjectType) {
         guard let workspaceRoot, let store = workspaceProjects else { return }
         Task { [weak self] in
             do {
-                let ref = try await store.addExistingProject(url: url, agentMode: agentMode, in: workspaceRoot)
-                let refs = await store.projects(for: workspaceRoot, rootMode: agentMode)
+                let ref = try await store.addExistingProject(url: url, projectType: projectType, in: workspaceRoot)
+                let refs = await store.projects(for: workspaceRoot, rootProjectType: projectType)
                 await MainActor.run {
                     self?.projects = refs
-                    self?.applyAdapterCapabilities(for: agentMode, projectURL: URL(fileURLWithPath: ref.path))
+                    self?.applyAdapterCapabilities(for: projectType, projectURL: URL(fileURLWithPath: ref.path))
                     self?.newChat(in: ref.path)
                 }
             } catch {
@@ -209,20 +209,23 @@ extension EngineViewModel {
         workspace?.path == projectPath && sessionID == id
     }
 
-    /// Resolves the adapter for `mode` and refreshes model / slash / resumable
-    /// capabilities used by the composer and sidebar.
-    public func applyAdapterCapabilities(for mode: ProjectAgentMode, projectURL: URL? = nil) {
+    /// Resolves the adapter for `projectType` and refreshes model / agent-mode /
+    /// slash / resumable capabilities used by the composer and sidebar.
+    public func applyAdapterCapabilities(for projectType: ProjectType, projectURL: URL? = nil) {
         let url = projectURL ?? workspace
         Task { [weak self] in
-            guard let adapter = await ProjectAgentRouter.resolveAdapter(mode: mode) else {
+            guard let adapter = await ProjectAgentRouter.resolveAdapter(projectType: projectType) else {
                 await MainActor.run {
                     self?.availableModels = []
+                    self?.availableAgentModes = []
+                    self?.selectedAgentModeID = ""
                     self?.supportsResumableSessions = false
                     self?.slashCommands = []
                 }
                 return
             }
             let models = adapter.availableModels()
+            let agentModes = adapter.availableAgentModes()
             let resumable = adapter.capabilities.contains(.resumableSessions)
             let builtIn = adapter.slashCommandCatalog
             let projectCommands: [SlashCommand]
@@ -233,6 +236,13 @@ extension EngineViewModel {
             }
             await MainActor.run {
                 self?.availableModels = models
+                self?.availableAgentModes = agentModes
+                if let current = self?.selectedAgentModeID,
+                   agentModes.contains(where: { $0.id == current }) {
+                    // Keep the user's selection when the adapter still offers it.
+                } else {
+                    self?.selectedAgentModeID = agentModes.first?.id ?? ""
+                }
                 self?.supportsResumableSessions = resumable
                 self?.slashCommands = builtIn + projectCommands
             }
@@ -243,15 +253,15 @@ extension EngineViewModel {
         Task { [weak self] in
             guard let self, let store = workspaceProjects else { return }
             let url = URL(fileURLWithPath: path)
-            let mode: ProjectAgentMode?
+            let projectType: ProjectType?
             if let project = await store.project(path: path) {
-                mode = project.agentMode
+                projectType = project.projectType
             } else {
-                mode = await store.resolveAgentMode(for: url)
+                projectType = await store.resolveProjectType(for: url)
             }
-            guard let mode else { return }
+            guard let projectType else { return }
             await MainActor.run {
-                self.applyAdapterCapabilities(for: mode, projectURL: url)
+                self.applyAdapterCapabilities(for: projectType, projectURL: url)
             }
         }
     }
@@ -341,12 +351,12 @@ extension EngineViewModel {
     func sessionResumeNeedsClaudeCodeReadiness(projectPath: String, sessionID id: String) -> Bool {
         // Prefer the session row because mixed projects can contain both Claude
         // and Codex sessions. If the row is not loaded yet, fall back to the
-        // project mode; this is still correct for dedicated Claude projects.
+        // project type; this is still correct for dedicated Claude projects.
         if let session = sessionsByProject[projectPath]?.first(where: { $0.id == id }) {
             return session.agentID == .claudeCode
         }
         if let project = projects.first(where: { $0.path == projectPath }) {
-            return project.agentMode == .claudeCode
+            return project.projectType == .claudeCode
         }
         return false
     }
@@ -374,7 +384,7 @@ extension EngineViewModel {
     }
 
     /// Opens a freshly created workspace folder without starting an agent.
-    /// Agent mode is chosen later via File → New Project…
+    /// Project type is chosen later via File → New Project…
     public func adoptEmptyWorkspace(_ url: URL) {
         endSessionSwitch()
         workspaceRoot = url
@@ -395,6 +405,8 @@ extension EngineViewModel {
         sessionTokens = 0
         sessionCostUSD = nil
         availableModels = []
+        availableAgentModes = []
+        selectedAgentModeID = ""
         slashCommands = []
         refreshProjects()
     }
@@ -420,6 +432,8 @@ extension EngineViewModel {
         sessionTokens = 0
         sessionCostUSD = nil
         availableModels = []
+        availableAgentModes = []
+        selectedAgentModeID = ""
         slashCommands = []
     }
 }

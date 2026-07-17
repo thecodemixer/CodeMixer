@@ -194,7 +194,7 @@ public struct SessionSidebarView: View {
                 .fontWeight(.semibold)
                 .foregroundStyle(isCurrent ? Theme.text.primary : Theme.text.secondary)
                 .lineLimit(1)
-            Text(project.agentMode.shortLabel)
+            Text(project.projectType.shortLabel)
                 .font(Theme.typography.caption)
                 .foregroundStyle(Theme.text.tertiary)
                 .padding(.horizontal, Theme.spacing.s4)

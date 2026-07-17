@@ -100,9 +100,9 @@ struct CursorACPAdapterTests {
         #expect(adapter.encodeCommand(.runSlashCommand(name: "/debug", args: [])) == nil)
     }
 
-    @Test("session modes expose agent plan ask for composer")
-    func sessionModes() {
-        let modes = CursorACPAdapter().availableSessionModes()
+    @Test("agent modes expose agent plan ask for composer")
+    func agentModes() {
+        let modes = CursorACPAdapter().availableAgentModes()
         #expect(modes.map(\.id) == ["agent", "plan", "ask"])
         #expect(modes.map(\.label) == ["Agent", "Plan", "Ask"])
         #expect(modes.allSatisfy { option in
@@ -114,7 +114,7 @@ struct CursorACPAdapterTests {
     func shipping() {
         #expect(AgentID.shipping.contains(.cursorCLI))
         #expect(SupportedBuiltInAgent.shipping.contains { $0.id == .cursorCLI })
-        #expect(SupportedBuiltInAgent.entry(for: .cursorCLI)?.projectMode == .cursorCLI)
+        #expect(SupportedBuiltInAgent.entry(for: .cursorCLI)?.projectType == .cursorCLI)
     }
 }
 

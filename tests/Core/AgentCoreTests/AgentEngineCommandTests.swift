@@ -85,7 +85,7 @@ struct AgentEngineCommandTests {
         await h.shutdown()
     }
 
-    @Test("openProject resolves the stored project mode and switches adapters")
+    @Test("openProject resolves the stored project type and switches adapters")
     func openProjectUsesStoredProjectMode() async throws {
         let capture = CapturingTransportFactory()
         let h = try await EngineHarness.make(transportFactory: capture.makeTransport)
@@ -95,7 +95,7 @@ struct AgentEngineCommandTests {
         let store = WorkspaceProjectsStore(environment: h.environment,
                                            fileSystem: h.fileSystem)
         let ref = try await store.createProject(name: "codex",
-                                                agentMode: .codex,
+                                                projectType: .codex,
                                                 in: h.workspace)
 
         try await h.engine.send(.openProject(path: ref.path, resumeSessionID: nil))
@@ -111,7 +111,7 @@ struct AgentEngineCommandTests {
         let store = WorkspaceProjectsStore(environment: h.environment,
                                            fileSystem: h.fileSystem)
         let ref = try await store.createProject(name: "mixed",
-                                                agentMode: .mixed(defaultAgent: .claudeCode),
+                                                projectType: .mixed(defaultAgent: .claudeCode),
                                                 in: h.workspace)
         let codex = RoutingTestAdapter(
             id: .codex,
@@ -145,7 +145,7 @@ struct AgentEngineCommandTests {
                                     executablePath: "/custom/agent",
                                     arguments: ["serve"])
         let ref = try await store.createProject(name: "custom",
-                                                agentMode: .custom(custom),
+                                                projectType: .custom(custom),
                                                 in: h.workspace)
 
         await #expect(throws: AgentError.self) {

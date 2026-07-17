@@ -612,7 +612,10 @@ public protocol AgentAdapter: Sendable {
     // 9. Model catalog (composer picker)
     func availableModels() -> [AgentModelOption]
 
-    // 10. Resume / session listing
+    // 10. Agent modes (composer bottom-bar mode dropdown)
+    func availableAgentModes() -> [AgentModeOption]
+
+    // 11. Resume / session listing
     func listResumableSessions(workspace: URL) async -> [SessionSummary]
     func resumeArgvAddition(sessionID: String) -> [String]
 }
@@ -621,6 +624,32 @@ public protocol AgentAdapter: Sendable {
 The adapter owns command encoding. Claude's default implementation emits slash
 text; Codex overrides with JSON-RPC frames. Unsupported commands are surfaced as
 explicit `.error(.unsupportedCommand)` events, never silently skipped.
+
+### Agent modes are provider-owned, not UI-hardcoded
+
+The composer's bottom-bar mode dropdown (the menu next to the model picker)
+never hardcodes a vendor's mode list. Each adapter publishes its own
+`[AgentModeOption]` from `availableAgentModes()`:
+
+- Claude Code: Agent / Think / Review, each activating via
+  `setPermissionMode` / `toggleThinkMode` / `toggleReviewMode`.
+- Codex: Agent / Review, via `toggleReviewMode`.
+- Cursor (ACP): Agent / Plan / Ask, via `session/set_mode` (see
+  `CursorModeCommand.sessionModes`).
+
+`AgentModeOption` (`Core/AgentProtocol/AgentModeOption.swift`) pairs a stable
+`id`/`label` with the ordered `[AgentCommand]` to send on selection.
+`EngineViewModel.availableAgentModes` / `selectedAgentModeID` hold the active
+adapter's list; `ComposerModeModelMenus` renders it generically and reduces
+`current_mode_update`-derived `statusPhraseChanged("Mode: <id>")` events back
+into `selectedAgentModeID` so externally-driven mode switches (e.g. a slash
+prompt) stay in sync. Adding a new agent CLI with its own mode taxonomy never
+requires a UI change — only a new `availableAgentModes()` implementation.
+
+This is distinct from `ProjectType`
+(`Core/AgentCore/Persistence/ProjectType.swift`), which chooses *which agent
+CLI* a project uses (Claude-only, Codex-only, Cursor-only, mixed, custom) —
+see [`WorkspaceProjectsStore`](#workspaceprojectsstore) below.
 
 ### `AgentCapabilities`
 
@@ -1150,7 +1179,7 @@ Persists `AppearancePrefs` and auto-approval rules. Appearance includes theme (`
 
 The agent-agnostic model behind the GUI session navigator. A *workspace* is the loaded folder (one window); each workspace owns an ordered list of `ProjectRef`s (path, display name, required `ProjectType`). The workspace root is seeded as the default project; further projects are created as subfolders or added from anywhere on disk.
 
-Agent mode is dual-persisted: app-support `workspaces.json` *and* `<project>/.codemixer/project.json` (`ProjectPaths` / `ProjectLocalState`). Each workspace also writes its project catalog to `<workspace>/.codemixer/workspace.json` (`WorkspaceLocalState`). `workspaces.json` schema v3 tracks `activeWorkspacePath` so launch restores the last open workspace unless the user chose **Close Workspace**.
+Project type is dual-persisted: app-support `workspaces.json` *and* `<project>/.codemixer/project.json` (`ProjectPaths` / `ProjectLocalState`). Each workspace also writes its project catalog to `<workspace>/.codemixer/workspace.json` (`WorkspaceLocalState`). `workspaces.json` schema v3 tracks `activeWorkspacePath` so launch restores the last open workspace unless the user chose **Close Workspace**.
 
 ```swift
 public actor WorkspaceProjectsStore {
@@ -1168,6 +1197,8 @@ public actor WorkspaceProjectsStore {
 ```
 
 It contains **no** Claude/terminal specifics — sessions are not modelled here; they flow through `AgentAdapter.listResumableSessions`, so the navigator works for Claude, Codex, and custom ACP (local `ACPSessionIndex`) alike. Adapters without `.resumableSessions` show *New Chat only*. Navigation actions in `EngineViewModel` (`newChat`, `openSession`) route through the wire `AgentCommand`s `.newSession` / `.openProject`, so the GUI, remote clients, and CLI all reach the same behavior. Sidebar visibility is GUI chrome persisted through `AppearancePrefs` (never on the wire, never `UserDefaults`).
+
+`ProjectType` itself never resolves an adapter — that's `ProjectAgentRouter.resolveAdapter(projectType:sessionAgentID:preferredForNewChat:)`, which special-cases `.custom` (routes through `CustomAgentAdapterFactories`) and otherwise looks up `AgentID` and asks `AdapterRegistry`. Pinned single-agent types (`.claudeCode`, `.codex`, `.cursorCLI`) don't hand-maintain a second `AgentID` switch; they resolve through `SupportedBuiltInAgent.shipping` (`Core/AgentCore/Persistence/SupportedBuiltInAgent.swift`), the same catalog that drives the New/Configure Project pickers. Adding a shipping CLI means extending that one catalog, not every switch that used to enumerate agents by hand.
 
 ### Atomic writes
 

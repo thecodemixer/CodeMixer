@@ -190,14 +190,14 @@ extension AgentEngine {
         await store.load()
         guard let project = await store.project(path: path) else {
             throw AgentError.unsupportedOperation(
-                detail: "Project \(path) has no stored agent mode. Open it from the project picker and choose an agent first."
+                detail: "Project \(path) has no stored project type. Open it from the project picker and choose an agent first."
             )
         }
 
         let sessionAgentID = await sessionAgentID(for: resumeSessionID,
                                                   workspace: projectURL,
-                                                  mode: project.agentMode)
-        guard let nextAdapter = await ProjectAgentRouter.resolveAdapter(mode: project.agentMode,
+                                                  mode: project.projectType)
+        guard let nextAdapter = await ProjectAgentRouter.resolveAdapter(projectType: project.projectType,
                                                                         sessionAgentID: sessionAgentID) else {
             throw AgentError.unsupportedOperation(
                 detail: "Project \(path) needs a concrete registered agent before it can be opened."
@@ -213,7 +213,7 @@ extension AgentEngine {
 
     private func sessionAgentID(for resumeSessionID: String?,
                                 workspace: URL,
-                                mode: ProjectAgentMode) async -> AgentID? {
+                                mode: ProjectType) async -> AgentID? {
         guard let resumeSessionID else { return nil }
         guard case .mixed = mode else { return nil }
         let adapters = await AdapterRegistry.shared.all()

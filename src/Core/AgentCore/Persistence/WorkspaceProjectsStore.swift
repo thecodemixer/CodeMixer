@@ -14,24 +14,24 @@ import OSLog
 /// `FileSystem` seam (never `UserDefaults`, never `FileManager` directly). The
 /// JSON root is versioned so older and newer builds never corrupt each other.
 ///
-/// Each project's `agentMode` is *also* written to
+/// Each project's `projectType` is *also* written to
 /// `<project>/.codemixer/project.json`, and each workspace writes its project
 /// catalog to `<workspace>/.codemixer/workspace.json`. Opening restores the
 /// last *active* workspace unless the user closed it.
 public actor WorkspaceProjectsStore {
 
-    /// A project within a workspace. `agentMode` is required — set at creation
+    /// A project within a workspace. `projectType` is required — set at creation
     /// and never silently defaulted.
     public struct ProjectRef: Sendable, Codable, Hashable, Identifiable {
         public var id: String { path }
         public let path: String
         public var displayName: String
-        public var agentMode: ProjectAgentMode
+        public var projectType: ProjectType
 
-        public init(path: String, displayName: String, agentMode: ProjectAgentMode) {
+        public init(path: String, displayName: String, projectType: ProjectType) {
             self.path = path
             self.displayName = displayName
-            self.agentMode = agentMode
+            self.projectType = projectType
         }
     }
 
@@ -40,7 +40,7 @@ public actor WorkspaceProjectsStore {
         case invalidProjectName(String)
         case projectFolderExists(path: String)
         /// A stored project could not be decoded into the current schema
-        /// (e.g. missing required `agentMode`). Surfaced for repair — never
+        /// (e.g. missing required `projectType`). Surfaced for repair — never
         /// silently reset or auto-assigned to Claude.
         case undecodableProject(path: String, detail: String)
     }
@@ -58,7 +58,7 @@ public actor WorkspaceProjectsStore {
     /// tolerates older versions and refuses to crash on newer ones.
     ///
     /// - v1: optional `agentID` per project (legacy)
-    /// - v2: required `agentMode` per project
+    /// - v2: required `projectType` per project
     /// - v3: adds `activeWorkspacePath` (nil = closed / show picker on launch)
     public static let currentSchemaVersion = 3
 
@@ -132,7 +132,7 @@ public actor WorkspaceProjectsStore {
                 return
             }
 
-            // Schema v1 used optional `agentID` instead of required `agentMode`.
+            // Schema v1 used optional `agentID` instead of required `projectType`.
             // We do not migrate: decode each project strictly and surface failures.
             if persisted.schemaVersion < 2 {
                 let failures = try await decodeLegacyOrStrict(data: data)
@@ -168,7 +168,7 @@ public actor WorkspaceProjectsStore {
             }
         } catch {
             // Whole-file failure: surface via diagnostics and keep empty model,
-            // but do not invent agent modes for any recovered project.
+            // but do not invent project types for any recovered project.
             log.warning("workspaces load failed: \(String(describing: error), privacy: .public). Using empty model.")
             decodeFailures = [.undecodableProject(path: url.path, detail: String(describing: error))]
             await SilentDiagnostics.shared.record(kind: .workspacesQuietReset,
@@ -203,12 +203,12 @@ public actor WorkspaceProjectsStore {
 
     // MARK: - Queries
 
-    /// The projects for a workspace. Pass `rootMode` only when you intentionally
+    /// The projects for a workspace. Pass `rootProjectType` only when you intentionally
     /// want to seed the workspace folder itself as the first project (Open
     /// Project on a folder). Empty workspace shells created via New Workspace
     /// stay empty until New Project / Add Existing registers a project.
     public func projects(for workspace: URL,
-                         rootMode: ProjectAgentMode? = nil) async -> [ProjectRef] {
+                         rootProjectType: ProjectType? = nil) async -> [ProjectRef] {
         let key = Self.key(for: workspace)
         if let existing = workspaces[key], !existing.isEmpty {
             let reconciled = await reconcileLocalState(existing, workspaceKey: key)
@@ -227,8 +227,8 @@ public actor WorkspaceProjectsStore {
 
         // Prefer on-disk project state when seeding so reopening a folder that
         // already carries `.codemixer/project.json` does not require a mode pick.
-        let resolvedMode = rootMode
-            ?? ProjectLocalStateStore.load(from: workspace, fileSystem: fileSystem)?.agentMode
+        let resolvedMode = rootProjectType
+            ?? ProjectLocalStateStore.load(from: workspace, fileSystem: fileSystem)?.projectType
         guard let resolvedMode else { return [] }
         let root = Self.rootProject(for: workspace, mode: resolvedMode)
         workspaces[key] = [root]
@@ -240,7 +240,7 @@ public actor WorkspaceProjectsStore {
 
     /// Find a project by absolute path across all loaded workspaces. This is
     /// used by engine-side `.openProject` handling so remote callers can resolve
-    /// the same persisted project mode as the GUI.
+    /// the same persisted project type as the GUI.
     public func project(path: String) async -> ProjectRef? {
         if let stored = workspaces.values.lazy
             .flatMap({ $0 })
@@ -251,17 +251,17 @@ public actor WorkspaceProjectsStore {
         guard let local = ProjectLocalStateStore.load(from: url, fileSystem: fileSystem) else {
             return nil
         }
-        return ProjectRef(path: path, displayName: local.displayName, agentMode: local.agentMode)
+        return ProjectRef(path: path, displayName: local.displayName, projectType: local.projectType)
     }
 
-    /// Resolves agent mode for a folder: project-local file first, then the
+    /// Resolves project type for a folder: project-local file first, then the
     /// in-memory / app-support index. Returns `nil` when neither knows — the
     /// UI must collect a mode before opening.
-    public func resolveAgentMode(for projectRoot: URL) async -> ProjectAgentMode? {
+    public func resolveProjectType(for projectRoot: URL) async -> ProjectType? {
         if let local = ProjectLocalStateStore.load(from: projectRoot, fileSystem: fileSystem) {
-            return local.agentMode
+            return local.projectType
         }
-        return await project(path: projectRoot.path)?.agentMode
+        return await project(path: projectRoot.path)?.projectType
     }
 
     // MARK: - Mutations
@@ -269,7 +269,7 @@ public actor WorkspaceProjectsStore {
     /// Create a new project as `<workspace>/<name>/` and register it.
     @discardableResult
     public func createProject(name: String,
-                              agentMode: ProjectAgentMode,
+                              projectType: ProjectType,
                               in workspace: URL) async throws -> ProjectRef {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard Self.isValidProjectName(trimmed) else {
@@ -286,8 +286,8 @@ public actor WorkspaceProjectsStore {
         }
 
         try fileSystem.createDirectory(at: folder, withIntermediates: true)
-        let ref = ProjectRef(path: folder.path, displayName: trimmed, agentMode: agentMode)
-        try await register(ref, in: workspace, rootMode: agentMode)
+        let ref = ProjectRef(path: folder.path, displayName: trimmed, projectType: projectType)
+        try await register(ref, in: workspace, rootProjectType: projectType)
         try ProjectLocalStateStore.save(ref: ref, fileSystem: fileSystem)
         return ref
     }
@@ -295,7 +295,7 @@ public actor WorkspaceProjectsStore {
     /// Register an existing folder as a project of the workspace.
     @discardableResult
     public func addExistingProject(url projectURL: URL,
-                                   agentMode: ProjectAgentMode,
+                                   projectType: ProjectType,
                                    in workspace: URL) async throws -> ProjectRef {
         let key = Self.key(for: workspace)
         if let existing = workspaces[key]?.first(where: { $0.path == projectURL.path }) {
@@ -306,21 +306,21 @@ public actor WorkspaceProjectsStore {
             ?? projectURL.lastPathComponent
         let ref = ProjectRef(path: projectURL.path,
                              displayName: displayName,
-                             agentMode: agentMode)
-        try await register(ref, in: workspace, rootMode: agentMode)
+                             projectType: projectType)
+        try await register(ref, in: workspace, rootProjectType: projectType)
         try ProjectLocalStateStore.save(ref: ref, fileSystem: fileSystem)
         return ref
     }
 
-    /// Repair an undecodable / mode-less project by writing a chosen mode.
+    /// Repair an undecodable / type-less project by writing a chosen project type.
     @discardableResult
-    public func setAgentMode(path: String,
-                             mode: ProjectAgentMode,
+    public func setProjectType(path: String,
+                             projectType: ProjectType,
                              in workspace: URL) async throws -> ProjectRef {
         let key = Self.key(for: workspace)
-        var list = await projects(for: workspace, rootMode: mode)
+        var list = await projects(for: workspace, rootProjectType: projectType)
         if let idx = list.firstIndex(where: { $0.path == path }) {
-            list[idx].agentMode = mode
+            list[idx].projectType = projectType
             workspaces[key] = list
             try await persist()
             try ProjectLocalStateStore.save(ref: list[idx], fileSystem: fileSystem)
@@ -333,8 +333,8 @@ public actor WorkspaceProjectsStore {
         }
         let ref = ProjectRef(path: path,
                              displayName: URL(fileURLWithPath: path).lastPathComponent,
-                             agentMode: mode)
-        try await register(ref, in: workspace, rootMode: mode)
+                             projectType: projectType)
+        try await register(ref, in: workspace, rootProjectType: projectType)
         try ProjectLocalStateStore.save(ref: ref, fileSystem: fileSystem)
         return ref
     }
@@ -384,12 +384,12 @@ public actor WorkspaceProjectsStore {
 
     private func register(_ ref: ProjectRef,
                           in workspace: URL,
-                          rootMode: ProjectAgentMode) async throws {
+                          rootProjectType: ProjectType) async throws {
         let key = Self.key(for: workspace)
-        // Do not pass `rootMode` here — that would seed the workspace folder as
+        // Do not pass `rootProjectType` here — that would seed the workspace folder as
         // a synthetic root project. Empty workspace shells stay empty until the
         // caller registers an explicit project (New Project / Add Existing).
-        _ = rootMode
+        _ = rootProjectType
         var list = await projects(for: workspace)
         if let idx = list.firstIndex(where: { $0.path == ref.path }) {
             list[idx] = ref
@@ -413,8 +413,8 @@ public actor WorkspaceProjectsStore {
                 fileSystem: fileSystem
             ) else { return ref }
             var next = ref
-            if next.agentMode != local.agentMode {
-                next.agentMode = local.agentMode
+            if next.projectType != local.projectType {
+                next.projectType = local.projectType
                 changed = true
             }
             if next.displayName != local.displayName {
@@ -476,7 +476,7 @@ public actor WorkspaceProjectsStore {
     }
 
     /// Attempt a strict v2 decode of each project object. Legacy v1 entries
-    /// without `agentMode` become `undecodableProject` failures — never
+    /// without `projectType` become `undecodableProject` failures — never
     /// auto-migrated to Claude.
     private func decodeLegacyOrStrict(data: Data) async throws -> [StoreError] {
         struct LoosePersisted: Decodable {
@@ -490,7 +490,7 @@ public actor WorkspaceProjectsStore {
         struct LooseProject: Decodable {
             var path: String
             var displayName: String
-            var agentMode: ProjectAgentMode?
+            var projectType: ProjectType?
             var agentID: AgentID?
         }
 
@@ -500,14 +500,14 @@ public actor WorkspaceProjectsStore {
         for entry in loose.workspaces {
             var refs: [ProjectRef] = []
             for project in entry.projects {
-                if let mode = project.agentMode {
+                if let mode = project.projectType {
                     refs.append(ProjectRef(path: project.path,
                                            displayName: project.displayName,
-                                           agentMode: mode))
+                                           projectType: mode))
                 } else {
                     failures.append(.undecodableProject(
                         path: project.path,
-                        detail: "missing required agentMode (legacy agentID=\(project.agentID?.rawValue ?? "nil"))"
+                        detail: "missing required projectType (legacy agentID=\(project.agentID?.rawValue ?? "nil"))"
                     ))
                 }
             }
@@ -521,12 +521,12 @@ public actor WorkspaceProjectsStore {
 
     private static func key(for workspace: URL) -> String { workspace.path }
 
-    private static func rootProject(for workspace: URL, mode: ProjectAgentMode) -> ProjectRef {
+    private static func rootProject(for workspace: URL, mode: ProjectType) -> ProjectRef {
         ProjectRef(path: workspace.path,
                    displayName: workspace.lastPathComponent.isEmpty
                        ? workspace.path
                        : workspace.lastPathComponent,
-                   agentMode: mode)
+                   projectType: mode)
     }
 
     private static func isValidProjectName(_ name: String) -> Bool {

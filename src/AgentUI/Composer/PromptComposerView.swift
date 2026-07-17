@@ -18,8 +18,6 @@ public struct PromptComposerView: View {
     public var voice: VoiceInputService?
 
     @State private var draft: String = ""
-    @State private var thinkOn: Bool = false
-    @State private var reviewOn: Bool = false
     @State private var isEditMode: Bool = false
     @State private var isDropTargeted: Bool = false
     @State private var showSlashPalette: Bool = false
@@ -117,8 +115,6 @@ public struct PromptComposerView: View {
 
                 HStack(alignment: .bottom, spacing: Theme.spacing.s8) {
                     ComposerModeModelMenus(model: model,
-                                           thinkOn: $thinkOn,
-                                           reviewOn: $reviewOn,
                                            selectedModelID: $selectedModelID)
 
                     Spacer()

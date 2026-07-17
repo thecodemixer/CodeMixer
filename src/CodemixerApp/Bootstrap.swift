@@ -27,7 +27,7 @@ final class Bootstrap {
     var startupError: String?
     /// False until `start()` finishes engine bootstrap and optional workspace restore.
     var isStartupComplete = false
-    /// Folder chosen via Open Project that has no stored agent mode yet.
+    /// Folder chosen via Open Project that has no stored project type yet.
     var pendingConfigureURL: URL?
     var pendingConfigureResumeSessionID: String?
 
@@ -123,14 +123,14 @@ final class Bootstrap {
         showProjectPicker = true
     }
 
-    /// File → New Workspace: dedicated sheet for name + parent folder + agent mode.
+    /// File → New Workspace: dedicated sheet for name + parent folder + project type.
     func presentNewWorkspaceSheet() {
         showNewWorkspaceSheet = true
     }
 
     /// Creates `<parent>/<name>/`, tears down any open workspace without
     /// bouncing through the Open Project picker, then adopts the folder as an
-    /// empty workspace shell. Agent mode is chosen later via New Project.
+    /// empty workspace shell. Project type is chosen later via New Project.
     func createWorkspace(name: String, parentDirectory: URL) async {
         showNewWorkspaceSheet = false
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -243,7 +243,7 @@ final class Bootstrap {
         }
     }
 
-    /// Opens a folder after resolving its agent mode from project-local state
+    /// Opens a folder after resolving its project type from project-local state
     /// or the workspace index. If neither knows the mode, presents the
     /// configure sheet instead of guessing.
     func openWorkspace(_ url: URL, resumeSessionID: String?) async {
@@ -303,7 +303,7 @@ final class Bootstrap {
         viewModel?.workspaceRoot = url
         if let store = projectsStore {
             _ = await store.projects(for: url, rootProjectType: projectType)
-            _ = try? await store.setProjectType(path: url.path, mode: projectType, in: url)
+            _ = try? await store.setProjectType(path: url.path, projectType: projectType, in: url)
         }
 
         guard let adapter = await Self.adapter(for: projectType) else {
