@@ -458,12 +458,9 @@ private struct WorkspaceSettingsTab: View {
             }
             switch row.refreshKind {
             case .automatic:
-                Text("Refreshes automatically")
+                Text("Loaded into memory on workspace open")
                     .font(Theme.typography.caption)
                     .foregroundStyle(Theme.text.secondary)
-                Button("Refresh") {}
-                    .disabled(true)
-                    .accessibilityLabel("\(row.displayName) model refresh is automatic")
             case .manual(let detail):
                 Text(detail)
                     .font(Theme.typography.caption)
@@ -488,10 +485,19 @@ private struct WorkspaceSettingsTab: View {
     }
 
     private func modelCountLabel(_ row: EngineViewModel.WorkspaceModelCatalogRow) -> String {
-        switch row.modelCount {
-        case 0: return "No models cached"
-        case 1: return "1 model"
-        default: return "\(row.modelCount) models"
+        switch row.refreshKind {
+        case .automatic:
+            switch row.modelCount {
+            case 0: return "No models loaded"
+            case 1: return "1 model"
+            default: return "\(row.modelCount) models"
+            }
+        case .manual:
+            switch row.modelCount {
+            case 0: return "No models cached"
+            case 1: return "1 model"
+            default: return "\(row.modelCount) models"
+            }
         }
     }
 }
