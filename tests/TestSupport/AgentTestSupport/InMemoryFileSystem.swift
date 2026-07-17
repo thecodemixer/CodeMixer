@@ -54,6 +54,27 @@ public final class InMemoryFileSystem: FileSystem, @unchecked Sendable {
         mtimes[url.path] = Date()
     }
 
+    public func move(from source: URL, to destination: URL) throws {
+        lock.lock(); defer { lock.unlock() }
+        let sourcePath = source.path
+        let destinationPath = destination.path
+        guard sourcePath != destinationPath else { return }
+        guard files[sourcePath] != nil
+            || directories.contains(sourcePath)
+            || containsDescendant(of: sourcePath) else {
+            throw FileSystemError.notFound(path: sourcePath)
+        }
+        guard files[destinationPath] == nil
+            && !directories.contains(destinationPath)
+            && !containsDescendant(of: destinationPath) else {
+            throw FileSystemError.ioError(path: destinationPath, underlying: "destination exists")
+        }
+
+        moveKeys(in: &files, from: sourcePath, to: destinationPath)
+        moveKeys(in: &mtimes, from: sourcePath, to: destinationPath)
+        directories = Set(directories.map { movedPath($0, from: sourcePath, to: destinationPath) })
+    }
+
     public func remove(at url: URL) throws {
         lock.lock(); defer { lock.unlock() }
         let removedFile = files.removeValue(forKey: url.path) != nil
@@ -75,5 +96,28 @@ public final class InMemoryFileSystem: FileSystem, @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         guard let date = mtimes[url.path] else { throw FileSystemError.notFound(path: url.path) }
         return date
+    }
+
+    private func containsDescendant(of path: String) -> Bool {
+        let prefix = path.hasSuffix("/") ? path : path + "/"
+        return files.keys.contains { $0.hasPrefix(prefix) }
+            || directories.contains { $0.hasPrefix(prefix) }
+    }
+
+    private func movedPath(_ path: String, from source: String, to destination: String) -> String {
+        guard path == source || path.hasPrefix(source + "/") else { return path }
+        return destination + path.dropFirst(source.count)
+    }
+
+    private func moveKeys<Value>(in dictionary: inout [String: Value],
+                                 from source: String,
+                                 to destination: String) {
+        let moved = dictionary.filter { key, _ in key == source || key.hasPrefix(source + "/") }
+        for key in moved.keys {
+            dictionary.removeValue(forKey: key)
+        }
+        for (key, value) in moved {
+            dictionary[movedPath(key, from: source, to: destination)] = value
+        }
     }
 }

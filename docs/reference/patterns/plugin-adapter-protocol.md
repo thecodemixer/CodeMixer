@@ -74,8 +74,11 @@ public protocol Adapter: Sendable {
     var actionCatalog: [Action] { get }
     func enumerateProjectActions(workspace: URL) async -> [Action]
 
-    // 9. Model catalog (composer picker; default `[]` in protocol extension)
+    // 9. Model catalog (composer picker; default `[]` / `.automatic` in protocol extension)
     func availableModels() -> [AgentModelOption]
+    func modelCatalogRefreshKind() -> ModelCatalogRefreshKind
+    func refreshModelCatalog() async throws -> [AgentModelOption]
+    func seedModelCatalog(_ models: [AgentModelOption])
 
     // 10. Resume / session listing
     func listResumableSessions(workspace: URL) async -> [SessionSummary]
@@ -88,6 +91,14 @@ public protocol Adapter: Sendable {
 
 Codemixer's live protocol uses `SlashCommand`, `AgentModelOption`, and
 transport-specific `AgentTransportDescriptor` names — see `AgentAdapter.swift`.
+
+**Model catalogs:** override `availableModels()` for the composer picker.
+Use `.manual(detail:)` when discovery is expensive (Claude Code) so Codemixer
+persists the list in `<workspace>/.codemixer/workspace.json` and only re-probes
+on first empty cache or an explicit Settings refresh. Use `.automatic` (default)
+for cheap/local discovery (Codex cache file, Cursor `models` CLI) — those stay
+in memory and are warmed via `WorkspaceLifecycle` when a workspace/project
+introduces the adapter. See [`docs/architecture.md` § Model catalogs](../architecture.md#model-catalogs).
 
 Each section is a *boundary* — a place where vendor specifics would otherwise
 leak into the core. Skipping a section because "vendor X doesn't need it" is

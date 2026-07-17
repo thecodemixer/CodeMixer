@@ -101,16 +101,27 @@ struct WorkspaceProjectsStoreTests {
         #expect(projects.contains { $0.path == workspace.path })
     }
 
-    @Test("renameProject changes the display label but keeps the path identity")
-    func renameKeepsPath() async throws {
-        let store = makeStore()
+    @Test("renameProject renames the folder and updates persisted refs")
+    func renameRenamesFolder() async throws {
+        let fs = InMemoryFileSystem()
+        let store = makeStore(fs: fs)
         let ref = try await store.createProject(name: "api", projectType: .claudeCode, in: workspace)
         let renamed = try await store.renameProject(path: ref.path, to: "Backend", in: workspace)
-        #expect(renamed.path == ref.path)
+        let renamedPath = workspace.appendingPathComponent("Backend").path
+        #expect(renamed.path == renamedPath)
         #expect(renamed.displayName == "Backend")
+        #expect(!fs.isDirectory(at: URL(fileURLWithPath: ref.path)))
+        #expect(fs.isDirectory(at: URL(fileURLWithPath: renamedPath)))
 
         let projects = await store.projects(for: workspace, rootProjectType: .claudeCode)
-        #expect(projects.first(where: { $0.path == ref.path })?.displayName == "Backend")
+        #expect(projects.first(where: { $0.path == renamedPath })?.displayName == "Backend")
+
+        let local = ProjectLocalStateStore.load(from: URL(fileURLWithPath: renamedPath), fileSystem: fs)
+        #expect(local?.displayName == "Backend")
+        #expect(local?.projectType == .claudeCode)
+
+        let workspaceLocal = WorkspaceLocalStateStore.load(from: workspace, fileSystem: fs)
+        #expect(workspaceLocal?.projects.map(\.path) == [renamedPath])
     }
 
     @Test("renameProject rejects an empty name")
@@ -119,6 +130,29 @@ struct WorkspaceProjectsStoreTests {
         let ref = try await store.createProject(name: "api", projectType: .claudeCode, in: workspace)
         await #expect(throws: WorkspaceProjectsStore.StoreError.self) {
             try await store.renameProject(path: ref.path, to: "   ", in: workspace)
+        }
+    }
+
+    @Test("renameProject rejects an existing destination folder")
+    func renameRejectsExistingDestination() async throws {
+        let fs = InMemoryFileSystem()
+        let store = makeStore(fs: fs)
+        let ref = try await store.createProject(name: "api", projectType: .claudeCode, in: workspace)
+        let existing = workspace.appendingPathComponent("Backend", isDirectory: true)
+        try fs.createDirectory(at: existing, withIntermediates: true)
+
+        await #expect(throws: WorkspaceProjectsStore.StoreError.projectFolderExists(path: existing.path)) {
+            try await store.renameProject(path: ref.path, to: "Backend", in: workspace)
+        }
+    }
+
+    @Test("renameProject rejects the workspace root folder")
+    func renameRejectsWorkspaceRoot() async {
+        let store = makeStore()
+        _ = await store.projects(for: workspace, rootProjectType: .claudeCode)
+
+        await #expect(throws: WorkspaceProjectsStore.StoreError.cannotRenameWorkspaceRoot(path: workspace.path)) {
+            try await store.renameProject(path: workspace.path, to: "Workspace", in: workspace)
         }
     }
 

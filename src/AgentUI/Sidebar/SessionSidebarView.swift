@@ -68,7 +68,7 @@ public struct SessionSidebarView: View {
             Button("Rename") { commitRename() }
             Button("Cancel", role: .cancel) { renameTargetPath = nil; renameText = "" }
         } message: {
-            Text("Changes the label shown here. The folder on disk is unchanged.")
+            Text("Renames the project folder on disk.")
         }
         .animation(Theme.motion.resolve(Theme.motion.changing, reduceMotion: reduceMotion),
                    value: focusMode)
@@ -223,7 +223,9 @@ public struct SessionSidebarView: View {
             Button("New Chat") { model.newChat(in: project.path) }
             Button("Reveal in Finder") { revealInFinder(project.path) }
             Divider()
-            Button("Rename…") { beginRename(project) }
+            if canRenameProject(project) {
+                Button("Rename…") { beginRename(project) }
+            }
             if project.path != model.workspace?.path {
                 Button("Remove from Navigator", role: .destructive) {
                     model.removeProject(path: project.path)
@@ -351,6 +353,11 @@ public struct SessionSidebarView: View {
         renameTargetPath = project.path
         renameText = project.displayName
         showRenamePrompt = true
+    }
+
+    private func canRenameProject(_ project: WorkspaceProjectsStore.ProjectRef) -> Bool {
+        project.path != model.workspaceRoot?.path
+            && model.activity == .idle
     }
 
     private func commitRename() {

@@ -78,7 +78,7 @@ Codemixer/
 | Status phrase priority | `Core/AgentCore/Status/StatusPhraseResolver.swift` |
 | Activity heartbeat | `Core/AgentCore/Activity/HeartbeatActivityMonitor.swift` |
 | Prefs / sessions / appearance persistence | `Core/AgentCore/Persistence/{PrefsStore,SessionStore,AppearancePrefs}.swift` |
-| Agent-agnostic Workspace→Projects model + persistence | `Core/AgentCore/Persistence/{WorkspaceProjectsStore,ProjectType,ProjectAgentRouter,ProjectLocalState,WorkspaceLocalState}.swift` |
+| Agent-agnostic Workspace→Projects model + persistence | `Core/AgentCore/Persistence/{WorkspaceProjectsStore,ProjectType,ProjectAgentRouter,ProjectLocalState,WorkspaceLocalState}.swift` (Claude model cache lives in `WorkspaceLocalState.adapterModelCaches`) |
 | Core framework wrappers (Process, Keychain, FSEvents) | `Core/AgentCore/External/{ProcessRunner,KeychainStore,FSEventsStream}.swift` |
 | Product constants (ports, identity, timing, buffers, paths) | `Core/AgentCore/{RemoteDefaults,RemoteAuthTiming,DaemonDefaults,AppIdentity,ActivityTiming,StreamBufferDefaults}.swift`, `Core/AgentCore/Paths/{AppSupportPaths,SystemPaths,ProjectPaths}.swift` |
 | DI seams | `Core/AgentCore/Seams/{Clock,RandomSource,Environment,FileSystem,Seams}.swift` |
@@ -245,6 +245,7 @@ tests/
 | Command dispatch parity | `Remote/RemoteParityTests/CommandDispatchParityTests.swift` |
 | View-model reduction | `AgentUITests/EngineViewModelTests.swift` |
 | Optimistic send + navigator actions | `AgentUITests/EngineViewModelNavigatorTests.swift` |
+| Workspace create/open model-catalog warm | `AgentUITests/WorkspaceLifecycleTests.swift` |
 | Interaction coverage (every command/event surfaced) | `AgentUITests/InteractionCoverageTests.swift` |
 | Session export | `AgentUITests/SessionExporterTests.swift` |
 | Voice + TTS + speech wrappers | `AgentUITests/{VoiceInputServiceTests,TTSStripMarkdownTests,SpeechCaptureTests,SpeechSynthesisTests}.swift` |
@@ -282,11 +283,12 @@ tests/
 3. Declare `transportDescriptor` (`.interactiveTerminal`, `.stdioJSONRPC`, or a real future ACP descriptor) and the relevant `AgentCapabilities`.
 4. Implement `sessionBootstrapBytes(context:)` and `encodeCommand(_:)` when the agent is not Claude slash-text compatible.
 5. If the CLI has selectable chat modes (Claude Think/Review, Cursor agent/plan/ask, …), override `availableAgentModes()` returning `[AgentModeOption]` — never hardcode the vendor's modes in `AgentUI`; the composer bottom-bar dropdown renders whatever the active adapter publishes.
-6. Register at startup: `await AdapterRegistry.shared.register(CodexAdapter())`.
-7. Add a test target under `tests/AgenticCLIs/<AgentName>/` with at least a smoke test that the adapter constructs — see [`tests/AgenticCLIs/README.md`](tests/AgenticCLIs/README.md).
-7. **Do not** add any import of the new adapter inside `AgentCore` or `AgentUI`.
+6. Override `availableModels()` / `refreshModelCatalog()` as needed. Prefer `.automatic` (in-memory warm via `WorkspaceLifecycle`) unless discovery is expensive — then use `.manual(detail:)` so only that adapter's catalog is persisted in `WorkspaceLocalState.adapterModelCaches` (Claude Code pattern).
+7. Register at startup: `await AdapterRegistry.shared.register(CodexAdapter())`.
+8. Add a test target under `tests/AgenticCLIs/<AgentName>/` with at least a smoke test that the adapter constructs — see [`tests/AgenticCLIs/README.md`](tests/AgenticCLIs/README.md).
+9. **Do not** add any import of the new adapter inside `AgentCore` or `AgentUI`.
 
-Full recipe in `docs/reference/patterns/plugin-adapter-protocol.md`.
+Full recipe in `docs/reference/patterns/plugin-adapter-protocol.md`. Canonical model-catalog rules: [`docs/architecture.md` § Model catalogs](docs/architecture.md#model-catalogs).
 
 ### Add a new SwiftUI view
 
@@ -509,4 +511,4 @@ If any of those isn't true, you aren't ready to merge yet. That's the bar.
 
 ---
 
-*Last revised after the generic transport + Codex surface landed (AgentTransport, Codex App Server stdio, project types, required agent selection). Update this file in the same PR as any change to module layout, top-level types, or merge gates.*
+*Last revised after workspace model-catalog warm landed (`WorkspaceLifecycle`, Claude-only `adapterModelCaches`, create/open gating). Update this file in the same PR as any change to module layout, top-level types, or merge gates.*

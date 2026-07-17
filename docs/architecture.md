@@ -611,6 +611,9 @@ public protocol AgentAdapter: Sendable {
 
     // 9. Model catalog (composer picker)
     func availableModels() -> [AgentModelOption]
+    func modelCatalogRefreshKind() -> ModelCatalogRefreshKind
+    func refreshModelCatalog() async throws -> [AgentModelOption]
+    func seedModelCatalog(_ models: [AgentModelOption])
 
     // 10. Agent modes (composer bottom-bar mode dropdown)
     func availableAgentModes() -> [AgentModeOption]
@@ -624,6 +627,33 @@ public protocol AgentAdapter: Sendable {
 The adapter owns command encoding. Claude's default implementation emits slash
 text; Codex overrides with JSON-RPC frames. Unsupported commands are surfaced as
 explicit `.error(.unsupportedCommand)` events, never silently skipped.
+
+### Model catalogs
+
+Composer model pickers are filled **before** the workspace UI becomes usable.
+`WorkspaceLifecycle` (`AgentUI/Workspace/WorkspaceLifecycle.swift`) is the
+shared create/open path:
+
+| Call | When |
+| --- | --- |
+| `openEmptyWorkspace(_:)` | New Workspace / reopen empty shell |
+| `loadModelCatalogs(at:rootProjectType:)` | Open / restore a workspace with projects |
+| `ensureModels(for:)` | Create / add / restore a project that introduces an adapter |
+
+Only shipping adapters **used by projects in that workspace** are warmed
+(pinned types → that agent; `.mixed` → every `SupportedBuiltInAgent.shipping`
+id). Custom projects contribute no shipping catalog.
+
+`ModelCatalogRefreshKind` splits persistence:
+
+| Kind | Adapters | Storage |
+| --- | --- | --- |
+| `.manual(detail:)` | Claude Code | Workspace file cache in `<workspace>/.codemixer/workspace.json` (`adapterModelCaches`). Load from cache whenever non-empty; live probe once on first empty cache, or when the user taps **Refresh models** in Settings → Workspace. |
+| `.automatic` | Codex, Cursor, … | In-memory only (Codex may also read `~/.codex/models_cache.json`). Never written to `workspace.json`. |
+
+Bootstrap sets `isPreparingWorkspace` while create/open awaits catalog warm;
+`RootView` keeps the loading spinner up until that flag clears. Project create /
+add is `async` and blocks the New Project sheet until `ensureModels` succeeds.
 
 ### Agent modes are provider-owned, not UI-hardcoded
 
@@ -1179,7 +1209,7 @@ Persists `AppearancePrefs` and auto-approval rules. Appearance includes theme (`
 
 The agent-agnostic model behind the GUI session navigator. A *workspace* is the loaded folder (one window); each workspace owns an ordered list of `ProjectRef`s (path, display name, required `ProjectType`). The workspace root is seeded as the default project; further projects are created as subfolders or added from anywhere on disk.
 
-Project type is dual-persisted: app-support `workspaces.json` *and* `<project>/.codemixer/project.json` (`ProjectPaths` / `ProjectLocalState`). Each workspace also writes its project catalog to `<workspace>/.codemixer/workspace.json` (`WorkspaceLocalState`). `workspaces.json` schema v3 tracks `activeWorkspacePath` so launch restores the last open workspace unless the user chose **Close Workspace**.
+Project type is dual-persisted: app-support `workspaces.json` *and* `<project>/.codemixer/project.json` (`ProjectPaths` / `ProjectLocalState`). Each workspace also writes its project catalog to `<workspace>/.codemixer/workspace.json` (`WorkspaceLocalState`). That same file optionally caches **Claude Code** model pickers under `adapterModelCaches` (keyed by `AgentID.rawValue`) so print-mode discovery stays rare — see [Model catalogs](#model-catalogs). Other adapters keep models in memory only. `workspaces.json` schema v3 tracks `activeWorkspacePath` so launch restores the last open workspace unless the user chose **Close Workspace**.
 
 ```swift
 public actor WorkspaceProjectsStore {
@@ -1193,6 +1223,8 @@ public actor WorkspaceProjectsStore {
     public func renameProject(path:to:in:) async throws -> ProjectRef  // label only
     public func removeProject(path:in:) async throws -> RemovedProject? // never the root
     public func restoreProject(_:in:) async throws                     // undo
+    public func cachedModels(for:in:) async -> WorkspaceLocalState.CachedAdapterModels?
+    public func saveModels(_:for:refreshedAt:in:) async throws         // Claude catalog only
 }
 ```
 

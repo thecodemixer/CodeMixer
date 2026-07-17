@@ -185,6 +185,80 @@ struct EngineViewModelNavigatorTests {
         await bus.shutdown()
     }
 
+    @Test("renameProject follows the renamed active project path")
+    func renameProjectFollowsRenamedActivePath() async throws {
+        let port = RecordingPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
+        let fileSystem = InMemoryFileSystem()
+        let environment = FakeEnvironment(home: URL(fileURLWithPath: "/Users/me"))
+        let store = WorkspaceProjectsStore(environment: environment, fileSystem: fileSystem)
+        let workspace = URL(fileURLWithPath: "/Users/me/ws")
+        let ref = try await store.createProject(name: "api", projectType: .codex, in: workspace)
+        let oldPath = ref.path
+        let newPath = workspace.appendingPathComponent("Backend").path
+        vm.workspaceProjects = store
+        vm.workspaceRoot = workspace
+        vm.workspace = URL(fileURLWithPath: oldPath)
+        vm.sessionID = "thread-1"
+        vm.projects = [ref]
+        vm.sessionsByProject[oldPath] = [
+            SessionSummary(id: "s1", agentID: .codex,
+                           workspace: URL(fileURLWithPath: oldPath),
+                           title: "Thread", lastActivity: Date(), messageCount: 1),
+        ]
+        vm.loadingProjectPaths.insert(oldPath)
+        vm.projectResumableSessionSupport[oldPath] = true
+
+        vm.renameProject(path: oldPath, newName: "Backend")
+        await drain()
+
+        #expect(vm.workspace?.path == newPath)
+        #expect(vm.projects.map(\.path) == [newPath])
+        #expect(vm.sessionsByProject[oldPath] == nil)
+        #expect(vm.sessionsByProject[newPath]?.first?.id == "s1")
+        #expect(!vm.loadingProjectPaths.contains(oldPath))
+        #expect(vm.loadingProjectPaths.contains(newPath))
+        #expect(vm.projectResumableSessionSupport[oldPath] == nil)
+        #expect(port.commands.contains {
+            if case .openProject(let path, let resume) = $0 {
+                return path == newPath && resume == "thread-1"
+            }
+            return false
+        })
+
+        await bus.shutdown()
+    }
+
+    @Test("renameProject blocks folder rename until the turn ends")
+    func renameProjectBlocksWhileTurnIsActive() async throws {
+        let (vm, bus, _) = makeModel()
+        let fileSystem = InMemoryFileSystem()
+        let environment = FakeEnvironment(home: URL(fileURLWithPath: "/Users/me"))
+        let store = WorkspaceProjectsStore(environment: environment, fileSystem: fileSystem)
+        let workspace = URL(fileURLWithPath: "/Users/me/ws")
+        let ref = try await store.createProject(name: "api", projectType: .codex, in: workspace)
+        let oldPath = ref.path
+        let newPath = workspace.appendingPathComponent("Backend").path
+        vm.workspaceProjects = store
+        vm.workspaceRoot = workspace
+        vm.workspace = workspace.appendingPathComponent("other")
+        vm.projects = [ref]
+        vm.activity = .awaitingFirstChunk
+
+        vm.renameProject(path: oldPath, newName: "Backend")
+        await drain()
+
+        #expect(fileSystem.isDirectory(at: URL(fileURLWithPath: oldPath)))
+        #expect(!fileSystem.isDirectory(at: URL(fileURLWithPath: newPath)))
+        #expect(vm.projects.map(\.path) == [oldPath])
+        #expect(vm.diagnostics.contains {
+            $0.message == "Wait for the current turn to finish before renaming a project."
+        })
+
+        await bus.shutdown()
+    }
+
     @Test("newChat always opens the project with no resume id for a fresh session")
     func newChatRoutesToWireCommands() async {
         let port = RecordingPort()
@@ -522,7 +596,7 @@ struct EngineViewModelNavigatorTests {
     }
 
     @Test("createProject persists the selected mixed default and opens the new project")
-    func createProjectPersistsMixedDefault() async {
+    func createProjectPersistsMixedDefault() async throws {
         let port = RecordingPort()
         let bus = MulticastEventBus()
         let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
@@ -534,11 +608,26 @@ struct EngineViewModelNavigatorTests {
         defer { vm.unsubscribe() }
 
         let workspace = URL(fileURLWithPath: "/Users/me/ws")
-        vm.adoptEmptyWorkspace(workspace)
-        try? await Task.sleep(for: .milliseconds(40))
+        try await vm.adoptEmptyWorkspace(workspace)
 
-        vm.createProject(name: "mixed", projectType: .mixed(defaultAgent: .claudeCode))
-        try? await Task.sleep(for: .milliseconds(80))
+        await AdapterRegistry.shared.register(MockAdapter(
+            id: .claudeCode,
+            displayName: "Claude Code",
+            models: [AgentModelOption(id: "sonnet", label: "Sonnet")]
+        ))
+        await AdapterRegistry.shared.register(MockAdapter(
+            id: .codex,
+            displayName: "Codex",
+            models: [AgentModelOption(id: "gpt", label: "GPT")]
+        ))
+        await AdapterRegistry.shared.register(MockAdapter(
+            id: .cursorCLI,
+            displayName: "Cursor",
+            models: [AgentModelOption(id: "auto", label: "Auto")]
+        ))
+
+        await vm.createProject(name: "mixed", projectType: .mixed(defaultAgent: .claudeCode))
+        try? await Task.sleep(for: .milliseconds(40))
 
         let project = await store.project(path: workspace.appendingPathComponent("mixed").path)
         #expect(project?.projectType == .mixed(defaultAgent: .claudeCode))
@@ -583,7 +672,7 @@ struct EngineViewModelNavigatorTests {
     }
 
     @Test("sessionStarted for a subproject keeps workspaceRoot and project sections")
-    func sessionStartedSubprojectKeepsWorkspaceProjects() async {
+    func sessionStartedSubprojectKeepsWorkspaceProjects() async throws {
         let port = RecordingPort()
         let bus = MulticastEventBus()
         let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
@@ -596,8 +685,7 @@ struct EngineViewModelNavigatorTests {
 
         let workspace = URL(fileURLWithPath: "/Users/me/ws")
         try? fileSystem.createDirectory(at: workspace, withIntermediates: true)
-        vm.adoptEmptyWorkspace(workspace)
-        try? await Task.sleep(for: .milliseconds(40))
+        try await vm.adoptEmptyWorkspace(workspace)
 
         let ref = try! await store.createProject(name: "api", projectType: .claudeCode, in: workspace)
         let refs = await store.projects(for: workspace)
@@ -710,6 +798,28 @@ struct EngineViewModelNavigatorTests {
         #expect(vm.sessionsByProject[project.path]?.first?.id == "thread-2")
 
         await bus.shutdown()
+    }
+
+    @Test("modelCatalogAgentIDs only includes shipping adapters used by workspace projects")
+    func modelCatalogAgentIDsScopedToWorkspaceProjects() {
+        let ids = EngineViewModel.modelCatalogAgentIDs(in: [
+            .init(path: "/ws/claude", displayName: "Claude", projectType: .claudeCode),
+            .init(path: "/ws/cursor", displayName: "Cursor", projectType: .cursorCLI),
+            .init(path: "/ws/mixed", displayName: "Mixed",
+                  projectType: .mixed(defaultAgent: .codex)),
+            .init(path: "/ws/custom", displayName: "Custom",
+                  projectType: .custom(CustomAgentRef(
+                    id: "x",
+                    displayName: "X",
+                    transport: .agentClientProtocol,
+                    executablePath: "/bin/x",
+                    arguments: []
+                  ))),
+        ])
+        // Mixed expands to every shipping agent; custom contributes none.
+        #expect(ids == [.claudeCode, .cursorCLI, .codex])
+        #expect(EngineViewModel.modelCatalogAgentIDs(for: .mixed(defaultAgent: .claudeCode))
+                == SupportedBuiltInAgent.shippingIDs())
     }
 }
 
