@@ -1,20 +1,30 @@
 # ACP CLIs
 
-Vendor-specific Agent Client Protocol adapters. Generic ACP framing, codec,
-reverse RPC, and session index live in
+Vendor-specific and generic Agent Client Protocol adapters. Framing, codec,
+reverse RPC, and the shared session index live in
 [`../AgentClientProtocol`](../AgentClientProtocol). This target owns
-**named, shipping** ACP-backed CLIs.
+**shipping** ACP-backed CLIs (Cursor) and the **generic Custom** wrapper used
+for `ProjectType.custom` ACP projects.
 
 ## Layout
 
 ```
 ACPCLIs/
 ├── README.md
-└── Cursor/
-    ├── Adapter/CursorACPAdapter.swift
-    └── Common/
-        ├── CursorBinaryLocator.swift
-        └── CursorModeCommand.swift
+├── Cursor/
+│   ├── Adapter/CursorACPAdapter.swift
+│   └── Common/
+│       ├── CursorBinaryLocator.swift
+│       ├── CursorModeCommand.swift
+│       └── CursorModelCatalog.swift
+└── Custom/
+    ├── Adapter/
+    │   ├── CustomACPAdapter.swift
+    │   └── CustomACPAdapterFactory.swift
+    ├── Common/
+    │   ├── CustomACPBinaryLocator.swift
+    │   └── CustomACPModeMapping.swift
+    └── digital-twin/fake-custom-acp/   # `swift build --product fake-custom-acp`
 ```
 
 ## Cursor ACP contract snapshot
@@ -30,7 +40,42 @@ Probed against `cursor-agent` `2026.04.15-dccdccd` (`cursor-agent acp`):
 | Slash `/agent` `/plan` `/ask` | Treated as ordinary prompts — **not** mode switches |
 | `/debug` | **Not** an ACP chat mode. Slash `/debug` only starts a conversational debug help turn. CLI `--mode` has no `debug` choice. Documented as diagnostic-only. |
 | Models | `session/new` may include `models.availableModels` |
+| Sessions | App-support `ACPSessionIndex` (turn cache for empty `session/load`) |
 
 Codemixer therefore encodes Cursor mode changes via `session/set_mode`, not
 slash text. `/debug` is listed in the catalog as diagnostic-only and is not
 mapped to `session/set_mode`.
+
+## Custom ACP contract
+
+`CustomACPAdapter` wraps `ACPAdapter` for any user-configured ACP binary
+(`ProjectType.custom` + transport Agent Client Protocol). Bootstrap/daemon
+register `CustomACPAdapterFactory` (caches by `CustomAgentRef`).
+
+| Concern | Behavior |
+| --- | --- |
+| Launch | Resolved executable + `CustomAgentRef.arguments` (`CODEMIXER_CUSTOM_ACP_BIN` override for tests) |
+| Auth / handshake | Inherited from `ACPAdapter` (`.sessionHandshakeGate`) |
+| Modes | Dynamic from `session/new` `availableModes` (id + name + description); composer lists them; slash `/<id>` remaps to `session/set_mode` |
+| Models | From ACP session (`availableModels`) |
+| Sessions | Project-local store under `<project>/.codemixer/acp/<customAgentID>/` |
+| Twin | `fake-custom-acp` advertises `migrate` / `document` / `agent` (not Cursor’s plan/ask) |
+
+### Project store layout
+
+```
+<project>/.codemixer/acp/<customAgentID>/
+  sessions-index.json
+  transcripts/<session-id>.jsonl
+```
+
+- Index holds metadata + embedded turns (same turn-cache roles as Cursor:
+  `user` / `thinking` / `tool` / `assistant`) for `localHistoryEvents` on empty
+  `session/load`.
+- JSONL is dual-written on each append (portable transcript; same 200-turn cap).
+- One-time migrate copies matching rows from app-support `acp-sessions.json`.
+- Resume still uses ACP `session/load` / `session/resume`; JSONL is not a
+  substitute for agent state.
+
+This Codemixer-owned transcript is an intentional exception for custom CLIs
+that do not write a vendor JSONL of their own (see `docs/architecture.md`).

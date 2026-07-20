@@ -59,7 +59,7 @@ public final class ACPClientState: @unchecked Sendable {
     /// Live tool-call metadata retained until `tool_call_update` completes.
     private var toolMetaByID: [String: (name: String, inputJSON: String?)] = [:]
     private var agentCapabilities: JSONValue?
-    private var availableModeIDs: [String] = []
+    private var availableModesStorage: [ACPSessionMode] = []
     private var currentModeIDStorage: String?
     private var availableModelOptions: [AgentModelOption] = []
     private var currentModelIDStorage: String?
@@ -106,7 +106,7 @@ public final class ACPClientState: @unchecked Sendable {
             thinkingBlockIDs.removeAll()
             toolMetaByID.removeAll()
             agentCapabilities = nil
-            availableModeIDs = []
+            availableModesStorage = []
             currentModeIDStorage = nil
             availableModelOptions = []
             currentModelIDStorage = nil
@@ -162,7 +162,7 @@ public final class ACPClientState: @unchecked Sendable {
             thinkingBlockIDs.removeAll()
             toolMetaByID.removeAll()
             phaseStorage = .awaitingSession
-            availableModeIDs = []
+            availableModesStorage = []
             currentModeIDStorage = nil
             availableModelOptions = []
             currentModelIDStorage = nil
@@ -192,7 +192,7 @@ public final class ACPClientState: @unchecked Sendable {
             thinkingBlockIDs.removeAll()
             toolMetaByID.removeAll()
             phaseStorage = .awaitingSession
-            availableModeIDs = []
+            availableModesStorage = []
             currentModeIDStorage = nil
             availableModelOptions = []
             currentModelIDStorage = nil
@@ -223,10 +223,10 @@ public final class ACPClientState: @unchecked Sendable {
         withLock { listSessionsSupported }
     }
 
-    func setSessionModes(currentModeID: String?, availableModeIDs: [String]) {
+    func setSessionModes(currentModeID: String?, available: [ACPSessionMode]) {
         withLock {
             self.currentModeIDStorage = currentModeID
-            self.availableModeIDs = availableModeIDs
+            self.availableModesStorage = available
         }
     }
 
@@ -238,12 +238,16 @@ public final class ACPClientState: @unchecked Sendable {
         withLock { currentModeIDStorage }
     }
 
-    func availableModes() -> [String] {
-        withLock { availableModeIDs }
+    func availableModes() -> [ACPSessionMode] {
+        withLock { availableModesStorage }
+    }
+
+    func availableModeIDs() -> [String] {
+        withLock { availableModesStorage.map(\.id) }
     }
 
     func supportsMode(_ modeID: String) -> Bool {
-        withLock { availableModeIDs.contains(modeID) }
+        withLock { availableModesStorage.contains { $0.id == modeID } }
     }
 
     func setSessionModels(currentModelID: String?, available: [AgentModelOption]) {

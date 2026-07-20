@@ -109,7 +109,7 @@ Adding `src/AgenticCLIs/CursorCLI/` (example):
 | [`ClaudeCode/`](ClaudeCode/README.md) | `ClaudeCode` | `claude` | `fake-claude` |
 | [`Codex/`](Codex/README.md) | `Codex` | `codex` | none |
 | [`AgentClientProtocol/`](AgentClientProtocol/README.md) | `AgentClientProtocol` | user-configured ACP binary | `fake-acp` |
-| [`ACPCLIs/`](ACPCLIs/README.md) | `ACPCLIs` | shipping ACP CLIs (Cursor first) | reuses `fake-acp` |
+| [`ACPCLIs/`](ACPCLIs/README.md) | `ACPCLIs` | shipping ACP CLIs (Cursor) + generic Custom ACP wrapper | reuses `fake-acp` |
 
 > **Grouped ACP CLIs:** `ACPCLIs` is the intentional exception to one-target-per-agent.
 > Generic ACP protocol primitives stay in `AgentClientProtocol`; named shipping

@@ -48,6 +48,78 @@ struct ACPEventDecoderTests {
         #expect(summaries.contains { $0.id == "abc-123" })
     }
 
+    @Test("session new response records advertised modes with name and description")
+    func sessionNewModes() async {
+        let fixture = ACPDecoderFixture(customAgentID: "custom")
+        _ = await fixture.decode(.response(
+            id: .number(1),
+            result: .object([
+                "protocolVersion": .number(1),
+                "agentCapabilities": .object([:]),
+                "authMethods": .array([]),
+            ]),
+            error: nil
+        ))
+        _ = await fixture.decode(.response(
+            id: .number(2),
+            result: .object([
+                "sessionId": .string("mode-sess"),
+                "modes": .object([
+                    "currentModeId": .string("migrate"),
+                    "availableModes": .array([
+                        .object([
+                            "id": .string("migrate"),
+                            "name": .string("Migrate"),
+                            "description": .string("Run migrations"),
+                        ]),
+                        .object([
+                            "id": .string("document"),
+                            "name": .string("Document"),
+                        ]),
+                    ]),
+                ]),
+            ]),
+            error: nil
+        ))
+        let modes = fixture.state.availableModes()
+        #expect(modes.map(\.id) == ["migrate", "document"])
+        #expect(modes[0].name == "Migrate")
+        #expect(modes[0].description == "Run migrations")
+        #expect(modes[1].name == "Document")
+        #expect(modes[1].description == nil)
+        #expect(fixture.state.currentModeID() == "migrate")
+    }
+
+    @Test("session new falls back to mode id when name is missing")
+    func sessionNewModeNameFallback() async {
+        let fixture = ACPDecoderFixture()
+        _ = await fixture.decode(.response(
+            id: .number(1),
+            result: .object([
+                "protocolVersion": .number(1),
+                "agentCapabilities": .object([:]),
+                "authMethods": .array([]),
+            ]),
+            error: nil
+        ))
+        _ = await fixture.decode(.response(
+            id: .number(2),
+            result: .object([
+                "sessionId": .string("s1"),
+                "modes": .object([
+                    "availableModes": .array([
+                        .object(["id": .string("agent")]),
+                    ]),
+                ]),
+            ]),
+            error: nil
+        ))
+        let modes = fixture.state.availableModes()
+        #expect(modes.count == 1)
+        #expect(modes[0].id == "agent")
+        #expect(modes[0].name == "agent")
+    }
+
     @Test("session new response records advertised models for the composer")
     func sessionNewModels() async {
         let fixture = ACPDecoderFixture(customAgentID: "cursor")

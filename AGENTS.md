@@ -104,9 +104,12 @@ Codemixer/
 | ACP reverse-terminal process wrapper | `AgenticCLIs/AgentClientProtocol/External/ACPTerminalProcess.swift` |
 | ACP digital twin | `AgenticCLIs/AgentClientProtocol/digital-twin/Twin/ACPTwin.swift` |
 | Shipping ACP CLIs (Cursor) | `AgenticCLIs/ACPCLIs/Cursor/` — `CursorACPAdapter`, binary locator, mode commands |
-| Custom ACP factory registration | `CustomAgentAdapterFactory` + `ACPCustomAgentAdapterFactory` (Bootstrap/daemon) |
+| Custom ACP CLIs | `AgenticCLIs/ACPCLIs/Custom/` — `CustomACPAdapter` + `CustomACPAdapterFactory`; project `.codemixer/acp/<id>/` |
+| Custom ACP factory registration | `CustomACPAdapterFactory` (Bootstrap/daemon); bare `ACPCustomAgentAdapterFactory` for unit tests |
 | Live ACP harness (opt-in tests) | `tests/AgenticCLIs/AgentClientProtocol/ACPAdapterTests/LiveACPHarness.swift` — docs in `tests/AgenticCLIs/README.md` |
 | Live Cursor ACP harness (opt-in) | `tests/AgenticCLIs/ACPCLIs/CursorACPCLITests/LiveCursorACPHarness.swift` |
+| Live Custom ACP harness (opt-in) | `tests/AgenticCLIs/ACPCLIs/CustomACPCLITests/LiveCustomACPHarness.swift` |
+| Fake Custom ACP twin | `swift build --product fake-custom-acp` — `ACPCLIs/Custom/digital-twin/fake-custom-acp/` |
 | Agentic CLI layout convention | `AgenticCLIs/README.md` |
 | The wire DTOs (Foundation-only) | `Core/AgentProtocol/{AgentCommand,AgentEventWire,WireFrames,Decisions,Prefs,AttachmentRef,WireVersion}.swift` |
 | WebSocket server | `Remote/AgentRemoteControl/RemoteControlServer.swift`, `ClientConnection.swift` |
@@ -234,6 +237,7 @@ tests/
 | Live ACP harness (opt-in) | `AgenticCLIs/AgentClientProtocol/ACPAdapterTests/{LiveACPHarness,LiveACPIntegrationTests}.swift` — see [`tests/AgenticCLIs/README.md`](tests/AgenticCLIs/README.md) |
 | ACP digital twin | `AgenticCLIs/AgentClientProtocol/ACPTwinTests/ACPTwinTests.swift` |
 | Cursor ACP adapter + fake/live harness | `AgenticCLIs/ACPCLIs/CursorACPCLITests/` — see [`tests/AgenticCLIs/README.md`](tests/AgenticCLIs/README.md) |
+| Custom ACP adapter + project store + fake/live | `AgenticCLIs/ACPCLIs/CustomACPCLITests/` — see [`tests/AgenticCLIs/README.md`](tests/AgenticCLIs/README.md) |
 | FakeClock virtual sleep | `TestSupport/AgentTestSupportTests/FakeClockTests.swift` |
 | Pairing PIN + lockout | `Remote/AgentRemoteControlTests/PairingServiceTests.swift` |
 | Paired-device store | `Remote/AgentRemoteControlTests/PairedDeviceStoreTests.swift` |

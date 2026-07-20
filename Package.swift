@@ -25,6 +25,7 @@ let package = Package(
         .executable(name: "codemixer", targets: ["CodemixerApp"]),
         .executable(name: "fake-claude", targets: ["FakeClaudeCLI"]),
         .executable(name: "fake-acp", targets: ["FakeACPCLI"]),
+        .executable(name: "fake-custom-acp", targets: ["FakeCustomACPCLI"]),
     ],
     dependencies: [
         .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.2.0"),
@@ -83,7 +84,10 @@ let package = Package(
             name: "ACPCLIs",
             dependencies: ["AgentCore", "AgentProtocol", "AgentClientProtocol"],
             path: "src/AgenticCLIs/ACPCLIs",
-            exclude: ["README.md"],
+            exclude: [
+                "README.md",
+                "Custom/digital-twin/fake-custom-acp",
+            ],
             swiftSettings: swiftSettings
         ),
         .target(
@@ -115,6 +119,12 @@ let package = Package(
             name: "FakeACPCLI",
             dependencies: ["AgentClientProtocol"],
             path: "src/AgenticCLIs/AgentClientProtocol/digital-twin/fake-acp",
+            swiftSettings: swiftSettings
+        ),
+        .executableTarget(
+            name: "FakeCustomACPCLI",
+            dependencies: ["AgentClientProtocol"],
+            path: "src/AgenticCLIs/ACPCLIs/Custom/digital-twin/fake-custom-acp",
             swiftSettings: swiftSettings
         ),
         .executableTarget(
@@ -174,6 +184,12 @@ let package = Package(
             name: "CursorACPCLITests",
             dependencies: ["ACPCLIs", "AgentClientProtocol", "AgentCore", "AgentTestSupport"],
             path: "tests/AgenticCLIs/ACPCLIs/CursorACPCLITests",
+            swiftSettings: swiftSettings
+        ),
+        .testTarget(
+            name: "CustomACPCLITests",
+            dependencies: ["ACPCLIs", "AgentClientProtocol", "AgentCore", "AgentTestSupport"],
+            path: "tests/AgenticCLIs/ACPCLIs/CustomACPCLITests",
             swiftSettings: swiftSettings
         ),
         .testTarget(

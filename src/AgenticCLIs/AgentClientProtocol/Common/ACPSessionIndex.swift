@@ -6,103 +6,14 @@ import AgentCore
 /// resumable-session list. Cursor's `session/load` currently returns modes /
 /// models without replaying history; the turn cache restores chat rows
 /// (user / thinking / tool / assistant) when the agent does not stream load chunks.
-public actor ACPSessionIndex {
-    private struct Turn: Sendable, Codable {
-        let role: String
-        let text: String
-        let toolCallID: String?
-        let toolSuccess: Bool?
-        let toolOutputSummary: String?
-        let toolInputJSON: String?
-
-        enum CodingKeys: String, CodingKey {
-            case role, text, toolCallID, toolSuccess, toolOutputSummary, toolInputJSON
-        }
-
-        init(role: String,
-             text: String,
-             toolCallID: String? = nil,
-             toolSuccess: Bool? = nil,
-             toolOutputSummary: String? = nil,
-             toolInputJSON: String? = nil) {
-            self.role = role
-            self.text = text
-            self.toolCallID = toolCallID
-            self.toolSuccess = toolSuccess
-            self.toolOutputSummary = toolOutputSummary
-            self.toolInputJSON = toolInputJSON
-        }
-
-        init(from decoder: Decoder) throws {
-            let c = try decoder.container(keyedBy: CodingKeys.self)
-            role = try c.decode(String.self, forKey: .role)
-            text = try c.decode(String.self, forKey: .text)
-            toolCallID = try c.decodeIfPresent(String.self, forKey: .toolCallID)
-            toolSuccess = try c.decodeIfPresent(Bool.self, forKey: .toolSuccess)
-            toolOutputSummary = try c.decodeIfPresent(String.self, forKey: .toolOutputSummary)
-            toolInputJSON = try c.decodeIfPresent(String.self, forKey: .toolInputJSON)
-        }
-
-        func encode(to encoder: Encoder) throws {
-            var c = encoder.container(keyedBy: CodingKeys.self)
-            try c.encode(role, forKey: .role)
-            try c.encode(text, forKey: .text)
-            try c.encodeIfPresent(toolCallID, forKey: .toolCallID)
-            try c.encodeIfPresent(toolSuccess, forKey: .toolSuccess)
-            try c.encodeIfPresent(toolOutputSummary, forKey: .toolOutputSummary)
-            try c.encodeIfPresent(toolInputJSON, forKey: .toolInputJSON)
-        }
-    }
-
-    private struct Entry: Sendable, Codable {
-        let id: String
-        let customAgentID: String
-        let workspacePath: String
-        var title: String
-        var lastActivity: Date
-        var messageCount: Int
-        var turns: [Turn]
-
-        enum CodingKeys: String, CodingKey {
-            case id, customAgentID, workspacePath, title, lastActivity, messageCount, turns
-        }
-
-        init(id: String,
-             customAgentID: String,
-             workspacePath: String,
-             title: String,
-             lastActivity: Date,
-             messageCount: Int,
-             turns: [Turn]) {
-            self.id = id
-            self.customAgentID = customAgentID
-            self.workspacePath = workspacePath
-            self.title = title
-            self.lastActivity = lastActivity
-            self.messageCount = messageCount
-            self.turns = turns
-        }
-
-        init(from decoder: Decoder) throws {
-            let c = try decoder.container(keyedBy: CodingKeys.self)
-            id = try c.decode(String.self, forKey: .id)
-            customAgentID = try c.decode(String.self, forKey: .customAgentID)
-            workspacePath = try c.decode(String.self, forKey: .workspacePath)
-            title = try c.decode(String.self, forKey: .title)
-            lastActivity = try c.decode(Date.self, forKey: .lastActivity)
-            messageCount = try c.decode(Int.self, forKey: .messageCount)
-            turns = try c.decodeIfPresent([Turn].self, forKey: .turns) ?? []
-        }
-    }
-
-    private struct Store: Sendable, Codable {
-        var entries: [Entry]
-    }
-
+///
+/// Default location: app-support `acp-sessions.json`. Custom ACP adapters inject
+/// `ACPProjectSessionStore` instead (project `.codemixer/acp/<id>/`).
+public actor ACPSessionIndex: ACPSessionIndexing {
     private let fileSystem: any FileSystem
     private let clock: any AgentClock
     private let url: URL
-    private var entries: [String: Entry] = [:]
+    private var entries: [String: ACPSessionStoreCodec.Entry] = [:]
     private var hasLoaded = false
 
     public init(environment: any AgentEnvironment = SystemEnvironment(),
@@ -119,9 +30,9 @@ public actor ACPSessionIndex {
                               title: String?) async {
         await loadIfNeeded()
         let path = workspace.standardizedFileURL.path
-        let key = Self.key(customAgentID: customAgentID, sessionID: id)
+        let key = ACPSessionStoreCodec.key(customAgentID: customAgentID, sessionID: id)
         let existing = entries[key]
-        entries[key] = Entry(
+        entries[key] = ACPSessionStoreCodec.Entry(
             id: id,
             customAgentID: customAgentID,
             workspacePath: path,
@@ -135,7 +46,7 @@ public actor ACPSessionIndex {
 
     public func recordTurn(sessionID: String, customAgentID: String, title: String?) async {
         await loadIfNeeded()
-        let key = Self.key(customAgentID: customAgentID, sessionID: sessionID)
+        let key = ACPSessionStoreCodec.key(customAgentID: customAgentID, sessionID: sessionID)
         guard var entry = entries[key] else { return }
         if entry.title == sessionID, let title, !title.isEmpty {
             entry.title = String(title.prefix(80))
@@ -146,7 +57,6 @@ public actor ACPSessionIndex {
         await persist()
     }
 
-    /// Append a user / thinking / assistant turn for local history replay on `session/load`.
     public func appendConversationTurn(sessionID: String,
                                        customAgentID: String,
                                        role: String,
@@ -156,12 +66,11 @@ public actor ACPSessionIndex {
         await appendTurn(
             sessionID: sessionID,
             customAgentID: customAgentID,
-            turn: Turn(role: role, text: trimmed),
+            turn: ACPConversationTurn(role: role, text: trimmed),
             titleFromUserText: role == "user" ? trimmed : nil
         )
     }
 
-    /// Append a completed tool call for local history replay on `session/load`.
     public func appendToolTurn(sessionID: String,
                                customAgentID: String,
                                toolCallID: String,
@@ -174,7 +83,7 @@ public actor ACPSessionIndex {
         await appendTurn(
             sessionID: sessionID,
             customAgentID: customAgentID,
-            turn: Turn(
+            turn: ACPConversationTurn(
                 role: "tool",
                 text: trimmedName,
                 toolCallID: toolCallID,
@@ -186,47 +95,13 @@ public actor ACPSessionIndex {
         )
     }
 
-    /// Rebuild Codemixer events from the local turn cache (Cursor fallback).
     public func localHistoryEvents(sessionID: String,
                                    customAgentID: String,
                                    random: any RandomSource) async -> [AgentEvent] {
         await loadIfNeeded()
-        let key = Self.key(customAgentID: customAgentID, sessionID: sessionID)
+        let key = ACPSessionStoreCodec.key(customAgentID: customAgentID, sessionID: sessionID)
         guard let entry = entries[key] else { return [] }
-        let now = clock.now()
-        return entry.turns.flatMap { turn -> [AgentEvent] in
-            switch turn.role {
-            case "user":
-                return [.userTurn(id: random.uuid().uuidString, text: turn.text)]
-            case "thinking":
-                let blockID = random.uuid()
-                return [
-                    .thinkingChunk(blockID: blockID, delta: turn.text),
-                    .thinkingComplete(blockID: blockID, duration: .zero),
-                ]
-            case "tool":
-                let id = turn.toolCallID ?? random.uuid().uuidString
-                return [
-                    .toolStart(
-                        id: id,
-                        name: turn.text,
-                        input: ToolInput(summary: turn.text, jsonPayload: turn.toolInputJSON),
-                        startedAt: now
-                    ),
-                    .toolEnd(
-                        id: id,
-                        success: turn.toolSuccess ?? true,
-                        output: ToolOutput(summary: turn.toolOutputSummary ?? ""),
-                        durationMS: 0
-                    ),
-                ]
-            case "assistant":
-                let id = random.uuid().uuidString
-                return [.assistantText(id: id, blockID: id, text: turn.text, isFinal: true)]
-            default:
-                return []
-            }
-        }
+        return ACPSessionStoreCodec.events(from: entry.turns, clock: clock, random: random)
     }
 
     public func summaries(workspace: URL, customAgentID: String) async -> [SessionSummary] {
@@ -247,29 +122,32 @@ public actor ACPSessionIndex {
             .sorted { $0.lastActivity > $1.lastActivity }
     }
 
+    /// Entries matching `customAgentID` + workspace path — used when migrating
+    /// to a project-local store.
+    func exportEntries(customAgentID: String, workspace: URL) async -> [ACPSessionStoreCodec.Entry] {
+        await loadIfNeeded()
+        let path = workspace.standardizedFileURL.path
+        return entries.values.filter {
+            $0.customAgentID == customAgentID && $0.workspacePath == path
+        }
+    }
+
     private func appendTurn(sessionID: String,
                             customAgentID: String,
-                            turn: Turn,
+                            turn: ACPConversationTurn,
                             titleFromUserText: String?) async {
         await loadIfNeeded()
-        let key = Self.key(customAgentID: customAgentID, sessionID: sessionID)
+        let key = ACPSessionStoreCodec.key(customAgentID: customAgentID, sessionID: sessionID)
         guard var entry = entries[key] else { return }
         entry.turns.append(turn)
-        if entry.turns.count > 200 {
-            entry.turns = Array(entry.turns.suffix(200))
-        }
+        entry.turns = ACPSessionStoreCodec.trimmedTurns(entry.turns)
         entry.lastActivity = clock.now()
-        // Sidebar count is chat turns only — thinking/tool are transcript detail.
-        entry.messageCount = entry.turns.filter { $0.role == "user" || $0.role == "assistant" }.count
+        entry.messageCount = ACPSessionStoreCodec.chatMessageCount(in: entry.turns)
         if entry.title == sessionID, let titleFromUserText {
             entry.title = String(titleFromUserText.prefix(80))
         }
         entries[key] = entry
         await persist()
-    }
-
-    private static func key(customAgentID: String, sessionID: String) -> String {
-        "\(customAgentID)::\(sessionID)"
     }
 
     private func loadIfNeeded() async {
@@ -282,10 +160,11 @@ public actor ACPSessionIndex {
             )
             guard fileSystem.fileExists(at: url) else { return }
             let data = try fileSystem.readData(at: url)
-            let store = try JSONDecoder().decode(Store.self, from: data)
+            let store = try ACPSessionStoreCodec.makeDecoder()
+                .decode(ACPSessionStoreCodec.Store.self, from: data)
             entries = Dictionary(
                 uniqueKeysWithValues: store.entries.map {
-                    (Self.key(customAgentID: $0.customAgentID, sessionID: $0.id), $0)
+                    (ACPSessionStoreCodec.key(customAgentID: $0.customAgentID, sessionID: $0.id), $0)
                 }
             )
         } catch {
@@ -300,8 +179,8 @@ public actor ACPSessionIndex {
 
     private func persist() async {
         do {
-            let store = Store(entries: Array(entries.values))
-            let data = try JSONEncoder().encode(store)
+            let store = ACPSessionStoreCodec.Store(schemaVersion: 1, entries: Array(entries.values))
+            let data = try ACPSessionStoreCodec.makeEncoder().encode(store)
             try fileSystem.writeAtomically(data, to: url)
         } catch {
             await SilentDiagnostics.shared.record(

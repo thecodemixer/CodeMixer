@@ -298,3 +298,36 @@ CODEMIXER_LIVE_CURSOR_ACP=1 \
 | `CODEMIXER_LIVE_CURSOR_ACP=1` | Yes (live) | Opt in |
 | `CURSOR_BIN` / `CODEMIXER_LIVE_CURSOR_BIN` | No | Override binary (defaults to PATH / `~/.local/bin/cursor-agent`) |
 | `CODEMIXER_LIVE_WORKSPACE` | No | Workspace directory |
+
+---
+
+## Custom ACP CLI (`ACPCLIs` / `CustomACPCLITests`)
+
+Generic ACP wrapper for `ProjectType.custom` projects (`CustomACPAdapter` +
+`CustomACPAdapterFactory`). Modes come from the live session; sessions + JSONL
+live under `<project>/.codemixer/acp/<customAgentID>/`.
+
+| File | Role |
+| --- | --- |
+| `ACPCLIs/CustomACPCLITests/CustomACPAdapterTests.swift` | Identity, locator, modes, factory cache |
+| `ACPCLIs/CustomACPCLITests/ACPProjectSessionStoreTests.swift` | Project index, JSONL dual-write, app-support migrate |
+| `ACPCLIs/CustomACPCLITests/FakeCustomACPIntegrationTests.swift` | Engine + Custom + `fake-custom-acp` modes + store |
+| `ACPCLIs/CustomACPCLITests/LiveCustomACPHarness.swift` | Opt-in live driver |
+| `ACPCLIs/CustomACPCLITests/LiveCustomACPIntegrationTests.swift` | Live suite |
+
+```bash
+swift build --product fake-custom-acp
+swift test --no-parallel --filter CustomACPCLI
+
+# Live Custom ACP (any ACP stdio binary)
+CODEMIXER_LIVE_CUSTOM_ACP=1 CODEMIXER_LIVE_ACP_BIN=/path/to/agent \
+  swift test --no-parallel --filter LiveCustomACPIntegrationTests
+```
+
+`fake-custom-acp` is a project-tool flavored twin (`migrate` / `document` / `agent`
+modes; reply `Hello from fake-custom-acp.`). It is distinct from `fake-acp`
+(Cursor-shaped agent/plan/ask).
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `CODEMIXER_LIVE_CUSTOM_ACP=1` | Yes (live) | Opt in |
+| `CODEMIXER_LIVE_ACP_BIN` / `CODEMIXER_CUSTOM_ACP_BIN` | Yes (live) | ACP executable path |

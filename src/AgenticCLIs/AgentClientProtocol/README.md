@@ -15,7 +15,11 @@ Agent Client Protocol launch an ACP agent server over stdio JSON-RPC
 | Cancel | `session/cancel` notification |
 | Updates | `session/update` → `AgentEvent`s |
 | Reverse RPCs | `fs/*`, `terminal/*`, `session/request_permission` |
-| Sessions | Local `ACPSessionIndex` + `.resumableSessions` |
+| Sessions | `ACPSessionIndexing`: app-support `ACPSessionIndex` (Cursor / bare) or project `ACPProjectSessionStore` (Custom under `.codemixer/acp/<id>/`) |
+
+Production custom projects register `CustomACPAdapterFactory` from `ACPCLIs`
+(Bootstrap/daemon). `ACPCustomAgentAdapterFactory` still builds a bare
+`ACPAdapter` for unit/twin tests.
 
 ## Layout
 

@@ -17,14 +17,14 @@ public actor ACPEventDecoder {
     }
 
     private let state: ACPClientState
-    private let sessionIndex: ACPSessionIndex
+    private let sessionIndex: any ACPSessionIndexing
     private let fileAccess: ACPFileAccess
     private let terminals: ACPTerminalSession
     private let clock: any AgentClock
     private let random: any RandomSource
 
     public init(state: ACPClientState,
-                sessionIndex: ACPSessionIndex,
+                sessionIndex: any ACPSessionIndexing,
                 fileAccess: ACPFileAccess,
                 terminals: ACPTerminalSession,
                 clock: any AgentClock,
@@ -149,12 +149,15 @@ public actor ACPEventDecoder {
         }
         state.setSessionID(sessionID)
         let modes = result?["modes"]
-        let available = (modes?["availableModes"]?.arrayValue ?? []).compactMap {
-            $0["id"]?.stringValue
+        let available = (modes?["availableModes"]?.arrayValue ?? []).compactMap { mode -> ACPSessionMode? in
+            guard let id = mode["id"]?.stringValue, !id.isEmpty else { return nil }
+            let name = mode["name"]?.stringValue.flatMap { $0.isEmpty ? nil : $0 } ?? id
+            let description = mode["description"]?.stringValue.flatMap { $0.isEmpty ? nil : $0 }
+            return ACPSessionMode(id: id, name: name, description: description)
         }
         state.setSessionModes(
             currentModeID: modes?["currentModeId"]?.stringValue,
-            availableModeIDs: available
+            available: available
         )
         let modelCatalog = ACPModelCatalog.parse(
             models: result?["models"],

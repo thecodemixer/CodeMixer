@@ -69,7 +69,7 @@ final class Bootstrap {
         await AdapterRegistry.shared.register(adapter)
         await AdapterRegistry.shared.register(CodexAdapter())
         await AdapterRegistry.shared.register(CursorACPAdapter())
-        await CustomAgentAdapterFactories.shared.register(ACPCustomAgentAdapterFactory())
+        await CustomAgentAdapterFactories.shared.register(CustomACPAdapterFactory())
 
         let env = Seams.live.environment.processEnvironment()
         if env["CODEMIXER_UI_BACKEND"] == "daemon" {
@@ -416,11 +416,33 @@ final class Bootstrap {
     }
 
     private static func listSessions(for url: URL) async -> [SessionSummary] {
-        let adapters = await AdapterRegistry.shared.all()
         var sessions: [SessionSummary] = []
-        for adapter in adapters where adapter.capabilities.contains(.resumableSessions) {
-            sessions += await adapter.listResumableSessions(workspace: url)
+        var seen = Set<String>()
+
+        func append(_ batch: [SessionSummary]) {
+            for summary in batch {
+                let key = "\(summary.agentID.rawValue)::\(summary.id)"
+                guard seen.insert(key).inserted else { continue }
+                sessions.append(summary)
+            }
         }
+
+        let adapters = await AdapterRegistry.shared.all()
+        for adapter in adapters where adapter.capabilities.contains(.resumableSessions) {
+            append(await adapter.listResumableSessions(workspace: url))
+        }
+
+        // Custom ACP adapters live in the factory cache, not AdapterRegistry.
+        if let local = ProjectLocalStateStore.load(
+            from: url,
+            fileSystem: Seams.live.fileSystem
+        ),
+           case .custom = local.projectType,
+           let adapter = await ProjectAgentRouter.resolveAdapter(projectType: local.projectType),
+           adapter.capabilities.contains(.resumableSessions) {
+            append(await adapter.listResumableSessions(workspace: url))
+        }
+
         return sessions.sorted { $0.lastActivity > $1.lastActivity }
     }
 }

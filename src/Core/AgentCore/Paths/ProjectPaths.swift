@@ -2,9 +2,17 @@ import Foundation
 
 /// On-disk layout for Codemixer state inside a project or workspace folder.
 ///
-/// - `<root>/.codemixer/project.json` — per-project type + display name
-/// - `<root>/.codemixer/workspace.json` — workspace catalog of member projects
-/// - `<root>/.codemixer/workspace-<AgentID.rawValue>.json` — per-adapter
+/// Per **project** (agent cwd / `ProjectRef.path`). For a nested project that
+/// is typically `<workspace>/<projectName>/`; it is the workspace folder
+/// itself only when that folder was opened as the seeded root project:
+/// - `<project>/.codemixer/project.json` — type + display name
+/// - `<project>/.codemixer/acp/<customAgentID>/` — Custom ACP session index +
+///   JSONL transcripts (`ACPProjectPaths`; never the workspace shell unless
+///   that shell *is* the active project)
+///
+/// Per **workspace** (window shell / `workspaceRoot`):
+/// - `<workspace>/.codemixer/workspace.json` — catalog of member projects
+/// - `<workspace>/.codemixer/workspace-<AgentID.rawValue>.json` — per-adapter
 ///   workspace state (model catalogs today)
 ///
 /// These travel with the folder (clone, zip, move) rather than living only in

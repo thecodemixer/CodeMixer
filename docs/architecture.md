@@ -1197,11 +1197,22 @@ Codemixer persists almost nothing itself. The agent writes JSONL transcripts; th
 ├── sessions.json        # recent projects (SessionStore)
 ├── workspaces.json      # Workspace→Projects navigator model
 ├── prefs.json           # appearance + auto-approval rules (PrefsStore)
+├── acp-sessions.json    # ACP session index + turn cache (Cursor / bare ACP)
 └── (Keychain)           # paired-device token hashes, TLS P12 password
+<project>/.codemixer/
+├── project.json         # project type + display name
+├── acp/<customAgentID>/ # Custom ACP only: sessions-index.json + transcripts/*.jsonl
+└── workspace-*.json     # per-adapter model catalogs (when used as workspace root)
 ~/Library/Caches/Codemixer/uploads/<sessionID>/<uuid>   # attachment staging
 ~/Library/LaunchAgents/com.codecave.Codemixer.daemon.plist  # if LaunchAgent installed
 ```
 
+**Custom ACP exception:** project-local Codemixer-owned JSONL under
+`.codemixer/acp/<id>/transcripts/` dual-writes the same turn cache used for
+empty `session/load` replay. Custom CLIs often have no vendor transcript; this
+is intentional and does not replace ACP `session/load` / `session/resume` as
+the agent-state resume path. Cursor continues to use app-support
+`acp-sessions.json` only.
 ### Stores
 
 | Store | File | On decode failure |
@@ -1400,7 +1411,10 @@ A native Mac app that spawns child processes, opens TTYs, watches arbitrary file
 
 ### What we never do
 
-- Store user prompts on disk outside the JSONL transcripts the agent itself writes.
+- Store user prompts on disk outside the JSONL transcripts the agent itself writes
+  (**exception:** Custom ACP project store under `<project>/.codemixer/acp/<id>/`,
+  and the Cursor/ACP local turn cache in `acp-sessions.json` / project index,
+  for empty `session/load` replay — see §20).
 - Send any telemetry of any kind.
 - Embed an analytics SDK.
 - Use third-party crash reporters.

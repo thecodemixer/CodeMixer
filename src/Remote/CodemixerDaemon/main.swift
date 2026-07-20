@@ -28,7 +28,7 @@ struct CodemixerDaemon {
         await AdapterRegistry.shared.register(adapter)
         await AdapterRegistry.shared.register(CodexAdapter())
         await AdapterRegistry.shared.register(CursorACPAdapter())
-        await CustomAgentAdapterFactories.shared.register(ACPCustomAgentAdapterFactory())
+        await CustomAgentAdapterFactories.shared.register(CustomACPAdapterFactory())
 
         let pairing = await RemoteRuntimeCoordinator.makePairing(seams: seams)
         let certificates = RemoteRuntimeCoordinator.makeCertificates(seams: seams)

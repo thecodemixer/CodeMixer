@@ -21,13 +21,14 @@ public final class ACPAdapter: AgentAdapter {
     private let clock: any AgentClock
     private let random: any RandomSource
     private let state: ACPClientState
-    private let sessionIndex: ACPSessionIndex
+    private let sessionIndex: any ACPSessionIndexing
 
     public init(ref: CustomAgentRef,
                 environment: any AgentEnvironment = SystemEnvironment(),
                 fileSystem: any FileSystem = SystemFileSystem(),
                 clock: any AgentClock = SystemClock(),
-                random: any RandomSource = SystemRandomSource()) {
+                random: any RandomSource = SystemRandomSource(),
+                sessionIndex: (any ACPSessionIndexing)? = nil) {
         self.ref = ref
         self.displayName = ref.displayName
         self.environment = environment
@@ -35,7 +36,7 @@ public final class ACPAdapter: AgentAdapter {
         self.clock = clock
         self.random = random
         self.state = ACPClientState()
-        self.sessionIndex = ACPSessionIndex(
+        self.sessionIndex = sessionIndex ?? ACPSessionIndex(
             environment: environment,
             fileSystem: fileSystem,
             clock: clock
@@ -211,6 +212,15 @@ public final class ACPAdapter: AgentAdapter {
 
     public func availableModels() -> [AgentModelOption] {
         state.availableModels()
+    }
+
+    /// Session modes advertised on the last `session/new` / `session/load`.
+    public func sessionAvailableModes() -> [ACPSessionMode] {
+        state.availableModes()
+    }
+
+    public func sessionCurrentModeID() -> String? {
+        state.currentModeID()
     }
 
     public func resumeArgvAddition(sessionID: String) -> [String] { [] }
