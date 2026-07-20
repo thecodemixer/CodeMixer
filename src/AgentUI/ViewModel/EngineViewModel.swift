@@ -204,6 +204,14 @@ public final class EngineViewModel {
             let sub = await self.bus.subscribe()
             for await entry in sub.stream {
                 self.apply(entry.event)
+                // Dense stdio bursts (ACP/Cursor) can deliver many chunks in one
+                // MainActor turn; yield so SwiftUI can paint intermediate prose.
+                switch entry.event {
+                case .assistantText(_, _, _, false), .textDelta, .thinkingChunk:
+                    await Task.yield()
+                default:
+                    break
+                }
             }
         }
     }
@@ -320,8 +328,11 @@ public extension EngineViewModel {
         public var id: String {
             switch self {
             case .user(let id, _):              return "user-\(id)"
-            case .assistant(let id, _):         return "asst-\(id)"
-            case .assistantStreaming(let id, _): return "stream-\(id)"
+            // Streaming and settled assistant share one id so ForEach morphs the
+            // bubble in place instead of tearing it down on finalize (which made
+            // replies look like they arrived all at once).
+            case .assistant(let id, _), .assistantStreaming(let id, _):
+                return "asst-\(id)"
             // Both thinking states share one id per block so the row morphs in
             // place (streaming → collapsed "Thought for Xs") instead of being
             // torn down and rebuilt.

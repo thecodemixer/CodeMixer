@@ -86,6 +86,68 @@ struct EngineViewModelTests {
         await bus.shutdown()
     }
 
+    @Test("assistantText keeps streaming across interleaved tools and stable id on finalize")
+    func assistantTextStreamsAcrossTools() async {
+        let (vm, bus) = makeModel()
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        let msgID = UUID()
+        await bus.publish(.assistantText(
+            id: msgID.uuidString,
+            blockID: "agent-message",
+            text: "Hello",
+            isFinal: false
+        ))
+        await bus.publish(.toolStart(
+            id: "t1",
+            name: "Read",
+            input: ToolInput(summary: "Read"),
+            startedAt: Date(timeIntervalSince1970: 0)
+        ))
+        await bus.publish(.assistantText(
+            id: msgID.uuidString,
+            blockID: "agent-message",
+            text: "Hello world",
+            isFinal: false
+        ))
+        await drain()
+
+        #expect(vm.messages.contains {
+            if case .assistantStreaming(let id, let text) = $0 {
+                return id == msgID && text == "Hello world"
+            }
+            return false
+        })
+        let streamID = vm.messages.first {
+            if case .assistantStreaming = $0 { return true }
+            return false
+        }?.id
+
+        await bus.publish(.assistantText(
+            id: msgID.uuidString,
+            blockID: "agent-message",
+            text: "Hello world!",
+            isFinal: true
+        ))
+        await drain()
+
+        #expect(vm.messages.contains {
+            if case .assistant(let id, let text) = $0 {
+                return id == msgID && text == "Hello world!"
+            }
+            return false
+        })
+        let finalID = vm.messages.first {
+            if case .assistant = $0 { return true }
+            return false
+        }?.id
+        #expect(streamID == finalID)
+        #expect(streamID == "asst-\(msgID)")
+
+        await bus.shutdown()
+    }
+
     @Test("thinkingChunk accumulates into a single message by blockID")
     func thinkingChunkAccumulates() async {
         let (vm, bus) = makeModel()

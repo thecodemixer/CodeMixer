@@ -81,12 +81,13 @@ public struct ConversationView: View {
                 .background(Theme.surface.canvas)
                 .onChange(of: model.messages.last?.id) { _, latest in
                     guard let latest, !searchVisible else { return }
-                    let motion = Theme.motion.resolve(Theme.motion.gentle, reduceMotion: reduceMotion)
-                    if let motion {
-                        withAnimation(motion) { proxy.scrollTo(latest, anchor: .bottom) }
-                    } else {
-                        proxy.scrollTo(latest, anchor: .bottom)
-                    }
+                    scrollToLatest(proxy: proxy, id: latest)
+                }
+                // Follow growing prose/thoughts while the ForEach id stays stable.
+                .onChange(of: model.messages.last?.textContent) { _, _ in
+                    guard !searchVisible,
+                          let latest = model.messages.last?.id else { return }
+                    scrollToLatest(proxy: proxy, id: latest)
                 }
                 .onChange(of: searchQuery) { _, q in
                     runSearch(q)
@@ -236,6 +237,15 @@ public struct ConversationView: View {
         let msgIdx = matchIndices[min(currentMatchIndex, matchIndices.count - 1)]
         let id = model.messages[msgIdx].id
         withAnimation(Theme.motion.gentle) { proxy.scrollTo(id, anchor: .center) }
+    }
+
+    private func scrollToLatest(proxy: ScrollViewProxy, id: String) {
+        let motion = Theme.motion.resolve(Theme.motion.gentle, reduceMotion: reduceMotion)
+        if let motion {
+            withAnimation(motion) { proxy.scrollTo(id, anchor: .bottom) }
+        } else {
+            proxy.scrollTo(id, anchor: .bottom)
+        }
     }
 }
 

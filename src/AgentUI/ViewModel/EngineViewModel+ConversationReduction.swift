@@ -76,16 +76,20 @@ extension EngineViewModel {
         case .assistantText(let msgID, _, let text, let isFinal):
             finishSessionSwitchIfNeeded()
             noteAgentReplyObserved()
-            // If there is an in-progress streaming bubble, update or promote it.
-            // Promoting (isFinal = true) replaces the .assistantStreaming with
-            // .assistant so the bubble ID stays the same and SwiftUI keeps the view.
-            if let lastIdx = messages.indices.last,
-               case .assistantStreaming(let existingID, _) = messages[lastIdx] {
-                messages[lastIdx] = isFinal
+            // Prefer the open streaming bubble with this id — even when a tool
+            // card was appended after it — so interleaved tools don't fork a
+            // second assistant row or delay updates until finalize.
+            let parsedID = UUID(uuidString: msgID)
+            if let idx = messages.lastIndex(where: {
+                guard case .assistantStreaming(let existingID, _) = $0 else { return false }
+                if let parsedID { return existingID == parsedID }
+                return true
+            }), case .assistantStreaming(let existingID, _) = messages[idx] {
+                messages[idx] = isFinal
                     ? .assistant(bubbleID: existingID, text: text)
                     : .assistantStreaming(bubbleID: existingID, text: text)
             } else {
-                let id = UUID(uuidString: msgID) ?? random.uuid()
+                let id = parsedID ?? random.uuid()
                 messages.append(isFinal
                     ? .assistant(bubbleID: id, text: text)
                     : .assistantStreaming(bubbleID: id, text: text))
