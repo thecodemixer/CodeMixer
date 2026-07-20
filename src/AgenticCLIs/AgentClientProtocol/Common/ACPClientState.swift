@@ -56,11 +56,27 @@ public final class ACPClientState: @unchecked Sendable {
     private var itemIDs: [String: UUID] = [:]
     private var assistantTextByItemID: [String: String] = [:]
     private var thinkingBlockIDs: [String: UUID] = [:]
+    /// Live tool-call metadata retained until `tool_call_update` completes.
+    private var toolMetaByID: [String: (name: String, inputJSON: String?)] = [:]
     private var agentCapabilities: JSONValue?
     private var availableModeIDs: [String] = []
     private var currentModeIDStorage: String?
     private var availableModelOptions: [AgentModelOption] = []
     private var currentModelIDStorage: String?
+
+    /// Role of the in-flight `session/load` history buffer (nil when idle).
+    private enum ReplayRole: Sendable, Equatable {
+        case user
+        case agent
+        case thinking
+    }
+
+    private var replayRole: ReplayRole?
+    private var replayMessageID: String?
+    private var replayText = ""
+    private var replayEventID: UUID?
+    /// Live-turn thought accumulator (persisted on prompt finalize).
+    private var thoughtText = ""
 
     public init() {}
 
@@ -88,11 +104,14 @@ public final class ACPClientState: @unchecked Sendable {
             itemIDs.removeAll()
             assistantTextByItemID.removeAll()
             thinkingBlockIDs.removeAll()
+            toolMetaByID.removeAll()
             agentCapabilities = nil
             availableModeIDs = []
             currentModeIDStorage = nil
             availableModelOptions = []
             currentModelIDStorage = nil
+            thoughtText = ""
+            clearReplayLocked()
         }
     }
 
@@ -141,11 +160,44 @@ public final class ACPClientState: @unchecked Sendable {
             itemIDs.removeAll()
             assistantTextByItemID.removeAll()
             thinkingBlockIDs.removeAll()
+            toolMetaByID.removeAll()
             phaseStorage = .awaitingSession
             availableModeIDs = []
             currentModeIDStorage = nil
             availableModelOptions = []
             currentModelIDStorage = nil
+            thoughtText = ""
+            clearReplayLocked()
+        }
+    }
+
+    /// Switch the live ACP process onto another session id without re-running
+    /// initialize/auth. Keeps advertised capabilities from the current process.
+    func prepareLoadSession(sessionID: String) {
+        withLock {
+            guard let existing = context else { return }
+            context = Context(
+                workspace: existing.workspace,
+                permissionMode: existing.permissionMode,
+                customAgentID: existing.customAgentID,
+                displayName: existing.displayName,
+                resumeSessionID: sessionID
+            )
+            requests.removeAll()
+            sessionIDStorage = nil
+            queuedPrompts.removeAll()
+            pendingApprovals.removeAll()
+            itemIDs.removeAll()
+            assistantTextByItemID.removeAll()
+            thinkingBlockIDs.removeAll()
+            toolMetaByID.removeAll()
+            phaseStorage = .awaitingSession
+            availableModeIDs = []
+            currentModeIDStorage = nil
+            availableModelOptions = []
+            currentModelIDStorage = nil
+            thoughtText = ""
+            clearReplayLocked()
         }
     }
 
@@ -278,6 +330,12 @@ public final class ACPClientState: @unchecked Sendable {
         }
     }
 
+    /// Drop turn-scoped synthetic ids so the next prompt allocates fresh
+    /// assistant / thinking identities (avoids SwiftUI row collisions).
+    func resetTurnScopedIDs() {
+        withLock { thinkingBlockIDs.removeAll() }
+    }
+
     func thinkingBlockID(for key: String, random: any RandomSource) -> UUID {
         withLock {
             if let existing = thinkingBlockIDs[key] { return existing }
@@ -285,6 +343,103 @@ public final class ACPClientState: @unchecked Sendable {
             thinkingBlockIDs[key] = id
             return id
         }
+    }
+
+    func rememberToolStart(id: String, name: String, inputJSON: String?) {
+        withLock { toolMetaByID[id] = (name, inputJSON) }
+    }
+
+    func takeToolMeta(id: String) -> (name: String, inputJSON: String?)? {
+        withLock { toolMetaByID.removeValue(forKey: id) }
+    }
+
+    func appendThoughtDelta(_ delta: String) {
+        withLock { thoughtText += delta }
+    }
+
+    /// Thought text accumulated this turn (for local session-index persistence).
+    func takeThoughtText() -> String? {
+        withLock {
+            let text = thoughtText
+            thoughtText = ""
+            return text.isEmpty ? nil : text
+        }
+    }
+
+    /// Close an open live thinking block (first assistant chunk or prompt finalize).
+    func takeOpenThinkingBlockID() -> UUID? {
+        withLock { thinkingBlockIDs.removeValue(forKey: "thought") }
+    }
+
+    /// Append a history chunk during `session/load`. Emits finalized turns when
+    /// the role or `messageId` boundary changes.
+    func appendHistoryChunk(role: String,
+                            messageID: String?,
+                            delta: String,
+                            random: any RandomSource) -> [AgentEvent] {
+        withLock {
+            guard !delta.isEmpty else { return [] }
+            let nextRole: ReplayRole
+            switch role {
+            case "user": nextRole = .user
+            case "thinking": nextRole = .thinking
+            default: nextRole = .agent
+            }
+            var events: [AgentEvent] = []
+            let boundary = replayRole != nil && (
+                replayRole != nextRole
+                    || (messageID != nil && replayMessageID != nil && messageID != replayMessageID)
+            )
+            if boundary {
+                events.append(contentsOf: flushReplayLocked())
+            }
+            if replayRole == nil {
+                replayRole = nextRole
+                replayMessageID = messageID
+                replayEventID = random.uuid()
+                replayText = ""
+            } else if messageID != nil {
+                replayMessageID = messageID
+            }
+            replayText += delta
+            return events
+        }
+    }
+
+    func flushHistoryReplay() -> [AgentEvent] {
+        withLock { flushReplayLocked() }
+    }
+
+    private func flushReplayLocked() -> [AgentEvent] {
+        defer { clearReplayLocked() }
+        guard let role = replayRole,
+              let id = replayEventID,
+              !replayText.isEmpty else { return [] }
+        let text = replayText
+        switch role {
+        case .user:
+            return [.userTurn(id: id.uuidString, text: text)]
+        case .agent:
+            return [.assistantText(
+                id: id.uuidString,
+                blockID: replayMessageID ?? "history-agent",
+                text: text,
+                isFinal: true
+            )]
+        case .thinking:
+            // Chunk then complete so EngineViewModel can materialize the text.
+            return [
+                .thinkingChunk(blockID: id, delta: text),
+                .thinkingComplete(blockID: id, duration: .zero),
+            ]
+        }
+    }
+
+    private func clearReplayLocked() {
+        replayRole = nil
+        replayMessageID = nil
+        replayText = ""
+        replayEventID = nil
     }
 
     private func withLock<T>(_ body: () -> T) -> T {

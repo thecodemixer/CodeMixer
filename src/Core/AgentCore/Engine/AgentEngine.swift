@@ -31,7 +31,7 @@ public actor AgentEngine: AgentEngineCommandPort {
     public nonisolated let bus: MulticastEventBus
 
     var adapter: (any AgentAdapter)?
-    private var state: EngineState = .stopped
+    var state: EngineState = .stopped
     var transport: (any AgentTransport)?
     private var terminal: (any TerminalSnapshotting)?
     var hookServer: HookServer?
@@ -149,11 +149,14 @@ public actor AgentEngine: AgentEngineCommandPort {
         guard state == .stopped else { throw AgentError.internalInvariant(detail: "engine not idle") }
         state = .starting
         self.adapter = adapter
+        // Always standardize so UI cwd filtering matches ACP `sessionStarted`.
+        let workspace = workspace.standardizedFileURL
         self.workspace = workspace
         self.transcript = []
         self.changedFiles = []
         let usesTerminal = adapter.transportDescriptor.requiresTerminalEmulation
             && adapter.capabilities.contains(.ptyTUIFallback)
+        let handshakeGate = adapter.capabilities.contains(.sessionHandshakeGate)
         resumeStartupSessionID = usesTerminal ? (resumeSessionID ?? "") : nil
         resumeStartupRequiresHookSession = usesTerminal && resumeSessionID != nil
         startupSubmitRecoveryArmed = resumeStartupSessionID != nil
@@ -259,7 +262,11 @@ public actor AgentEngine: AgentEngineCommandPort {
 
         state = .running(sessionID: resumeSessionID)
         log.notice("engine started workspace=\(workspace.path, privacy: .public)")
-        await bus.publish(.sessionStarted(sessionID: resumeSessionID ?? "",
+        // Handshake-gated adapters (Cursor / ACP) publish the real SessionStart
+        // after protocol open. Emitting the resume id here would unlock the
+        // composer before `session/load` / `session/new` completes.
+        let bootstrapSessionID = handshakeGate ? "" : (resumeSessionID ?? "")
+        await bus.publish(.sessionStarted(sessionID: bootstrapSessionID,
                                           model: nil,
                                           cwd: workspace))
 
@@ -435,12 +442,13 @@ public actor AgentEngine: AgentEngineCommandPort {
             } else {
                 cancelResumeStartupWatchdog()
             }
-            if currentSessionID == id {
-                return
+            if currentSessionID != id {
+                currentSessionID = id
+                sessionIDContinuation?.yield(id)
+                state = .running(sessionID: id)
             }
-            currentSessionID = id
-            sessionIDContinuation?.yield(id)
-            state = .running(sessionID: id)
+            // Same-id SessionStart (ACP resume after engine preset the id) must
+            // still reach the bus so the UI can unlock and refresh catalogs.
         case .userTurn(let id, let text):
             // Only the live UserPromptSubmit echo for *this* prompt confirms
             // acceptance. Historical transcript replay also emits `.userTurn`

@@ -335,6 +335,8 @@ final class Bootstrap {
                 workspaceLifecycle?.abortOpen()
                 return
             }
+            await viewModel?.prepareProjectOpen(url: url, projectType: projectType)
+            await viewModel?.reloadProjects(rootProjectType: projectType)
             viewModel?.send(.openProject(path: url.path, resumeSessionID: resumeSessionID))
             try? await viewModel?.workspaceProjects?.markActiveWorkspace(url)
             Task { await configureSlashCommands(for: url, mode: projectType) }
@@ -370,10 +372,13 @@ final class Bootstrap {
         }
 
         do {
+            // Gate the composer before spawn so Cursor ACP's ~20s
+            // initialize/auth/session-new cannot race an early send.
+            await viewModel?.prepareProjectOpen(url: url, projectType: projectType)
+            await viewModel?.reloadProjects(rootProjectType: projectType)
             try await engine.start(adapter: adapter,
                                    workspace: url,
                                    resumeSessionID: resumeSessionID)
-            viewModel?.workspaceRoot = url
             viewModel?.supportsResumableSessions = adapter.capabilities.contains(.resumableSessions)
             viewModel?.availableModels = adapter.availableModels()
             viewModel?.availableAgentModes = adapter.availableAgentModes()

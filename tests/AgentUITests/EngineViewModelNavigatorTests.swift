@@ -149,7 +149,10 @@ struct EngineViewModelNavigatorTests {
         let (vm, bus, _) = makeModel()
         let path = "/Users/me/ws/claude"
         vm.supportsResumableSessions = false
-        vm.projectResumableSessionSupport[path] = true
+        vm.projectCapabilities[path] = .init(
+            supportsResumableSessions: true,
+            requiresSessionHandshakeGate: false
+        )
         vm.sessionLister = { url in
             [SessionSummary(id: "s1", agentID: .claudeCode,
                             workspace: url, title: "Claude chat",
@@ -208,7 +211,10 @@ struct EngineViewModelNavigatorTests {
                            title: "Thread", lastActivity: Date(), messageCount: 1),
         ]
         vm.loadingProjectPaths.insert(oldPath)
-        vm.projectResumableSessionSupport[oldPath] = true
+        vm.projectCapabilities[oldPath] = .init(
+            supportsResumableSessions: true,
+            requiresSessionHandshakeGate: false
+        )
 
         vm.renameProject(path: oldPath, newName: "Backend")
         await drain()
@@ -219,7 +225,7 @@ struct EngineViewModelNavigatorTests {
         #expect(vm.sessionsByProject[newPath]?.first?.id == "s1")
         #expect(!vm.loadingProjectPaths.contains(oldPath))
         #expect(vm.loadingProjectPaths.contains(newPath))
-        #expect(vm.projectResumableSessionSupport[oldPath] == nil)
+        #expect(vm.projectCapabilities[oldPath] == nil)
         #expect(port.commands.contains {
             if case .openProject(let path, let resume) = $0 {
                 return path == newPath && resume == "thread-1"
@@ -450,6 +456,194 @@ struct EngineViewModelNavigatorTests {
 
         vm.sendPrompt("now allowed")
         #expect(vm.messages.count == 2)
+
+        await bus.shutdown()
+    }
+
+    @Test("Cursor openSession stays locked through history until live SessionStart")
+    func cursorOpenSessionKeepsComposerLockedThroughHistoryReplay() async {
+        await AdapterRegistry.shared.register(MockAdapter(
+            id: .cursorCLI,
+            displayName: "Cursor",
+            capabilities: [.sessionHandshakeGate, .resumableSessions]
+        ))
+        let port = RecordingPort()
+        let bus = MulticastEventBus()
+        let clock = FakeClock()
+        let vm = EngineViewModel(engine: port, bus: bus, clock: clock, random: FakeRandomSource())
+        let project = URL(fileURLWithPath: "/Users/me/ws/cursor")
+        vm.projects = [
+            .init(path: project.path, displayName: "Cursor", projectType: .cursorCLI),
+        ]
+        vm.projectCapabilities[project.path] = .init(
+            supportsResumableSessions: true,
+            requiresSessionHandshakeGate: true
+        )
+        vm.sessionsByProject[project.path] = [
+            SessionSummary(
+                id: "sess-cursor",
+                agentID: .cursorCLI,
+                workspace: project,
+                title: "Prior",
+                lastActivity: Date(),
+                messageCount: 2
+            ),
+        ]
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        vm.openSession(projectPath: project.path, id: "sess-cursor")
+        #expect(vm.isComposerLockedForSessionResume)
+
+        // Past the short Codex-style unlock — handshake gate must still hold.
+        clock.advance(by: SessionSwitchingTiming.composerHardUnlock + .milliseconds(1))
+        await drain()
+        #expect(vm.isComposerLockedForSessionResume)
+
+        await bus.publish(.userTurn(id: UUID().uuidString, text: "prior user"))
+        await bus.publish(.assistantText(
+            id: UUID().uuidString,
+            blockID: "a",
+            text: "prior assistant",
+            isFinal: true
+        ))
+        await drain()
+        #expect(vm.messages.count >= 2)
+        #expect(vm.isComposerLockedForSessionResume)
+
+        await bus.publish(.sessionStarted(
+            sessionID: "sess-cursor",
+            model: "auto",
+            cwd: project
+        ))
+        await drain()
+        #expect(!vm.isComposerLockedForSessionResume)
+
+        await bus.shutdown()
+    }
+
+    @Test("new Cursor chat locks composer until the ACP session is ready")
+    func newCursorChatLocksComposerUntilACPSessionReady() async {
+        let port = RecordingPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
+        let project = URL(fileURLWithPath: "/Users/me/ws/cursor")
+        vm.projects = [
+            .init(path: project.path, displayName: "Cursor", projectType: .cursorCLI),
+        ]
+        vm.projectCapabilities[project.path] = .init(
+            supportsResumableSessions: true,
+            requiresSessionHandshakeGate: true
+        )
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        vm.newChat(in: project.path)
+        #expect(vm.isComposerLockedForSessionResume)
+        try? await Task.sleep(for: .milliseconds(60))
+        #expect(port.commands.contains {
+            if case .openProject(let path, let resume) = $0 {
+                return path == project.path && resume == nil
+            }
+            return false
+        })
+
+        vm.sendPrompt("too early")
+        #expect(vm.messages.isEmpty)
+
+        // Engine bootstrap publishes an empty id before Cursor ACP completes
+        // initialize/auth/session-new; that is not prompt-ready.
+        await bus.publish(.sessionStarted(sessionID: "", model: nil, cwd: project))
+        await drain()
+        #expect(vm.isComposerLockedForSessionResume)
+
+        await bus.publish(.sessionStarted(sessionID: "cursor-session", model: nil, cwd: project))
+        await drain()
+        #expect(!vm.isComposerLockedForSessionResume)
+
+        vm.sendPrompt("now allowed")
+        #expect(vm.messages.count == 1)
+
+        await bus.shutdown()
+    }
+
+    @Test("new Cursor chat on the same project reuses session/new instead of respawning")
+    func newCursorChatOnSameProjectUsesNewSession() async {
+        let port = RecordingPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
+        let project = URL(fileURLWithPath: "/Users/me/ws/cursor")
+        vm.projects = [
+            .init(path: project.path, displayName: "Cursor", projectType: .cursorCLI),
+        ]
+        vm.projectCapabilities[project.path] = .init(
+            supportsResumableSessions: true,
+            requiresSessionHandshakeGate: true
+        )
+        vm.workspace = project
+        vm.sessionID = "cursor-session"
+        vm.messages = [.user(bubbleID: UUID(), text: "old")]
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        vm.newChat(in: project.path)
+        try? await Task.sleep(for: .milliseconds(60))
+
+        #expect(vm.isComposerLockedForSessionResume)
+        #expect(vm.messages.contains {
+            if case .clientAction(let action) = $0 {
+                return action.kind == .sessionLifecycle && action.detail == "New session"
+            }
+            return false
+        } || port.commands.contains {
+            if case .newSession = $0 { return true }
+            if case .recordClientAction = $0 { return true }
+            return false
+        })
+        #expect(!port.commands.contains {
+            if case .openProject = $0 { return true }
+            return false
+        })
+
+        await bus.shutdown()
+    }
+
+    @Test("new Codex chat keeps the composer immediately available")
+    func newCodexChatDoesNotUseACPComposerLock() async {
+        let port = RecordingPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
+        let project = URL(fileURLWithPath: "/Users/me/ws/api")
+        vm.projects = [
+            .init(path: project.path, displayName: "API", projectType: .codex),
+        ]
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        vm.newChat(in: project.path)
+        #expect(!vm.isComposerLockedForSessionResume)
+
+        vm.sendPrompt("ready")
+        #expect(vm.messages.count == 1)
+
+        await bus.shutdown()
+    }
+
+    @Test("prepareProjectOpen gates mixed projects when a handshake-capable adapter is registered")
+    func prepareProjectOpenGatesMixedWithoutDefaultWhenHandshakeAdapterRegistered() async {
+        await AdapterRegistry.shared.register(MockAdapter(
+            id: .cursorCLI,
+            displayName: "Cursor Mock",
+            capabilities: [.sessionHandshakeGate, .resumableSessions]
+        ))
+        let port = RecordingPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
+        let project = URL(fileURLWithPath: "/Users/me/ws/mixed")
+
+        await vm.prepareProjectOpen(url: project, projectType: .mixed(defaultAgent: nil))
+        #expect(vm.isComposerLockedForSessionResume)
+        #expect(vm.projectCapabilities.requiresSessionHandshakeGate(for: project.path))
 
         await bus.shutdown()
     }

@@ -36,4 +36,8 @@ public struct AgentCapabilities: OptionSet, Sendable, Hashable {
     public static let ptyTUIFallback       = AgentCapabilities(rawValue: 1 << 3)
     public static let permissionPrompts    = AgentCapabilities(rawValue: 1 << 5)
     public static let resumableSessions    = AgentCapabilities(rawValue: 1 << 6)
+    /// Session is not prompt-ready until a non-empty `sessionStarted` arrives
+    /// (ACP initialize → auth → session/new). UI gates the composer; same-project
+    /// New Chat prefers `.newSession` over respawning the agent process.
+    public static let sessionHandshakeGate = AgentCapabilities(rawValue: 1 << 7)
 }

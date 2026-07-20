@@ -10,6 +10,8 @@ public enum ACPAgentError: Error, Sendable, Equatable {
     case rpc(code: Int, message: String)
     case missingSessionID
     case authenticationRequired(displayName: String)
+    case sessionLoadFailed(sessionID: String, message: String)
+    case resumeUnsupported(sessionID: String)
     case pathOutsideWorkspace(path: String)
     case unknownServerRequest(method: String)
     case persistence(detail: String)
@@ -38,6 +40,10 @@ public enum ACPAgentError: Error, Sendable, Equatable {
             return "missing-session-id"
         case .authenticationRequired(let displayName):
             return "\(displayName) requires authentication. Run its login/auth command in Terminal, then open this project again."
+        case .sessionLoadFailed(let sessionID, let message):
+            return "session-load-failed:\(sessionID):\(message)"
+        case .resumeUnsupported(let sessionID):
+            return "resume-unsupported:\(sessionID)"
         case .pathOutsideWorkspace(let path):
             return "path-outside-workspace:\(path)"
         case .unknownServerRequest(let method):

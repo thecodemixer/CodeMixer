@@ -65,6 +65,49 @@ struct ACPInputEncodingTests {
         #expect(text.contains("\"sessionId\":\"resume-7\""))
     }
 
+    @Test("sessionOpen does not fall back to session/new when resume cannot be honored")
+    func sessionOpenNoSilentNewOnUnsupportedResume() {
+        let state = ACPClientState()
+        _ = ACPInputEncoding.bootstrap(
+            context: LaunchContext(
+                workspace: workspace,
+                resumeSessionID: "resume-missing",
+                permissionMode: .default
+            ),
+            state: state,
+            customAgentID: "x",
+            displayName: "Agent"
+        )
+        state.setAgentCapabilities(.object([:]))
+        #expect(ACPInputEncoding.sessionOpen(state: state).isEmpty)
+        #expect(ACPInputEncoding.resumeUnsupportedAfterInitialize(state: state) == "resume-missing")
+        let post = String(decoding: ACPInputEncoding.postInitialize(state: state), as: UTF8.self)
+        #expect(post.contains("initialized"))
+        #expect(!post.contains("session/new"))
+        #expect(!post.contains("session/load"))
+    }
+
+    @Test("warm sessionLoad encodes session/load without re-bootstrap")
+    func warmSessionLoad() {
+        let state = ACPClientState()
+        _ = ACPInputEncoding.bootstrap(
+            context: LaunchContext(workspace: workspace, permissionMode: .default),
+            state: state,
+            customAgentID: "x",
+            displayName: "Agent"
+        )
+        state.setAgentCapabilities(.object(["loadSession": .bool(true)]))
+        state.setSessionID("old-session")
+        let text = String(
+            decoding: ACPInputEncoding.sessionLoad(sessionID: "warm-42", state: state),
+            as: UTF8.self
+        )
+        #expect(text.contains("\"method\":\"session/load\""))
+        #expect(text.contains("\"sessionId\":\"warm-42\""))
+        #expect(state.sessionID() == nil)
+        #expect(state.phase() == .awaitingSession)
+    }
+
     @Test("userPrompt queues text until session id is available")
     func queuedPrompt() {
         let state = ACPClientState()

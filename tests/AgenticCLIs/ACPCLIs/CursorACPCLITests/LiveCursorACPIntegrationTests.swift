@@ -52,7 +52,99 @@ struct LiveCursorACPIntegrationTests {
         #expect(result.modeProbeResults[.plan] == .supported)
         #expect(result.modeProbeResults[.ask] == .supported)
         #expect(result.modeProbeResults[.debug] == .diagnosticOnly)
-        #expect(result.finalAssistantText?
+        #expect(result.firstTurn.finalAssistantText?
             .localizedCaseInsensitiveContains(configuration.expectedFinalSubstring) == true)
+        #expect(result.secondTurn.finalAssistantText?
+            .localizedCaseInsensitiveContains(configuration.expectedSecondFinalSubstring) == true)
+        print(
+            "live Cursor ACP timings: first=\(result.firstTurn.duration) second=\(result.secondTurn.duration) session=\(result.sessionID ?? "nil")"
+        )
+        // Warm same-session turn must beat the first prompt (no cold handshake).
+        #expect(result.secondTurn.duration < result.firstTurn.duration)
+        // Distinct bubble ids so SwiftUI keeps both finals visible.
+        if let firstID = result.firstTurn.finalAssistantID,
+           let secondID = result.secondTurn.finalAssistantID {
+            #expect(firstID != secondID)
+        } else {
+            Issue.record("missing final assistant ids (first=\(String(describing: result.firstTurn.finalAssistantID)), second=\(String(describing: result.secondTurn.finalAssistantID)))")
+        }
+        // Both finals remain in the live event stream after turn 2.
+        let finals = result.events.compactMap { event -> String? in
+            if case .assistantText(_, _, let text, true) = event { return text }
+            return nil
+        }
+        #expect(finals.contains { $0.localizedCaseInsensitiveContains(configuration.expectedFinalSubstring) })
+        #expect(finals.contains { $0.localizedCaseInsensitiveContains(configuration.expectedSecondFinalSubstring) })
+    }
+
+    @Test("live Cursor ACP thoughts and replies stream incrementally")
+    func liveStreamingCadence() async throws {
+        guard LiveCursorACPHarness.isEnabled() else { return }
+        if let reason = LiveCursorACPHarness.prerequisiteFailure() {
+            Issue.record("\(reason)")
+            return
+        }
+        guard let configuration = LiveCursorACPHarness.defaultConfiguration() else {
+            Issue.record("missing Cursor binary")
+            return
+        }
+
+        let harness = LiveCursorACPHarness()
+        let result: LiveCursorACPHarness.StreamingCadenceResult
+        do {
+            result = try await harness.runStreamingCadence(configuration)
+        } catch {
+            Issue.record("\(error)")
+            return
+        }
+
+        #expect(result.finalAssistantText?
+            .localizedCaseInsensitiveContains("codemixer-stream-ok") == true)
+        // Live Cursor must deliver multiple non-final assistant chunks (not one dump).
+        #expect(result.nonFinalAssistantCount >= 2)
+        #expect(result.distinctNonFinalLengths.count >= 2)
+        if result.distinctNonFinalLengths.count >= 2 {
+            #expect(result.distinctNonFinalLengths.last! > result.distinctNonFinalLengths.first!)
+        }
+        // Chunks should arrive over time, not in a single MainActor burst only.
+        if let span = result.assistantStreamSpan {
+            #expect(span > .milliseconds(20))
+        } else {
+            Issue.record("assistantStreamSpan nil — chunks may have arrived in one instant")
+        }
+        print(
+            "live Cursor streaming: thoughts=\(result.thinkingChunkCount) thoughtSpan=\(String(describing: result.thinkingStreamSpan)) nonFinalAssistant=\(result.nonFinalAssistantCount) lengths=\(result.distinctNonFinalLengths) assistantSpan=\(String(describing: result.assistantStreamSpan)) session=\(result.sessionID ?? "nil")"
+        )
+    }
+
+    @Test("live Cursor ACP fresh-process session/load replays history")
+    func liveFreshProcessHistoryLoad() async throws {
+        guard LiveCursorACPHarness.isEnabled() else { return }
+        if let reason = LiveCursorACPHarness.prerequisiteFailure() {
+            Issue.record("\(reason)")
+            return
+        }
+        guard let configuration = LiveCursorACPHarness.defaultConfiguration() else {
+            Issue.record("missing Cursor binary")
+            return
+        }
+
+        let harness = LiveCursorACPHarness()
+        let result: LiveCursorACPHarness.ResumeLoadResult
+        do {
+            result = try await harness.runFreshProcessLoad(configuration)
+        } catch {
+            Issue.record("\(error)")
+            return
+        }
+
+        #expect(result.cliVersion?.isEmpty == false)
+        #expect(result.sawPriorUserTurn)
+        #expect(result.sawPriorAssistantFinal)
+        #expect(result.followUpAssistantText?
+            .localizedCaseInsensitiveContains(configuration.expectedSecondFinalSubstring) == true)
+        print(
+            "live Cursor ACP session/load: session=\(result.priorSessionID) historyUser=\(result.sawPriorUserTurn) historyAssistant=\(result.sawPriorAssistantFinal)"
+        )
     }
 }

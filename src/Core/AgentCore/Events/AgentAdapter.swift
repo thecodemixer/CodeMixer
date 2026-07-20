@@ -131,6 +131,12 @@ public protocol AgentAdapter: Sendable {
     /// explicit unsupported-command error rather than silently skipping.
     func encodeCommand(_ command: AgentCommand) -> Data?
 
+    /// Encode a same-process session resume/load (ACP `session/load`). Return
+    /// `nil` when the adapter cannot warm-switch sessions without a respawn.
+    /// Used by `openProject` to avoid Cursor's ~20s cold handshake when the
+    /// agent process is already live on the same workspace.
+    func encodeResumeSession(sessionID: String) -> Data?
+
     // MARK: Permission responses
 
     func encodePermissionResponse(_ decision: PermissionDecision,
@@ -216,6 +222,8 @@ public extension AgentAdapter {
     func availableAgentModes() -> [AgentModeOption] { [] }
 
     func sessionBootstrapBytes(context: LaunchContext) -> Data { Data() }
+
+    func encodeResumeSession(sessionID: String) -> Data? { nil }
 
     /// Default encodes Claude-compatible slash text for the common command
     /// set. Non-terminal adapters override with protocol frames.

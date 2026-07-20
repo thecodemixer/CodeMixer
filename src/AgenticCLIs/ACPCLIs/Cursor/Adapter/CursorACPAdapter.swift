@@ -16,6 +16,7 @@ public final class CursorACPAdapter: AgentAdapter {
     public let capabilities: AgentCapabilities = [
         .permissionPrompts,
         .resumableSessions,
+        .sessionHandshakeGate,
     ]
     public var transportDescriptor: AgentTransportDescriptor { .agentClientProtocol }
 
@@ -146,6 +147,10 @@ public final class CursorACPAdapter: AgentAdapter {
         default:
             return inner.encodeCommand(command)
         }
+    }
+
+    public func encodeResumeSession(sessionID: String) -> Data? {
+        inner.encodeResumeSession(sessionID: sessionID)
     }
 
     public func encodePermissionResponse(_ decision: PermissionDecision,

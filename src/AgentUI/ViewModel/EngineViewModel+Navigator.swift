@@ -5,6 +5,11 @@ import AgentProtocol
 enum SessionSwitchingTiming {
     static let emptySessionFallback: Duration = .seconds(2)
 
+    /// Adapters that declare `.sessionHandshakeGate` can spend their first
+    /// seconds in protocol bootstrap before they accept a prompt. Keep the
+    /// composer honest during that cold start, but never indefinitely.
+    static let sessionHandshakeHardUnlock: Duration = .seconds(45)
+
     /// Non-Claude agents can unlock as soon as replayed content proves the UI
     /// is showing the selected session. The engine remains the source of truth
     /// for whether a command can be written to the transport.
@@ -39,8 +44,7 @@ extension EngineViewModel {
     public func reloadProjects(rootProjectType: ProjectType? = nil) async {
         guard let workspaceRoot, let store = workspaceProjects else { return }
         let refs = await store.projects(for: workspaceRoot, rootProjectType: rootProjectType)
-        projects = refs
-        projectResumableSessionSupport = await Self.resumableSessionSupport(for: refs)
+        await applyProjectList(refs)
     }
 
     /// Lazily list the resumable sessions for a project. A non-resumable agent
@@ -69,8 +73,15 @@ extension EngineViewModel {
 
     /// Open a specific resumable session of a project. Makes that project the
     /// current one immediately so the top bar title updates before resume finishes.
+    ///
+    /// Cursor / ACP: when the agent process is already live on this project,
+    /// the engine warm-loads via `session/load` (~seconds) instead of respawning
+    /// `cursor-agent` (~20s initialize/auth).
     public func openSession(projectPath: String, id: String) {
         guard !isCurrentSession(projectPath: projectPath, sessionID: id) else { return }
+        // Capabilities must be known before arming the composer lock — Cursor /
+        // ACP need the longer handshake gate, not the 3s resume unlock.
+        applyAdapterCapabilities(forProjectPath: projectPath)
         // The session list carries the concrete agent for mixed projects. Use it
         // to decide whether history replay is enough to unlock the composer.
         // Claude Code is special because replayed history comes from JSONL,
@@ -79,7 +90,6 @@ extension EngineViewModel {
                            sessionID: id,
                            waitsForClaudeCodeResume: sessionResumeNeedsClaudeCodeReadiness(projectPath: projectPath,
                                                                                            sessionID: id))
-        applyAdapterCapabilities(forProjectPath: projectPath)
         send(.openProject(path: projectPath, resumeSessionID: id))
     }
 
@@ -102,14 +112,22 @@ extension EngineViewModel {
         newChat(in: path)
     }
 
-    /// Start a fresh chat in `projectPath`. Always opens the project with no
-    /// resume id so both Claude and Codex get a real new session (Codex
-    /// `.newSession` encoding can no-op when session context isn't ready, and
-    /// Claude `/clear` does not reliably clear the local conversation).
+    /// Start a fresh chat in `projectPath`.
+    ///
+    /// Claude / Codex always reopen with no resume id so the local conversation
+    /// and agent session stay aligned (Codex `.newSession` can no-op; Claude
+    /// `/clear` does not reliably clear Codemixer history).
+    ///
+    /// Cursor / ACP already have a live `cursor-agent acp` process after the
+    /// first open — reuse it via `.newSession` (`session/new`, ~3s) instead of
+    /// respawning the binary (~20s initialize/auth handshake).
     public func newChat(in projectPath: String) {
         guard !projectPath.isEmpty else { return }
         endSessionSwitch()
         let target = URL(fileURLWithPath: projectPath).standardizedFileURL
+        let alreadyOnProject = workspace.map {
+            URL(fileURLWithPath: $0.path).standardizedFileURL.path
+        } == target.path
         workspace = target
         sessionID = nil
         clearConversationState()
@@ -117,7 +135,35 @@ extension EngineViewModel {
         status = .idle
         activity = .idle
         applyAdapterCapabilities(forProjectPath: target.path)
+        if projectNeedsSessionHandshakeGate(path: target.path) {
+            lockComposerForSessionHandshake()
+            if alreadyOnProject {
+                startNewSession()
+                return
+            }
+        }
         send(.openProject(path: target.path, resumeSessionID: nil))
+    }
+
+    /// Bind the active project and arm the adapter's session-handshake composer
+    /// gate before engine spawn so an early send cannot race protocol bootstrap.
+    public func prepareProjectOpen(url: URL, projectType: ProjectType) async {
+        let target = url.standardizedFileURL
+        workspaceRoot = target
+        workspace = target
+        let needsGate = await Self.adapterRequiresSessionHandshakeGate(projectType)
+        if var caps = projectCapabilities[target.path] {
+            caps.requiresSessionHandshakeGate = needsGate
+            projectCapabilities[target.path] = caps
+        } else {
+            projectCapabilities[target.path] = .init(
+                supportsResumableSessions: false,
+                requiresSessionHandshakeGate: needsGate
+            )
+        }
+        if needsGate {
+            lockComposerForSessionHandshake()
+        }
     }
 
     /// Create a new project (subfolder of the workspace) and switch to it.
@@ -128,9 +174,7 @@ extension EngineViewModel {
             let ref = try await store.createProject(name: name, projectType: projectType, in: workspaceRoot)
             try await WorkspaceLifecycle(model: self).ensureModels(for: projectType)
             let refs = await store.projects(for: workspaceRoot, rootProjectType: projectType)
-            let support = await Self.resumableSessionSupport(for: refs)
-            projects = refs
-            projectResumableSessionSupport = support
+            await applyProjectList(refs)
             applyAdapterCapabilities(for: projectType, projectURL: URL(fileURLWithPath: ref.path))
             newChat(in: ref.path)
         } catch {
@@ -146,9 +190,7 @@ extension EngineViewModel {
             let ref = try await store.addExistingProject(url: url, projectType: projectType, in: workspaceRoot)
             try await WorkspaceLifecycle(model: self).ensureModels(for: projectType)
             let refs = await store.projects(for: workspaceRoot, rootProjectType: projectType)
-            let support = await Self.resumableSessionSupport(for: refs)
-            projects = refs
-            projectResumableSessionSupport = support
+            await applyProjectList(refs)
             applyAdapterCapabilities(for: projectType, projectURL: URL(fileURLWithPath: ref.path))
             newChat(in: ref.path)
         } catch {
@@ -172,10 +214,10 @@ extension EngineViewModel {
             do {
                 let renamed = try await store.renameProject(path: path, to: newName, in: workspaceRoot)
                 let refs = await store.projects(for: workspaceRoot)
-                let support = await Self.resumableSessionSupport(for: refs)
+                let capabilities = await Self.projectCapabilityIndex(for: refs)
                 await MainActor.run {
                     self?.projects = refs
-                    self?.projectResumableSessionSupport = support
+                    self?.projectCapabilities = capabilities
                     self?.applyRenamedProjectPath(from: path, to: renamed.path)
                     if renamesActiveProject {
                         self?.send(.openProject(path: renamed.path, resumeSessionID: resumeSessionID))
@@ -195,10 +237,10 @@ extension EngineViewModel {
             do {
                 let removed = try await store.removeProject(path: path, in: workspaceRoot)
                 let refs = await store.projects(for: workspaceRoot)
-                let support = await Self.resumableSessionSupport(for: refs)
+                let capabilities = await Self.projectCapabilityIndex(for: refs)
                 await MainActor.run {
                     self?.projects = refs
-                    self?.projectResumableSessionSupport = support
+                    self?.projectCapabilities = capabilities
                     if let removed { self?.armRemovedProjectUndo(removed) }
                 }
             } catch {
@@ -219,9 +261,7 @@ extension EngineViewModel {
             try await store.restoreProject(removed, in: workspaceRoot)
             try await WorkspaceLifecycle(model: self).ensureModels(for: removed.ref.projectType)
             let refs = await store.projects(for: workspaceRoot)
-            let support = await Self.resumableSessionSupport(for: refs)
-            projects = refs
-            projectResumableSessionSupport = support
+            await applyProjectList(refs)
         } catch {
             recordProjectError(error)
         }
@@ -537,20 +577,23 @@ extension EngineViewModel {
         if loadingProjectPaths.remove(oldPath) != nil {
             loadingProjectPaths.insert(newPath)
         }
-        if let support = projectResumableSessionSupport.removeValue(forKey: oldPath),
-           projectResumableSessionSupport[newPath] == nil {
-            projectResumableSessionSupport[newPath] = support
-        }
+        projectCapabilities.rekey(from: oldPath, to: newPath)
     }
 
     func beginSessionSwitch(projectPath: String,
                             sessionID id: String,
                             waitsForClaudeCodeResume: Bool = false) {
-        workspace = URL(fileURLWithPath: projectPath)
+        workspace = URL(fileURLWithPath: projectPath).standardizedFileURL
         sessionID = id
         clearConversationState()
         isSwitchingSession = true
-        lockComposerForSessionResume(waitsForClaudeCodeResume: waitsForClaudeCodeResume)
+        // Cursor / ACP cold start (~20s) needs the handshake gate. A 3s unlock
+        // lets the first prompt race `session/load` and vanish into the queue.
+        if !waitsForClaudeCodeResume, projectNeedsSessionHandshakeGate(path: projectPath) {
+            lockComposerForSessionHandshake()
+        } else {
+            lockComposerForSessionResume(waitsForClaudeCodeResume: waitsForClaudeCodeResume)
+        }
         sessionSwitchingTask?.cancel()
         sessionSwitchingTask = Task { [weak self] in
             try? await self?.clock.sleep(for: SessionSwitchingTiming.emptySessionFallback)
@@ -583,7 +626,12 @@ extension EngineViewModel {
         // enough for the composer because command delivery is not racing a TUI
         // resume screen. For Claude Code, the same content may be JSONL replay
         // only; live input readiness is handled by SessionStart below.
+        // Handshake-gated agents (Cursor / ACP) stream history during
+        // `session/load` *before* the session is prompt-ready — keep locked.
         if isComposerLockedForSessionResume, !isComposerWaitingForClaudeCodeResume {
+            if isComposerLockedForSessionHandshake {
+                return
+            }
             unlockComposerForSessionResume()
         }
     }
@@ -591,9 +639,17 @@ extension EngineViewModel {
     func lockComposerForSessionResume(waitsForClaudeCodeResume: Bool = false) {
         isComposerLockedForSessionResume = true
         isComposerWaitingForClaudeCodeResume = waitsForClaudeCodeResume
+        isComposerLockedForSessionHandshake = false
         scheduleComposerResumeUnlock(after: waitsForClaudeCodeResume
             ? SessionSwitchingTiming.claudeCodeComposerHardUnlock
             : SessionSwitchingTiming.composerHardUnlock)
+    }
+
+    func lockComposerForSessionHandshake() {
+        isComposerLockedForSessionResume = true
+        isComposerWaitingForClaudeCodeResume = false
+        isComposerLockedForSessionHandshake = true
+        scheduleComposerResumeUnlock(after: SessionSwitchingTiming.sessionHandshakeHardUnlock)
     }
 
     func scheduleComposerResumeUnlock(after delay: Duration) {
@@ -615,6 +671,7 @@ extension EngineViewModel {
     func unlockComposerForSessionResume() {
         isComposerLockedForSessionResume = false
         isComposerWaitingForClaudeCodeResume = false
+        isComposerLockedForSessionHandshake = false
         composerResumeUnlockTask?.cancel()
         composerResumeUnlockTask = nil
         // Empty resumes never get replay content that would end the switch;
@@ -637,8 +694,26 @@ extension EngineViewModel {
         return false
     }
 
+    func projectNeedsSessionHandshakeGate(path projectPath: String) -> Bool {
+        if projectCapabilities.requiresSessionHandshakeGate(for: projectPath) {
+            return true
+        }
+        // `applyAdapterCapabilities` is async; when the index is not warm yet,
+        // fall back to project types that always ship with handshake-gated adapters.
+        let standardized = URL(fileURLWithPath: projectPath).standardizedFileURL.path
+        guard let project = projects.first(where: {
+            URL(fileURLWithPath: $0.path).standardizedFileURL.path == standardized
+        }) else { return false }
+        switch project.projectType {
+        case .cursorCLI, .custom:
+            return true
+        default:
+            return false
+        }
+    }
+
     public var hasResumableSessionProjects: Bool {
-        supportsResumableSessions || projectResumableSessionSupport.values.contains(true)
+        supportsResumableSessions || projectCapabilities.anySupportsResumableSessions
     }
 
     public func supportsResumableSessions(for project: WorkspaceProjectsStore.ProjectRef) -> Bool {
@@ -646,7 +721,7 @@ extension EngineViewModel {
     }
 
     func supportsResumableSessions(forProjectPath path: String) -> Bool {
-        projectResumableSessionSupport[path] ?? supportsResumableSessions
+        projectCapabilities.supportsResumableSessions(for: path) ?? supportsResumableSessions
     }
 
     func recordProjectError(_ error: any Error) {
@@ -681,7 +756,7 @@ extension EngineViewModel {
         sessionID = nil
         projects = []
         sessionsByProject = [:]
-        projectResumableSessionSupport = [:]
+        projectCapabilities.removeAll()
         loadingProjectPaths = []
         removedProjectUndo = nil
         removedProjectUndoTask?.cancel()
@@ -710,7 +785,7 @@ extension EngineViewModel {
         sessionID = nil
         projects = []
         sessionsByProject = [:]
-        projectResumableSessionSupport = [:]
+        projectCapabilities.removeAll()
         loadingProjectPaths = []
         removedProjectUndo = nil
         removedProjectUndoTask?.cancel()
@@ -730,14 +805,22 @@ extension EngineViewModel {
         slashCommands = []
     }
 
-    private static func resumableSessionSupport(
+    func applyProjectList(_ refs: [WorkspaceProjectsStore.ProjectRef]) async {
+        projects = refs
+        projectCapabilities = await Self.projectCapabilityIndex(for: refs)
+    }
+
+    private static func projectCapabilityIndex(
         for refs: [WorkspaceProjectsStore.ProjectRef]
-    ) async -> [String: Bool] {
-        var support: [String: Bool] = [:]
+    ) async -> ProjectCapabilityIndex {
+        var index = ProjectCapabilityIndex()
         for ref in refs {
-            support[ref.path] = await projectTypeSupportsResumableSessions(ref.projectType)
+            index[ref.path] = ProjectCapabilities(
+                supportsResumableSessions: await projectTypeSupportsResumableSessions(ref.projectType),
+                requiresSessionHandshakeGate: await adapterRequiresSessionHandshakeGate(ref.projectType)
+            )
         }
-        return support
+        return index
     }
 
     private static func projectTypeSupportsResumableSessions(_ projectType: ProjectType) async -> Bool {
@@ -749,5 +832,23 @@ extension EngineViewModel {
             return false
         }
         return adapter.capabilities.contains(.resumableSessions)
+    }
+
+    private static func adapterRequiresSessionHandshakeGate(_ projectType: ProjectType) async -> Bool {
+        // Mixed with a default: ask that agent. Mixed without a default: gate if
+        // any registered adapter declares the capability (safer than false-open).
+        // Custom ACP refs resolve through `CustomAgentAdapterFactories` → `ACPAdapter`.
+        if case .mixed(let defaultAgent) = projectType {
+            if let defaultAgent,
+               let adapter = await AdapterRegistry.shared.adapter(for: defaultAgent) {
+                return adapter.capabilities.contains(.sessionHandshakeGate)
+            }
+            let adapters = await AdapterRegistry.shared.all()
+            return adapters.contains { $0.capabilities.contains(.sessionHandshakeGate) }
+        }
+        guard let adapter = await ProjectAgentRouter.resolveAdapter(projectType: projectType) else {
+            return false
+        }
+        return adapter.capabilities.contains(.sessionHandshakeGate)
     }
 }

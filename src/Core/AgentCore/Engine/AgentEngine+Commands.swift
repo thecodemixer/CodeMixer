@@ -23,17 +23,25 @@ extension AgentEngine {
             lastUserBubbleID = bubbleID
             let prompt = try await promptText(text, attachments: attachments)
             let bytes = adapter.encodeUserPrompt(prompt)
-            // Echo the turn + start the heartbeat BEFORE the awaited PTY write so
-            // every connected surface (the GUI and remote API clients) reflects
-            // the turn instantly rather than after the write + bus fan-out. If
-            // the write then fails, `send` still throws so the caller surfaces
-            // the error. Ordering is otherwise unchanged.
+            // Echo the turn BEFORE the awaited write so every connected surface
+            // reflects the turn instantly. If the write then fails, `send` still
+            // throws so the caller surfaces the error.
             //
-            // The resume-startup gate still runs inside `writePromptBytes` — do
-            // not hold this echo on that gate. Holding it made first prompts
-            // look dead when Claude's ready-prompt scrape lagged, and the stall
-            // toast is already filtered by turn-id matching in the view model.
+            // ACP may return empty bytes while session/open is still in flight —
+            // the prompt is queued in adapter state and flushed on SessionStart.
+            // Do not start the heartbeat or leave the turn "awaiting acceptance"
+            // forever in that case.
             await bus.publish(.userTurn(id: bubbleID.uuidString, text: prompt))
+            if bytes.isEmpty {
+                currentTurnID = bubbleID
+                currentTurnPromptText = prompt
+                currentTurnAwaitingAcceptance = false
+                await bus.publish(.statusPhraseChanged(
+                    source: .adapterPinned,
+                    phrase: "Waiting for session…"
+                ))
+                return
+            }
             currentTurnID = bubbleID
             currentTurnPromptText = prompt
             currentTurnAwaitingAcceptance = true
@@ -190,11 +198,16 @@ extension AgentEngine {
     }
 
     private func openProject(path: String, resumeSessionID: String?) async throws {
-        let projectURL = URL(fileURLWithPath: path)
+        let projectURL = URL(fileURLWithPath: path).standardizedFileURL
         let store = WorkspaceProjectsStore(environment: seams.environment,
                                            fileSystem: seams.fileSystem)
         await store.load()
-        guard let project = await store.project(path: path) else {
+        let project: WorkspaceProjectsStore.ProjectRef
+        if let match = await store.project(path: projectURL.path) {
+            project = match
+        } else if let match = await store.project(path: path) {
+            project = match
+        } else {
             throw AgentError.unsupportedOperation(
                 detail: "Project \(path) has no stored project type. Open it from the project picker and choose an agent first."
             )
@@ -210,11 +223,62 @@ extension AgentEngine {
             )
         }
 
+        // Warm ACP/Cursor path: same workspace + live process → `session/load`
+        // (~1–3s) instead of respawning the binary (~20s initialize/auth).
+        if let resumeSessionID,
+           await tryWarmResume(
+            projectURL: projectURL,
+            resumeSessionID: resumeSessionID,
+            nextAdapter: nextAdapter
+           ) {
+            return
+        }
+
         await shutdown(reason: .userCancel)
         try await start(adapter: nextAdapter,
                         workspace: projectURL,
                         resumeSessionID: resumeSessionID,
                         permissionMode: .default)
+    }
+
+    /// Returns `true` when the live agent accepted a same-process session load.
+    private func tryWarmResume(projectURL: URL,
+                               resumeSessionID: String,
+                               nextAdapter: any AgentAdapter) async -> Bool {
+        guard case .running = state else { return false }
+        guard let live = adapter, live.id == nextAdapter.id else { return false }
+        guard live.capabilities.contains(.sessionHandshakeGate) else { return false }
+        guard let currentWorkspace = workspace,
+              currentWorkspace.standardizedFileURL.path == projectURL.path else {
+            return false
+        }
+        guard let bytes = live.encodeResumeSession(sessionID: resumeSessionID),
+              !bytes.isEmpty else {
+            return false
+        }
+        transcript = []
+        changedFiles = []
+        currentTurnID = nil
+        currentTurnPromptText = nil
+        currentTurnAwaitingAcceptance = false
+        cancelStartupSubmitRecovery()
+        await heartbeat?.endTurn()
+        // Preset so same-id SessionStart still publishes for UI unlock.
+        currentSessionID = resumeSessionID
+        state = .running(sessionID: resumeSessionID)
+        do {
+            try await transport?.write(bytes)
+            log.notice("warm session/load session=\(resumeSessionID, privacy: .public)")
+            return true
+        } catch {
+            await SilentDiagnostics.shared.record(
+                kind: .other,
+                owner: "AgentEngine",
+                summary: "warm session/load write failed; falling back to cold open",
+                details: String(describing: error)
+            )
+            return false
+        }
     }
 
     private func sessionAgentID(for resumeSessionID: String?,

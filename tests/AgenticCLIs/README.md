@@ -277,8 +277,12 @@ Built-in Cursor adapter over ACP (`cursor-agent acp`). Modes use ACP
 | --- | --- |
 | `ACPCLIs/CursorACPCLITests/CursorACPAdapterTests.swift` | Identity, locator, mode encoding |
 | `ACPCLIs/CursorACPCLITests/FakeCursorACPIntegrationTests.swift` | Engine + Cursor + `fake-acp` mode switches |
-| `ACPCLIs/CursorACPCLITests/LiveCursorACPHarness.swift` | Opt-in live driver + mode probe |
-| `ACPCLIs/CursorACPCLITests/LiveCursorACPIntegrationTests.swift` | Live suite |
+| `ACPCLIs/CursorACPCLITests/LiveCursorACPHarness.swift` | Opt-in live driver + mode probe + two-turn warm latency + fresh-process `session/load` history |
+| `ACPCLIs/CursorACPCLITests/LiveCursorACPIntegrationTests.swift` | Live suite (second turn faster; load replays prior turns) |
+
+Same-project Cursor session switches warm-load via `session/load` on the live `cursor-agent` process (no ~20s respawn). Cold open (first spawn / project change) still pays initialize/auth.
+
+Cursor / ACP history: prefer wire replay from `session/load` (`user_message_chunk` / `agent_thought_chunk` / `tool_call` / `agent_message_chunk`). Cursor currently returns modes/models without streaming history, so Codemixer also keeps a local turn cache in `ACPSessionIndex` (user / thinking / tool / assistant) and restores it when the load stream is empty. The sidebar session list is driven by that same index (Cursor has no `session/list`).
 
 ```bash
 swift build --product fake-acp

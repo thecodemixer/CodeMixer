@@ -11,6 +11,7 @@ public final class ACPAdapter: AgentAdapter {
     public let capabilities: AgentCapabilities = [
         .permissionPrompts,
         .resumableSessions,
+        .sessionHandshakeGate,
     ]
     public var transportDescriptor: AgentTransportDescriptor { .agentClientProtocol }
 
@@ -124,6 +125,12 @@ public final class ACPAdapter: AgentAdapter {
                     customAgentID: context.customAgentID,
                     title: text
                 )
+                await sessionIndex.appendConversationTurn(
+                    sessionID: sessionID,
+                    customAgentID: context.customAgentID,
+                    role: "user",
+                    text: text
+                )
             }
         }
         return data
@@ -162,6 +169,11 @@ public final class ACPAdapter: AgentAdapter {
         default:
             return nil
         }
+    }
+
+    public func encodeResumeSession(sessionID: String) -> Data? {
+        let data = ACPInputEncoding.sessionLoad(sessionID: sessionID, state: state)
+        return data.isEmpty ? nil : data
     }
 
     /// Encodes ACP `session/set_mode` for agents that advertise `availableModes`.

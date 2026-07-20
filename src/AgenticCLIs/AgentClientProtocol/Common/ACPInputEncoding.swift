@@ -37,23 +37,6 @@ public enum ACPInputEncoding {
         )
     }
 
-    /// Frames sent after a successful `initialize` (no auth required).
-    public static func postInitialize(state: ACPClientState) -> Data {
-        let initialized = ACPRPCCodec.notification(method: "initialized")
-        let session = sessionOpen(state: state)
-        return ACPRPCCodec.concatenate([initialized, session])
-    }
-
-    public static func authenticate(methodID: String, state: ACPClientState) -> Data {
-        let id = state.nextRequestID(for: .authenticate)
-        state.setPhase(.awaitingAuthentication)
-        return ACPRPCCodec.request(
-            id: id,
-            method: "authenticate",
-            params: .object(["methodId": .string(methodID)])
-        )
-    }
-
     public static func sessionOpen(state: ACPClientState) -> Data {
         guard let context = state.currentContext() else { return Data() }
         if let resume = context.resumeSessionID {
@@ -83,8 +66,71 @@ public enum ACPInputEncoding {
                     ])
                 )
             }
+            // Never silently `session/new` while the sidebar shows an old id.
+            return Data()
         }
         return sessionNew(state: state)
+    }
+
+    /// Warm `session/load` / `session/resume` on an already-authenticated process.
+    public static func sessionLoad(sessionID: String, state: ACPClientState) -> Data {
+        state.prepareLoadSession(sessionID: sessionID)
+        guard let context = state.currentContext() else { return Data() }
+        if state.supportsLoadSession() {
+            let id = state.nextRequestID(for: .sessionLoad)
+            state.setPhase(.awaitingSession)
+            return ACPRPCCodec.request(
+                id: id,
+                method: "session/load",
+                params: .object([
+                    "sessionId": .string(sessionID),
+                    "cwd": .string(context.workspace.path),
+                    "mcpServers": .array([]),
+                ])
+            )
+        }
+        if state.supportsResumeSession() {
+            let id = state.nextRequestID(for: .sessionResume)
+            state.setPhase(.awaitingSession)
+            return ACPRPCCodec.request(
+                id: id,
+                method: "session/resume",
+                params: .object([
+                    "sessionId": .string(sessionID),
+                    "cwd": .string(context.workspace.path),
+                    "mcpServers": .array([]),
+                ])
+            )
+        }
+        return Data()
+    }
+
+    /// `initialized` plus session open, or just `initialized` when resume cannot
+    /// be honored (caller must emit a visible error in that case).
+    public static func postInitialize(state: ACPClientState) -> Data {
+        let initialized = ACPRPCCodec.notification(method: "initialized")
+        let session = sessionOpen(state: state)
+        if session.isEmpty {
+            return initialized
+        }
+        return ACPRPCCodec.concatenate([initialized, session])
+    }
+
+    /// Whether a resume was requested but the agent advertised neither load nor resume.
+    public static func resumeUnsupportedAfterInitialize(state: ACPClientState) -> String? {
+        guard let resume = state.currentContext()?.resumeSessionID else { return nil }
+        if state.supportsLoadSession() || state.supportsResumeSession() { return nil }
+        return resume
+    }
+
+    public static func authenticate(methodID: String, state: ACPClientState) -> Data {
+        let id = state.nextRequestID(for: .authenticate)
+        state.setPhase(.awaitingAuthentication)
+        return ACPRPCCodec.request(
+            id: id,
+            method: "authenticate",
+            params: .object(["methodId": .string(methodID)])
+        )
     }
 
     public static func sessionNew(state: ACPClientState) -> Data {

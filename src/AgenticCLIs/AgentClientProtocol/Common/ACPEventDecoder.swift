@@ -59,6 +59,15 @@ public actor ACPEventDecoder {
                     .error(ACPAgentError.authenticationRequired(displayName: displayName).agentError),
                 ])
             }
+            if purpose == .sessionLoad {
+                let sessionID = state.currentContext()?.resumeSessionID ?? "unknown"
+                return Batch(events: [
+                    .error(ACPAgentError.sessionLoadFailed(
+                        sessionID: sessionID,
+                        message: error.message
+                    ).agentError),
+                ])
+            }
             return Batch(events: [
                 .error(ACPAgentError.rpc(code: error.code, message: error.message).agentError),
             ])
@@ -69,7 +78,7 @@ public actor ACPEventDecoder {
         case .initialize:
             return await handleInitialize(result: result)
         case .authenticate:
-            return Batch(replies: [ACPInputEncoding.postInitialize(state: state)])
+            return postInitializeBatch()
         case .sessionNew, .sessionLoad, .sessionResume:
             return await handleSessionOpen(purpose: purpose, result: result)
         case .sessionPrompt:
@@ -98,8 +107,18 @@ public actor ACPEventDecoder {
                 ACPInputEncoding.authenticate(methodID: methodID, state: state),
             ])
         }
-        let replies = [ACPInputEncoding.postInitialize(state: state)]
-        return Batch(replies: replies)
+        return postInitializeBatch()
+    }
+
+    private func postInitializeBatch() -> Batch {
+        var events: [AgentEvent] = []
+        if let resume = ACPInputEncoding.resumeUnsupportedAfterInitialize(state: state) {
+            events.append(.error(ACPAgentError.resumeUnsupported(sessionID: resume).agentError))
+        }
+        return Batch(
+            events: events,
+            replies: [ACPInputEncoding.postInitialize(state: state)]
+        )
     }
 
     private func handleSessionOpen(purpose: ACPClientState.RequestPurpose,
@@ -115,6 +134,18 @@ public actor ACPEventDecoder {
             sessionID = resume
         } else {
             return Batch(events: [.error(ACPAgentError.missingSessionID.agentError)])
+        }
+        // Flush any open history buffers before marking the session ready.
+        var events = state.flushHistoryReplay()
+        // Cursor (and any agent that skips load replay) — restore from the
+        // Codemixer-owned turn cache when the wire stream was empty.
+        if events.isEmpty, purpose == .sessionLoad || purpose == .sessionResume {
+            let local = await sessionIndex.localHistoryEvents(
+                sessionID: sessionID,
+                customAgentID: context.customAgentID,
+                random: random
+            )
+            events.append(contentsOf: local)
         }
         state.setSessionID(sessionID)
         let modes = result?["modes"]
@@ -139,16 +170,17 @@ public actor ACPEventDecoder {
             workspace: context.workspace,
             title: nil
         )
+        events.append(.sessionStarted(
+            sessionID: sessionID,
+            model: modelCatalog.currentModelID,
+            cwd: context.workspace
+        ))
         var replies = [ACPInputEncoding.queuedPrompts(state: state)]
         if let list = ACPInputEncoding.listSessions(state: state) {
             replies.append(list)
         }
         return Batch(
-            events: [.sessionStarted(
-                sessionID: sessionID,
-                model: modelCatalog.currentModelID,
-                cwd: context.workspace
-            )],
+            events: events,
             replies: replies.filter { !$0.isEmpty }
         )
     }
@@ -189,14 +221,34 @@ public actor ACPEventDecoder {
             ?? update["type"]?.stringValue
         switch kind {
         case "agent_message_chunk":
+            if state.phase() == .awaitingSession {
+                return historyChunk(role: "agent", update: update)
+            }
             return agentMessageChunk(update)
         case "agent_thought_chunk":
+            if state.phase() == .awaitingSession {
+                return historyChunk(role: "thinking", update: update)
+            }
             return agentThoughtChunk(update)
         case "tool_call":
+            if state.phase() == .awaitingSession {
+                // Flush open text history so tools stay in transcript order.
+                let flushed = state.flushHistoryReplay()
+                let tool = toolCall(update)
+                return Batch(events: flushed + tool.events, replies: tool.replies)
+            }
             return toolCall(update)
         case "tool_call_update":
+            if state.phase() == .awaitingSession {
+                let flushed = state.flushHistoryReplay()
+                let tool = toolCallUpdate(update)
+                return Batch(events: flushed + tool.events, replies: tool.replies)
+            }
             return toolCallUpdate(update)
         case "user_message_chunk":
+            if state.phase() == .awaitingSession {
+                return historyChunk(role: "user", update: update)
+            }
             return Batch()
         case "session_info_update":
             return await sessionInfoUpdate(params: params, update: update)
@@ -228,8 +280,42 @@ public actor ACPEventDecoder {
         }
     }
 
+    private func historyChunk(role: String, update: JSONValue) -> Batch {
+        let content = update["content"]
+        let text = content?["text"]?.stringValue
+            ?? content?["content"]?.stringValue
+            ?? update["text"]?.stringValue
+            ?? ""
+        let messageID = update["messageId"]?.stringValue
+            ?? update["message_id"]?.stringValue
+        let events = state.appendHistoryChunk(
+            role: role,
+            messageID: messageID,
+            delta: text,
+            random: random
+        )
+        return Batch(events: events)
+    }
+
     private func finalizePromptTurn() -> Batch {
         var events: [AgentEvent] = []
+        if let thoughtID = state.takeOpenThinkingBlockID() {
+            events.append(.thinkingComplete(blockID: thoughtID, duration: .zero))
+        }
+        if let thoughtText = state.takeThoughtText(),
+           let context = state.currentContext(),
+           let sessionID = state.sessionID() {
+            let customAgentID = context.customAgentID
+            let index = sessionIndex
+            Task {
+                await index.appendConversationTurn(
+                    sessionID: sessionID,
+                    customAgentID: customAgentID,
+                    role: "thinking",
+                    text: thoughtText
+                )
+            }
+        }
         if let finalized = state.finalizedAssistantMessage() {
             events.append(.assistantText(
                 id: finalized.id.uuidString,
@@ -237,7 +323,21 @@ public actor ACPEventDecoder {
                 text: finalized.text,
                 isFinal: true
             ))
+            if let context = state.currentContext(), let sessionID = state.sessionID() {
+                let customAgentID = context.customAgentID
+                let text = finalized.text
+                let index = sessionIndex
+                Task {
+                    await index.appendConversationTurn(
+                        sessionID: sessionID,
+                        customAgentID: customAgentID,
+                        role: "assistant",
+                        text: text
+                    )
+                }
+            }
         }
+        state.resetTurnScopedIDs()
         events.append(.activityStateChanged(.idle))
         return Batch(events: events)
     }
@@ -248,22 +348,26 @@ public actor ACPEventDecoder {
             ?? content?["content"]?.stringValue
             ?? ""
         guard !text.isEmpty else { return Batch() }
+        var events: [AgentEvent] = []
+        if let thoughtID = state.takeOpenThinkingBlockID() {
+            events.append(.thinkingComplete(blockID: thoughtID, duration: .zero))
+        }
         let itemID = "agent-message"
         let id = state.itemUUID(for: itemID, random: random)
-        return Batch(events: [
-            .assistantText(
-                id: id.uuidString,
-                blockID: itemID,
-                text: state.appendAssistantDelta(text, itemID: itemID),
-                isFinal: false
-            ),
-        ])
+        events.append(.assistantText(
+            id: id.uuidString,
+            blockID: itemID,
+            text: state.appendAssistantDelta(text, itemID: itemID),
+            isFinal: false
+        ))
+        return Batch(events: events)
     }
 
     private func agentThoughtChunk(_ update: JSONValue) -> Batch {
         let content = update["content"]
         let text = content?["text"]?.stringValue ?? ""
         guard !text.isEmpty else { return Batch() }
+        state.appendThoughtDelta(text)
         let blockID = state.thinkingBlockID(for: "thought", random: random)
         return Batch(events: [.thinkingChunk(blockID: blockID, delta: text)])
     }
@@ -279,13 +383,15 @@ public actor ACPEventDecoder {
         if status == "completed" || status == "failed" {
             return toolCallUpdate(update)
         }
+        let inputJSON = stringified(update)
+        state.rememberToolStart(id: toolCallID, name: title, inputJSON: inputJSON)
         return Batch(events: [
             .toolStart(
                 id: toolCallID,
                 name: title,
                 input: ToolInput(
                     summary: title,
-                    jsonPayload: stringified(update)
+                    jsonPayload: inputJSON
                 ),
                 startedAt: clock.now()
             ),
@@ -299,14 +405,28 @@ public actor ACPEventDecoder {
         let status = update["status"]?.stringValue
         let success = status != "failed"
         if status == "completed" || status == "failed" || status == "cancelled" {
+            let outputSummary = update["content"]?.stringValue
+                ?? stringified(update["rawOutput"])
+                ?? status
+                ?? ""
+            let meta = state.takeToolMeta(id: toolCallID)
+            let name = meta?.name
+                ?? update["title"]?.stringValue
+                ?? update["kind"]?.stringValue
+                ?? "Tool"
+            let inputJSON = meta?.inputJSON ?? stringified(update)
+            persistToolTurn(
+                toolCallID: toolCallID,
+                name: name,
+                success: success,
+                outputSummary: outputSummary,
+                inputJSON: inputJSON
+            )
             return Batch(events: [
                 .toolEnd(
                     id: toolCallID,
                     success: success,
-                    output: ToolOutput(summary: update["content"]?.stringValue
-                        ?? stringified(update["rawOutput"])
-                        ?? status
-                        ?? ""),
+                    output: ToolOutput(summary: outputSummary),
                     durationMS: 0
                 ),
             ])
@@ -318,6 +438,30 @@ public actor ACPEventDecoder {
             ])
         }
         return Batch()
+    }
+
+    private func persistToolTurn(toolCallID: String,
+                                 name: String,
+                                 success: Bool,
+                                 outputSummary: String,
+                                 inputJSON: String?) {
+        // Only cache live turns — load-time wire replay must not rewrite the index.
+        guard state.phase() == .ready,
+              let context = state.currentContext(),
+              let sessionID = state.sessionID() else { return }
+        let customAgentID = context.customAgentID
+        let index = sessionIndex
+        Task {
+            await index.appendToolTurn(
+                sessionID: sessionID,
+                customAgentID: customAgentID,
+                toolCallID: toolCallID,
+                name: name,
+                success: success,
+                outputSummary: outputSummary,
+                inputJSON: inputJSON
+            )
+        }
     }
 
     private func sessionInfoUpdate(params: JSONValue, update: JSONValue) async -> Batch {

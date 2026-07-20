@@ -23,7 +23,13 @@ extension EngineViewModel {
             let previousSessionID = sessionID
             let sessionChanged = previousSessionID != id
             let shouldResetConversation = projectChanged || (sessionChanged && activity == .idle)
-            sessionID = id
+            // Engine bootstrap may publish an empty id for handshake-gated
+            // adapters; do not clobber a resume id the navigator already set.
+            if !id.isEmpty {
+                sessionID = id
+            } else if previousSessionID == nil {
+                sessionID = id
+            }
             // First session with no explicit workspace shell: treat cwd as the root.
             if workspaceRoot == nil {
                 workspaceRoot = cwd
@@ -31,20 +37,26 @@ extension EngineViewModel {
             if projectChanged {
                 workspace = cwd
             }
-            if shouldResetConversation {
+            if shouldResetConversation, !id.isEmpty || previousSessionID == nil {
                 clearConversationState()
             }
             // SessionStart with a model is the first live signal from the
             // resumed agent process. For Claude Code, that matters because the
             // visible history may already be on screen from JSONL replay; wait
-            // one engine-aligned settle window before enabling GUI sends. Other
-            // agents do not have this JSONL-vs-live-PTY split, so they can
-            // unlock immediately on their real SessionStart.
-            if isComposerLockedForSessionResume, id == previousSessionID, model != nil {
-                if isComposerWaitingForClaudeCodeResume {
-                    scheduleComposerResumeUnlock(after: SessionSwitchingTiming.claudeCodeComposerHookUnlock)
-                } else {
-                    unlockComposerForSessionResume()
+            // one engine-aligned settle window before enabling GUI sends.
+            // Handshake-gated agents (Cursor / ACP) unlock on any non-empty
+            // live SessionStart — including same-id resume without a model.
+            if isComposerLockedForSessionResume, !id.isEmpty {
+                let handshake = projectNeedsSessionHandshakeGate(path: cwd.path)
+                    || projectNeedsSessionHandshakeGate(path: workspace?.path ?? "")
+                let resumedSessionConfirmed = id == previousSessionID && (model != nil || handshake)
+                let freshSessionConfirmed = previousSessionID?.isEmpty ?? true
+                if resumedSessionConfirmed || freshSessionConfirmed {
+                    if isComposerWaitingForClaudeCodeResume {
+                        scheduleComposerResumeUnlock(after: SessionSwitchingTiming.claudeCodeComposerHookUnlock)
+                    } else {
+                        unlockComposerForSessionResume()
+                    }
                 }
             }
             if projectChanged {

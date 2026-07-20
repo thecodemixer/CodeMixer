@@ -202,7 +202,7 @@ public struct PromptComposerView: View {
 
     private var promptPlaceholder: String {
         if model.isComposerLockedForSessionResume {
-            return "Finishing session resume…"
+            return "Starting session…"
         }
         return isEditMode ? "Edit your message…" : "Ask…"
     }

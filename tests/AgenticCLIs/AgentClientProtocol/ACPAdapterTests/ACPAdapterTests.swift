@@ -14,6 +14,13 @@ struct ACPAdapterTests {
         #expect(adapter.transportDescriptor == .agentClientProtocol)
     }
 
+    @Test("ACP adapter declares sessionHandshakeGate")
+    func sessionHandshakeGateCapability() {
+        let adapter = makeAdapter()
+        #expect(adapter.capabilities.contains(.sessionHandshakeGate))
+        #expect(adapter.capabilities.contains(.resumableSessions))
+    }
+
     @Test("bootstrap emits initialize only")
     func bootstrapInitializeOnly() throws {
         let adapter = makeAdapter()
@@ -363,6 +370,82 @@ struct ACPAdapterTests {
         #expect(secondAssistant?.text == "second response")
     }
 
+    @Test("consecutive session prompts allocate distinct thinking block ids")
+    func consecutiveSessionPromptsUseDistinctThinkingIDs() async throws {
+        let fs = InMemoryFileSystem()
+        let clock = FakeClock()
+        let firstID = UUID(uuidString: "00000000-0000-0000-0000-000000000011")!
+        let secondID = UUID(uuidString: "00000000-0000-0000-0000-000000000012")!
+        let random = FakeRandomSource(uuids: [firstID, secondID])
+        let state = ACPClientState()
+        _ = ACPInputEncoding.bootstrap(
+            context: LaunchContext(
+                workspace: URL(fileURLWithPath: "/tmp/acp-ws"),
+                permissionMode: .default
+            ),
+            state: state,
+            customAgentID: "x",
+            displayName: "Test Agent"
+        )
+        let decoder = ACPEventDecoder(
+            state: state,
+            sessionIndex: ACPSessionIndex(
+                environment: FakeEnvironment(),
+                fileSystem: fs,
+                clock: clock
+            ),
+            fileAccess: ACPFileAccess(
+                workspace: URL(fileURLWithPath: "/tmp/acp-ws"),
+                fileSystem: fs
+            ),
+            terminals: ACPTerminalSession(
+                workspace: URL(fileURLWithPath: "/tmp/acp-ws"),
+                random: random
+            ),
+            clock: clock,
+            random: random
+        )
+
+        let firstPromptID = state.nextRequestID(for: .sessionPrompt)
+        let firstThought = await decoder.decode(.notification(
+            method: "session/update",
+            params: .object([
+                "sessionId": .string("s1"),
+                "update": .object([
+                    "sessionUpdate": .string("agent_thought_chunk"),
+                    "content": .object(["type": .string("text"), "text": .string("think-1")]),
+                ]),
+            ])
+        ))
+        _ = await decoder.decode(.response(
+            id: firstPromptID,
+            result: .object(["stopReason": .string("end_turn")]),
+            error: nil
+        ))
+
+        let secondPromptID = state.nextRequestID(for: .sessionPrompt)
+        let secondThought = await decoder.decode(.notification(
+            method: "session/update",
+            params: .object([
+                "sessionId": .string("s1"),
+                "update": .object([
+                    "sessionUpdate": .string("agent_thought_chunk"),
+                    "content": .object(["type": .string("text"), "text": .string("think-2")]),
+                ]),
+            ])
+        ))
+        _ = await decoder.decode(.response(
+            id: secondPromptID,
+            result: .object(["stopReason": .string("end_turn")]),
+            error: nil
+        ))
+
+        let firstBlock = thinkingBlockID(in: firstThought.events)
+        let secondBlock = thinkingBlockID(in: secondThought.events)
+        #expect(firstBlock == firstID)
+        #expect(secondBlock == secondID)
+    }
+
     @Test("fs read rejects paths outside workspace")
     func fsSandbox() async {
         let fs = InMemoryFileSystem()
@@ -395,6 +478,61 @@ struct ACPAdapterTests {
         #expect(summaries.count == 1)
         #expect(summaries.first?.id == "s1")
         #expect(summaries.first?.title == "Hello")
+
+        await index.appendConversationTurn(
+            sessionID: "s1",
+            customAgentID: "gemini",
+            role: "user",
+            text: "hi"
+        )
+        await index.appendConversationTurn(
+            sessionID: "s1",
+            customAgentID: "gemini",
+            role: "thinking",
+            text: "hmm"
+        )
+        await index.appendToolTurn(
+            sessionID: "s1",
+            customAgentID: "gemini",
+            toolCallID: "t-1",
+            name: "Read",
+            success: true,
+            outputSummary: "ok",
+            inputJSON: #"{"path":"a.swift"}"#
+        )
+        await index.appendConversationTurn(
+            sessionID: "s1",
+            customAgentID: "gemini",
+            role: "assistant",
+            text: "hello"
+        )
+        let replay = await index.localHistoryEvents(
+            sessionID: "s1",
+            customAgentID: "gemini",
+            random: FakeRandomSource()
+        )
+        #expect(replay.contains {
+            if case .thinkingChunk(_, let delta) = $0 { return delta == "hmm" }
+            return false
+        })
+        #expect(replay.contains {
+            if case .thinkingComplete = $0 { return true }
+            return false
+        })
+        #expect(replay.contains {
+            if case .toolStart(let id, let name, _, _) = $0 {
+                return id == "t-1" && name == "Read"
+            }
+            return false
+        })
+        #expect(replay.contains {
+            if case .toolEnd(let id, true, let output, _) = $0 {
+                return id == "t-1" && output.summary == "ok"
+            }
+            return false
+        })
+        let after = await index.summaries(workspace: workspace, customAgentID: "gemini")
+        #expect(after.first?.messageCount == 2)
     }
 
     @Test("permission mapping prefers reject_always for deny when available")
@@ -569,6 +707,15 @@ struct ACPAdapterTests {
         for event in events {
             if case .assistantText(let id, _, let text, true) = event {
                 return (id, text)
+            }
+        }
+        return nil
+    }
+
+    private func thinkingBlockID(in events: [AgentEvent]) -> UUID? {
+        for event in events {
+            if case .thinkingChunk(let id, _) = event {
+                return id
             }
         }
         return nil

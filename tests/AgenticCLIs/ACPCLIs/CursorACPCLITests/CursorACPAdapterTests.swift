@@ -17,6 +17,7 @@ struct CursorACPAdapterTests {
         #expect(adapter.transportDescriptor == .agentClientProtocol)
         #expect(adapter.capabilities.contains(.permissionPrompts))
         #expect(adapter.capabilities.contains(.resumableSessions))
+        #expect(adapter.capabilities.contains(.sessionHandshakeGate))
     }
 
     @Test("buildLaunchArgv is cursor-agent acp")

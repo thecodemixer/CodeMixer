@@ -1,6 +1,7 @@
 @testable import AgentClientProtocol
 import AgentCore
 import AgentProtocol
+import AgentTestSupport
 import Foundation
 import Testing
 
@@ -230,6 +231,58 @@ struct ACPEventDecoderTests {
         })
     }
 
+    @Test("first assistant chunk completes open thinking; finalize persists thought for replay")
+    func thinkingPersistedForLocalReplay() async {
+        let fixture = ACPDecoderFixture(customAgentID: "cursor")
+        _ = await fixture.openSession(id: "s-think")
+        _ = await fixture.decode(.notification(
+            method: "session/update",
+            params: .object([
+                "update": .object([
+                    "sessionUpdate": .string("agent_thought_chunk"),
+                    "content": .object(["text": .string("reason")]),
+                ]),
+            ])
+        ))
+        let firstAssistant = await fixture.decode(.notification(
+            method: "session/update",
+            params: .object([
+                "update": .object([
+                    "sessionUpdate": .string("agent_message_chunk"),
+                    "content": .object(["text": .string("answer")]),
+                ]),
+            ])
+        ))
+        #expect(firstAssistant.events.contains {
+            if case .thinkingComplete = $0 { return true }
+            return false
+        })
+        let promptID = fixture.state.nextRequestID(for: .sessionPrompt)
+        _ = await fixture.decode(.response(
+            id: promptID,
+            result: .object(["stopReason": .string("end_turn")]),
+            error: nil
+        ))
+        try? await Task.sleep(for: .milliseconds(50))
+        let replay = await fixture.sessionIndex.localHistoryEvents(
+            sessionID: "s-think",
+            customAgentID: "cursor",
+            random: FakeRandomSource()
+        )
+        #expect(replay.contains {
+            if case .thinkingChunk(_, let delta) = $0 { return delta == "reason" }
+            return false
+        })
+        #expect(replay.contains {
+            if case .thinkingComplete = $0 { return true }
+            return false
+        })
+        #expect(replay.contains {
+            if case .assistantText(_, _, let text, true) = $0 { return text == "answer" }
+            return false
+        })
+    }
+
     @Test("tool call start and completion map to toolStart and toolEnd")
     func toolLifecycle() async {
         let fixture = ACPDecoderFixture()
@@ -265,6 +318,52 @@ struct ACPEventDecoderTests {
         #expect(end.events.contains {
             if case .toolEnd(let id, let success, let output, _) = $0 {
                 return id == "t1" && success && output.summary == "done"
+            }
+            return false
+        })
+    }
+
+    @Test("completed tool calls persist into local history replay")
+    func toolPersistedForLocalReplay() async {
+        let fixture = ACPDecoderFixture(customAgentID: "cursor")
+        _ = await fixture.openSession(id: "s-tool")
+        _ = await fixture.decode(.notification(
+            method: "session/update",
+            params: .object([
+                "update": .object([
+                    "sessionUpdate": .string("tool_call"),
+                    "toolCallId": .string("read-1"),
+                    "title": .string("Read"),
+                    "status": .string("running"),
+                ]),
+            ])
+        ))
+        _ = await fixture.decode(.notification(
+            method: "session/update",
+            params: .object([
+                "update": .object([
+                    "sessionUpdate": .string("tool_call_update"),
+                    "toolCallId": .string("read-1"),
+                    "status": .string("completed"),
+                    "content": .string("file contents"),
+                ]),
+            ])
+        ))
+        try? await Task.sleep(for: .milliseconds(50))
+        let replay = await fixture.sessionIndex.localHistoryEvents(
+            sessionID: "s-tool",
+            customAgentID: "cursor",
+            random: FakeRandomSource()
+        )
+        #expect(replay.contains {
+            if case .toolStart(let id, let name, _, _) = $0 {
+                return id == "read-1" && name == "Read"
+            }
+            return false
+        })
+        #expect(replay.contains {
+            if case .toolEnd(let id, let success, let output, _) = $0 {
+                return id == "read-1" && success && output.summary == "file contents"
             }
             return false
         })
@@ -443,6 +542,175 @@ struct ACPEventDecoderTests {
         #expect(batch.events.contains {
             if case .error(.unsupportedOperation(let detail)) = $0 {
                 return detail.contains("rpc:-32602:bad params")
+            }
+            return false
+        })
+    }
+
+    @Test("session/load history chunks become user and assistant turns before SessionStart")
+    func sessionLoadHistoryReplay() async {
+        let fixture = ACPDecoderFixture(resumeSessionID: "resume-hist")
+        _ = await fixture.decode(.response(
+            id: .number(1),
+            result: .object([
+                "protocolVersion": .number(1),
+                "agentCapabilities": .object(["loadSession": .bool(true)]),
+                "authMethods": .array([]),
+            ]),
+            error: nil
+        ))
+        fixture.state.setPhase(.awaitingSession)
+
+        let userBatch = await fixture.decode(.notification(
+            method: "session/update",
+            params: .object([
+                "sessionId": .string("resume-hist"),
+                "update": .object([
+                    "sessionUpdate": .string("user_message_chunk"),
+                    "messageId": .string("u1"),
+                    "content": .object(["type": .string("text"), "text": .string("hello")]),
+                ]),
+            ])
+        ))
+        #expect(userBatch.events.isEmpty)
+
+        let agentBatch = await fixture.decode(.notification(
+            method: "session/update",
+            params: .object([
+                "sessionId": .string("resume-hist"),
+                "update": .object([
+                    "sessionUpdate": .string("agent_message_chunk"),
+                    "messageId": .string("a1"),
+                    "content": .object(["type": .string("text"), "text": .string("hi there")]),
+                ]),
+            ])
+        ))
+        #expect(agentBatch.events.contains {
+            if case .userTurn(_, let text) = $0 { return text == "hello" }
+            return false
+        })
+
+        let loadID = fixture.state.nextRequestID(for: .sessionLoad)
+        let openBatch = await fixture.decode(.response(
+            id: loadID,
+            result: .object(["modes": .object([:]), "models": .object([:])]),
+            error: nil
+        ))
+        #expect(openBatch.events.contains {
+            if case .assistantText(_, _, let text, true) = $0 { return text == "hi there" }
+            return false
+        })
+        #expect(openBatch.events.contains {
+            if case .sessionStarted(let id, _, _) = $0 { return id == "resume-hist" }
+            return false
+        })
+        let sessionIdx = openBatch.events.firstIndex {
+            if case .sessionStarted = $0 { return true }
+            return false
+        }
+        let assistantIdx = openBatch.events.firstIndex {
+            if case .assistantText(_, _, _, true) = $0 { return true }
+            return false
+        }
+        if let sessionIdx, let assistantIdx {
+            #expect(assistantIdx < sessionIdx)
+        }
+    }
+
+    @Test("session/load thought chunks become thinkingComplete before SessionStart")
+    func sessionLoadThoughtReplay() async {
+        let fixture = ACPDecoderFixture(resumeSessionID: "resume-think")
+        _ = await fixture.decode(.response(
+            id: .number(1),
+            result: .object([
+                "protocolVersion": .number(1),
+                "agentCapabilities": .object(["loadSession": .bool(true)]),
+                "authMethods": .array([]),
+            ]),
+            error: nil
+        ))
+        fixture.state.setPhase(.awaitingSession)
+
+        _ = await fixture.decode(.notification(
+            method: "session/update",
+            params: .object([
+                "sessionId": .string("resume-think"),
+                "update": .object([
+                    "sessionUpdate": .string("user_message_chunk"),
+                    "messageId": .string("u1"),
+                    "content": .object(["type": .string("text"), "text": .string("why?")]),
+                ]),
+            ])
+        ))
+        let thoughtBatch = await fixture.decode(.notification(
+            method: "session/update",
+            params: .object([
+                "sessionId": .string("resume-think"),
+                "update": .object([
+                    "sessionUpdate": .string("agent_thought_chunk"),
+                    "messageId": .string("t1"),
+                    "content": .object(["type": .string("text"), "text": .string("pondering")]),
+                ]),
+            ])
+        ))
+        #expect(thoughtBatch.events.contains {
+            if case .userTurn(_, let text) = $0 { return text == "why?" }
+            return false
+        })
+        let agentBatch = await fixture.decode(.notification(
+            method: "session/update",
+            params: .object([
+                "sessionId": .string("resume-think"),
+                "update": .object([
+                    "sessionUpdate": .string("agent_message_chunk"),
+                    "messageId": .string("a1"),
+                    "content": .object(["type": .string("text"), "text": .string("because")]),
+                ]),
+            ])
+        ))
+        #expect(agentBatch.events.contains {
+            if case .thinkingChunk(_, let delta) = $0 { return delta == "pondering" }
+            return false
+        })
+        #expect(agentBatch.events.contains {
+            if case .thinkingComplete = $0 { return true }
+            return false
+        })
+
+        let loadID = fixture.state.nextRequestID(for: .sessionLoad)
+        let openBatch = await fixture.decode(.response(
+            id: loadID,
+            result: .object(["modes": .object([:]), "models": .object([:])]),
+            error: nil
+        ))
+        #expect(openBatch.events.contains {
+            if case .assistantText(_, _, let text, true) = $0 { return text == "because" }
+            return false
+        })
+        let thinkIdx = agentBatch.events.firstIndex {
+            if case .thinkingComplete = $0 { return true }
+            return false
+        }
+        let assistantIdx = openBatch.events.firstIndex {
+            if case .assistantText(_, _, _, true) = $0 { return true }
+            return false
+        }
+        #expect(thinkIdx != nil)
+        #expect(assistantIdx != nil)
+    }
+
+    @Test("session/load RPC error surfaces session-load-failed")
+    func sessionLoadRPCError() async {
+        let fixture = ACPDecoderFixture(resumeSessionID: "resume-fail")
+        let id = fixture.state.nextRequestID(for: .sessionLoad)
+        let batch = await fixture.decode(.response(
+            id: id,
+            result: nil,
+            error: .init(code: -32_000, message: "not found", data: nil)
+        ))
+        #expect(batch.events.contains {
+            if case .error(.unsupportedOperation(let detail)) = $0 {
+                return detail.contains("session-load-failed:resume-fail:not found")
             }
             return false
         })

@@ -103,6 +103,32 @@ private struct FakeACPServer {
             if let resume = params["sessionId"]?.stringValue {
                 sessionID = resume
             }
+            if scenario == .resume, method == "session/load" {
+                // Replay a short transcript before the load response so clients
+                // can rebuild chat history (ACP session/load contract).
+                return [
+                    sessionUpdate(
+                        kind: "user_message_chunk",
+                        content: .object([
+                            "type": .string("text"),
+                            "text": .string("prior user"),
+                        ]),
+                        messageID: "hist-user-1"
+                    ),
+                    sessionUpdate(
+                        kind: "agent_message_chunk",
+                        content: .object([
+                            "type": .string("text"),
+                            "text": .string("prior assistant"),
+                        ]),
+                        messageID: "hist-agent-1"
+                    ),
+                    ACPRPCCodec.response(id: id, result: .object([
+                        "modes": modesPayload(),
+                        "models": modelsPayload(),
+                    ])),
+                ]
+            }
             return [ACPRPCCodec.response(id: id, result: .object([
                 "modes": modesPayload(),
                 "models": modelsPayload(),
@@ -261,15 +287,19 @@ private struct FakeACPServer {
         ]
     }
 
-    private func sessionUpdate(kind: String, content: JSONValue) -> Data {
-        ACPRPCCodec.notification(
+    private func sessionUpdate(kind: String, content: JSONValue, messageID: String? = nil) -> Data {
+        var update: [String: JSONValue] = [
+            "sessionUpdate": .string(kind),
+            "content": content,
+        ]
+        if let messageID {
+            update["messageId"] = .string(messageID)
+        }
+        return ACPRPCCodec.notification(
             method: "session/update",
             params: .object([
                 "sessionId": .string(sessionID),
-                "update": .object([
-                    "sessionUpdate": .string(kind),
-                    "content": content,
-                ]),
+                "update": .object(update),
             ])
         )
     }

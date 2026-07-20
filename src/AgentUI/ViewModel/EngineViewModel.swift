@@ -38,6 +38,9 @@ public final class EngineViewModel {
     /// Holds the composer closed briefly after opening a saved session so the
     /// first prompt cannot race Claude's resume/startup TUI.
     public internal(set) var isComposerLockedForSessionResume: Bool = false
+    /// True while the composer lock was armed by `.sessionHandshakeGate`
+    /// (Cursor / ACP). History replay must not clear this — only SessionStart.
+    internal var isComposerLockedForSessionHandshake: Bool = false
     /// Claude Code resume has two clocks: the UI can replay JSONL history
     /// quickly, while the live `claude --resume` PTY may still be painting
     /// history and not yet accepting input. While true, replayed content may
@@ -99,9 +102,9 @@ public final class EngineViewModel {
     /// Resumable sessions per project path, lazily loaded on expand.
     public internal(set) var sessionsByProject: [String: [SessionSummary]] = [:]
 
-    /// Whether each project can list resumable sessions. This is project-specific
-    /// because the active project's adapter should not decide every sidebar row.
-    public internal(set) var projectResumableSessionSupport: [String: Bool] = [:]
+    /// Per-project adapter capabilities resolved through `ProjectAgentRouter`
+    /// (resumable sessions, session-handshake gate). Replaces parallel bool maps.
+    public internal(set) var projectCapabilities = ProjectCapabilityIndex()
 
     /// Project paths whose session list is currently loading (drives skeletons).
     public internal(set) var loadingProjectPaths: Set<String> = []
@@ -372,5 +375,83 @@ public extension EngineViewModel {
     struct PendingExport: Sendable {
         public let kind: SnapshotKind
         public let payload: Data
+    }
+
+    /// Per-project adapter capability snapshot resolved for the navigator.
+    struct ProjectCapabilities: Sendable, Hashable {
+        var supportsResumableSessions: Bool
+        var requiresSessionHandshakeGate: Bool
+
+        static let none = ProjectCapabilities(
+            supportsResumableSessions: false,
+            requiresSessionHandshakeGate: false
+        )
+    }
+
+    /// Path-keyed index of `ProjectCapabilities`. Lookups tolerate path
+    /// standardization differences between store paths and UI paths.
+    struct ProjectCapabilityIndex: Sendable {
+        private var entries: [String: ProjectCapabilities] = [:]
+
+        var isEmpty: Bool { entries.isEmpty }
+
+        var anySupportsResumableSessions: Bool {
+            entries.values.contains { $0.supportsResumableSessions }
+        }
+
+        subscript(_ path: String) -> ProjectCapabilities? {
+            get { entry(for: path) }
+            set {
+                let key = Self.normalized(path)
+                if let newValue {
+                    entries[key] = newValue
+                } else {
+                    entries.removeValue(forKey: key)
+                }
+            }
+        }
+
+        mutating func removeAll() {
+            entries.removeAll(keepingCapacity: false)
+        }
+
+        mutating func rekey(from oldPath: String, to newPath: String) {
+            guard oldPath != newPath,
+                  let value = removeEntry(for: oldPath),
+                  entry(for: newPath) == nil else { return }
+            entries[Self.normalized(newPath)] = value
+        }
+
+        func supportsResumableSessions(for path: String) -> Bool? {
+            entry(for: path)?.supportsResumableSessions
+        }
+
+        func requiresSessionHandshakeGate(for path: String) -> Bool {
+            entry(for: path)?.requiresSessionHandshakeGate ?? false
+        }
+
+        private func entry(for path: String) -> ProjectCapabilities? {
+            let normalized = Self.normalized(path)
+            if let exact = entries[path] { return exact }
+            if let cached = entries[normalized] { return cached }
+            for (key, value) in entries where Self.normalized(key) == normalized {
+                return value
+            }
+            return nil
+        }
+
+        private mutating func removeEntry(for path: String) -> ProjectCapabilities? {
+            let normalized = Self.normalized(path)
+            if let value = entries.removeValue(forKey: path) { return value }
+            if let value = entries.removeValue(forKey: normalized) { return value }
+            if let key = entries.keys.first(where: { Self.normalized($0) == normalized }) {
+                return entries.removeValue(forKey: key)
+            }
+            return nil
+        }
+
+        private static func normalized(_ path: String) -> String {
+            URL(fileURLWithPath: path).standardizedFileURL.path
+        }
     }
 }

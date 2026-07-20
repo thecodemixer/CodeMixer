@@ -105,6 +105,16 @@ struct FakeACPIntegrationTests {
                     if case .sessionStarted(let id, _, _) = $0 { return id == resumeID }
                     return false
                 })
+                #expect(events.contains {
+                    if case .userTurn(_, let text) = $0 { return text.contains("prior user") }
+                    return false
+                })
+                #expect(events.contains {
+                    if case .assistantText(_, _, let text, true) = $0 {
+                        return text.contains("prior assistant")
+                    }
+                    return false
+                })
             }
         )
     }

@@ -704,6 +704,7 @@ public struct AgentCapabilities: OptionSet, Sendable {
     public static let ptyTUIFallback       = AgentCapabilities(rawValue: 1 << 3)
     public static let permissionPrompts    = AgentCapabilities(rawValue: 1 << 5)
     public static let resumableSessions    = AgentCapabilities(rawValue: 1 << 6)
+    public static let sessionHandshakeGate = AgentCapabilities(rawValue: 1 << 7)
 }
 ```
 
@@ -716,6 +717,7 @@ Transport is deliberately not a capability. The engine reads
 - `.ptyTUIFallback` → adapter consumes `inputs.terminal` snapshots.
 - `.permissionPrompts` → `PermissionResponseDelivery` is honored.
 - `.resumableSessions` → enables the *Sessions* picker.
+- `.sessionHandshakeGate` → UI keeps the composer locked until a non-empty `sessionStarted` (ACP initialize/auth/session-new); same-project New Chat prefers `.newSession` over respawning. Opening a saved ACP/Cursor session on an already-live process warm-loads via `session/load` (no binary respawn). Conversation history prefers ACP `session/load` wire replay; when the agent streams nothing (Cursor today), Codemixer restores from a local turn cache in `ACPSessionIndex`. Cursor does not implement `session/list`.
 
 ### `PermissionResponseDelivery`
 

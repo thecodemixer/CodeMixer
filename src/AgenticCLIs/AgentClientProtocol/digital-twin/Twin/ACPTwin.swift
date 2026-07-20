@@ -22,7 +22,11 @@ public final class ACPTwin: AgentAdapter {
     public let id: AgentID = .other
     public let displayName = "ACP Twin"
     public let iconSymbol = "terminal"
-    public let capabilities: AgentCapabilities = [.permissionPrompts, .resumableSessions]
+    public let capabilities: AgentCapabilities = [
+        .permissionPrompts,
+        .resumableSessions,
+        .sessionHandshakeGate,
+    ]
     public var transportDescriptor: AgentTransportDescriptor { .agentClientProtocol }
 
     public let configuration: Configuration
