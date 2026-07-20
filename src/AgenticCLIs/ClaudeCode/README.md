@@ -10,11 +10,12 @@ This module implements the Claude Code adapter (`Adapter/`), shared contract log
 Composer models come from `claude -p '/model'` (plus `/effort` for thinking
 levels). Print mode can consume agent credits, so Codemixer:
 
-1. Stores the catalog in `<workspace>/.codemixer/workspace.json` (`adapterModelCaches`)
+1. Stores the catalog in `<workspace>/.codemixer/workspace-claudeCode.json`
 2. Runs the probe once when that cache is empty
 3. Re-runs only when the user clicks **Refresh models** under Settings → Workspace
 
-Codex and Cursor keep automatic discovery; their Workspace refresh controls stay disabled.
+Codex and Cursor use `.automatic` catalogs in their own
+`workspace-<AgentID>.json` files (refreshed at most once a day).
 
 ## Process model
 

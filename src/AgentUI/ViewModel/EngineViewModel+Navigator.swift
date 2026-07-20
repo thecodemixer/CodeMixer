@@ -342,8 +342,9 @@ extension EngineViewModel {
     }
 
     /// Loads model catalogs for every shipping adapter used by projects in this
-    /// workspace. Claude may persist to workspace file storage; other adapters
-    /// stay in memory. Throws if any required catalog cannot be populated.
+    /// workspace. Catalogs are read from per-adapter workspace files when
+    /// fresh enough; otherwise adapters are probed and the result is persisted.
+    /// Throws if any required catalog cannot be populated.
     public func warmWorkspaceModelCatalogs() async throws {
         guard workspaceRoot != nil, workspaceProjects != nil else {
             workspaceModelCatalogRows = []
@@ -364,8 +365,8 @@ extension EngineViewModel {
         }
     }
 
-    /// Ensures `agentID` has a non-empty in-memory catalog (Claude also
-    /// persists to the workspace file when needed).
+    /// Ensures `agentID` has a non-empty in-memory catalog, warming from the
+    /// per-adapter workspace file or a live probe as needed.
     public func ensureModelsLoaded(for agentID: AgentID) async throws {
         guard AgentID.shipping.contains(agentID) else { return }
         guard let adapter = await AdapterRegistry.shared.adapter(for: agentID) else {
@@ -377,42 +378,61 @@ extension EngineViewModel {
         }
     }
 
-    /// Manual adapters (Claude) use the workspace cache; automatic adapters
-    /// keep discovery in memory only. An empty Claude cache triggers a
-    /// one-time print-mode probe, then persists the result for later sessions.
+    /// Manual adapters (Claude) use the workspace cache with no TTL. Automatic
+    /// adapters reuse a disk cache for at most
+    /// `ModelCatalogTiming.automaticCatalogMaxAge`, then re-probe. A flaky
+    /// empty/failed probe keeps the previous on-disk catalog when one exists
+    /// and records a warning diagnostic. Freshness is decided from the
+    /// workspace adapter file — not process-local `availableModels()` — so
+    /// background probes (e.g. Cursor binary locate) cannot skip a due daily
+    /// refresh.
     func loadModels(for adapter: any AgentAdapter) async throws -> [AgentModelOption] {
-        switch adapter.modelCatalogRefreshKind() {
-        case .automatic:
-            let existing = adapter.availableModels()
-            if !existing.isEmpty { return existing }
+        let kind = adapter.modelCatalogRefreshKind()
+        guard let workspaceRoot, let store = workspaceProjects else {
+            return try await probeAndSeed(adapter)
+        }
+
+        let cached = await store.cachedModels(for: adapter.id, in: workspaceRoot)
+        if let cached, !cached.models.isEmpty, Self.shouldUseCachedModels(cached, kind: kind, now: clock.now()) {
+            adapter.seedModelCatalog(cached.models)
+            return cached.models
+        }
+
+        do {
             let models = try await adapter.refreshModelCatalog()
-            if !models.isEmpty {
-                adapter.seedModelCatalog(models)
+            guard !models.isEmpty else {
+                if let cached, !cached.models.isEmpty {
+                    adapter.seedModelCatalog(cached.models)
+                    noteRetainedModelCatalog(
+                        for: adapter,
+                        reason: "empty catalog"
+                    )
+                    return cached.models
+                }
+                return models
             }
-            return models.isEmpty ? adapter.availableModels() : models
-        case .manual:
-            guard let workspaceRoot, let store = workspaceProjects else {
-                return adapter.availableModels()
-            }
-            if let cached = await store.cachedModels(for: adapter.id, in: workspaceRoot),
-               !cached.models.isEmpty {
-                adapter.seedModelCatalog(cached.models)
-                return cached.models
-            }
-            let models = try await adapter.refreshModelCatalog()
-            guard !models.isEmpty else { return models }
             try await store.saveModels(
                 models,
                 for: adapter.id,
                 refreshedAt: clock.now(),
                 in: workspaceRoot
             )
+            adapter.seedModelCatalog(models)
             return models
+        } catch {
+            if let cached, !cached.models.isEmpty {
+                adapter.seedModelCatalog(cached.models)
+                noteRetainedModelCatalog(
+                    for: adapter,
+                    reason: error.localizedDescription
+                )
+                return cached.models
+            }
+            throw error
         }
     }
 
-    /// User-triggered model refresh from Workspace settings (Claude only —
-    /// other catalogs are automatic / in-memory).
+    /// User-triggered model refresh from Workspace settings (manual and automatic).
     public func refreshAdapterModels(for agentID: AgentID) async {
         guard let workspaceRoot, let store = workspaceProjects else {
             diagnostics.append(diagnostic(
@@ -428,21 +448,15 @@ extension EngineViewModel {
             ))
             return
         }
-        switch adapter.modelCatalogRefreshKind() {
-        case .automatic:
-            diagnostics.append(diagnostic(
-                level: .info,
-                message: "\(adapter.displayName) refreshes models automatically."
-            ))
-            return
-        case .manual:
-            break
-        }
+        let previous = await store.cachedModels(for: agentID, in: workspaceRoot)
         modelCatalogRefreshInFlight = agentID
         defer { modelCatalogRefreshInFlight = nil }
         do {
             let models = try await adapter.refreshModelCatalog()
             guard !models.isEmpty else {
+                if let previous, !previous.models.isEmpty {
+                    adapter.seedModelCatalog(previous.models)
+                }
                 throw ModelCatalogLoadError.emptyCatalog(adapter.displayName)
             }
             try await store.saveModels(
@@ -451,6 +465,7 @@ extension EngineViewModel {
                 refreshedAt: clock.now(),
                 in: workspaceRoot
             )
+            adapter.seedModelCatalog(models)
             await reloadWorkspaceModelCatalogStatus()
             if let activePath = workspace?.path,
                let activeType = projects.first(where: { $0.path == activePath })?.projectType,
@@ -458,6 +473,9 @@ extension EngineViewModel {
                 availableModels = models
             }
         } catch {
+            if let previous, !previous.models.isEmpty {
+                adapter.seedModelCatalog(previous.models)
+            }
             diagnostics.append(diagnostic(
                 level: .error,
                 message: "Model refresh failed: \(error.localizedDescription)"
@@ -477,24 +495,54 @@ extension EngineViewModel {
             let kind = adapter?.modelCatalogRefreshKind() ?? .automatic
             let cached = await store.cachedModels(for: agentID, in: workspaceRoot)
             let modelCount: Int
-            let refreshedAt: Date?
-            switch kind {
-            case .automatic:
+            if let cached, !cached.models.isEmpty {
+                modelCount = cached.models.count
+            } else {
                 modelCount = adapter?.availableModels().count ?? 0
-                refreshedAt = nil
-            case .manual:
-                modelCount = cached?.models.count ?? 0
-                refreshedAt = cached?.refreshedAt
             }
             rows.append(WorkspaceModelCatalogRow(
                 agentID: entry.id,
                 displayName: entry.displayLabel,
                 refreshKind: kind,
                 modelCount: modelCount,
-                refreshedAt: refreshedAt
+                refreshedAt: cached?.refreshedAt
             ))
         }
         workspaceModelCatalogRows = rows
+    }
+
+    private static func shouldUseCachedModels(
+        _ cached: WorkspaceAdapterLocalState.CachedAdapterModels,
+        kind: ModelCatalogRefreshKind,
+        now: Date
+    ) -> Bool {
+        switch kind {
+        case .manual:
+            return !cached.models.isEmpty
+        case .automatic:
+            guard !cached.models.isEmpty, let refreshedAt = cached.refreshedAt else {
+                return false
+            }
+            return now.timeIntervalSince(refreshedAt) < ModelCatalogTiming.automaticCatalogMaxAge
+        }
+    }
+
+    private func noteRetainedModelCatalog(for adapter: any AgentAdapter, reason: String) {
+        diagnostics.append(diagnostic(
+            level: .warning,
+            message: """
+                \(adapter.displayName) model refresh failed (\(reason)); \
+                using cached models.
+                """
+        ))
+    }
+
+    private func probeAndSeed(_ adapter: any AgentAdapter) async throws -> [AgentModelOption] {
+        let models = try await adapter.refreshModelCatalog()
+        if !models.isEmpty {
+            adapter.seedModelCatalog(models)
+        }
+        return models.isEmpty ? adapter.availableModels() : models
     }
 
     /// Shipping agents whose model catalogs are required for `projectType`.

@@ -268,7 +268,7 @@ struct WorkspaceProjectsStoreTests {
         #expect(projects.last?.projectType == .codex)
     }
 
-    @Test("saveModels preserves project catalog and stores adapter models")
+    @Test("saveModels writes per-adapter file and preserves project catalog")
     func saveModelsPreservesProjects() async throws {
         let fs = InMemoryFileSystem()
         let store = makeStore(fs: fs)
@@ -287,12 +287,60 @@ struct WorkspaceProjectsStoreTests {
         let local = WorkspaceLocalStateStore.load(from: workspace, fileSystem: fs)
         #expect(local?.schemaVersion == WorkspaceLocalState.currentSchemaVersion)
         #expect(local?.projects.map(\.path) == [ref.path])
-        #expect(local?.adapterModelCaches["claudeCode"]?.models.count == 2)
+        #expect(fs.fileExists(at: ProjectPaths.workspaceAdapterStateURL(in: workspace, agentID: .claudeCode)))
 
         // Project-only saves must not wipe the model cache.
         try WorkspaceLocalStateStore.save(projects: local!.projects, to: workspace, fileSystem: fs)
         let stillCached = await store.cachedModels(for: .claudeCode, in: workspace)
         #expect(stillCached?.models.map(\.code) == ["sonnet", "opus"])
+    }
+
+    @Test("loading schema-v2 workspace.json migrates adapterModelCaches to per-adapter files")
+    func migratesV2AdapterModelCaches() throws {
+        let fs = InMemoryFileSystem()
+        try fs.createDirectory(at: ProjectPaths.directoryURL(in: workspace), withIntermediates: true)
+        let stamped = Date(timeIntervalSince1970: 1_700_000_000)
+        struct LegacyV2: Encodable {
+            var schemaVersion = 2
+            var projects: [WorkspaceProjectsStore.ProjectRef]
+            var adapterModelCaches: [String: WorkspaceAdapterLocalState.CachedAdapterModels]
+        }
+        let legacy = LegacyV2(
+            projects: [
+                .init(path: workspace.path, displayName: "ws", projectType: .claudeCode),
+            ],
+            adapterModelCaches: [
+                "claudeCode": .init(
+                    models: [AgentModelOption(code: "sonnet", name: "Sonnet")],
+                    refreshedAt: stamped
+                ),
+            ]
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try fs.writeAtomically(
+            try encoder.encode(legacy),
+            to: ProjectPaths.workspaceStateURL(in: workspace)
+        )
+
+        let loaded = WorkspaceLocalStateStore.load(from: workspace, fileSystem: fs)
+        #expect(loaded?.schemaVersion == 3)
+        #expect(loaded?.projects.count == 1)
+
+        let adapterURL = ProjectPaths.workspaceAdapterStateURL(in: workspace, agentID: .claudeCode)
+        #expect(fs.fileExists(at: adapterURL))
+        let cached = WorkspaceAdapterLocalStateStore.cachedModels(
+            for: .claudeCode,
+            in: workspace,
+            fileSystem: fs
+        )
+        #expect(cached?.models.map(\.code) == ["sonnet"])
+
+        // Re-load must not leave adapterModelCaches in workspace.json.
+        let rewritten = try fs.readData(at: ProjectPaths.workspaceStateURL(in: workspace))
+        let json = try JSONSerialization.jsonObject(with: rewritten) as? [String: Any]
+        #expect(json?["adapterModelCaches"] == nil)
+        #expect(json?["schemaVersion"] as? Int == 3)
     }
 
     @Test("markActiveWorkspace / clearActiveWorkspace round-trip through workspaces.json")

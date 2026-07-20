@@ -458,48 +458,41 @@ private struct WorkspaceSettingsTab: View {
                     .font(Theme.typography.caption)
                     .foregroundStyle(Theme.text.tertiary)
             }
-            switch row.refreshKind {
-            case .automatic:
-                Text("Loaded into memory on workspace open")
+            Text(kindDetail(row))
+                .font(Theme.typography.caption)
+                .foregroundStyle(Theme.text.secondary)
+            if let refreshedAt = row.refreshedAt {
+                Text("Last refreshed \(refreshedAt.formatted(date: .abbreviated, time: .shortened))")
                     .font(Theme.typography.caption)
-                    .foregroundStyle(Theme.text.secondary)
-            case .manual(let detail):
-                Text(detail)
+                    .foregroundStyle(Theme.text.tertiary)
+            } else {
+                Text("Not refreshed yet for this workspace")
                     .font(Theme.typography.caption)
-                    .foregroundStyle(Theme.text.secondary)
-                if let refreshedAt = row.refreshedAt {
-                    Text("Last refreshed \(refreshedAt.formatted(date: .abbreviated, time: .shortened))")
-                        .font(Theme.typography.caption)
-                        .foregroundStyle(Theme.text.tertiary)
-                } else {
-                    Text("Not refreshed yet for this workspace")
-                        .font(Theme.typography.caption)
-                        .foregroundStyle(Theme.text.tertiary)
-                }
-                Button(model.modelCatalogRefreshInFlight == row.agentID ? "Refreshing…" : "Refresh models") {
-                    Task { await model.refreshAdapterModels(for: row.agentID) }
-                }
-                .disabled(model.modelCatalogRefreshInFlight != nil)
-                .accessibilityLabel("Refresh \(row.displayName) models")
+                    .foregroundStyle(Theme.text.tertiary)
             }
+            Button(model.modelCatalogRefreshInFlight == row.agentID ? "Refreshing…" : "Refresh models") {
+                Task { await model.refreshAdapterModels(for: row.agentID) }
+            }
+            .disabled(model.modelCatalogRefreshInFlight != nil)
+            .accessibilityLabel("Refresh \(row.displayName) models")
         }
         .padding(.vertical, Theme.spacing.s4)
     }
 
-    private func modelCountLabel(_ row: EngineViewModel.WorkspaceModelCatalogRow) -> String {
+    private func kindDetail(_ row: EngineViewModel.WorkspaceModelCatalogRow) -> String {
         switch row.refreshKind {
         case .automatic:
-            switch row.modelCount {
-            case 0: return "No models loaded"
-            case 1: return "1 model"
-            default: return "\(row.modelCount) models"
-            }
-        case .manual:
-            switch row.modelCount {
-            case 0: return "No models cached"
-            case 1: return "1 model"
-            default: return "\(row.modelCount) models"
-            }
+            return "Cached in this workspace; refreshed at most once a day"
+        case .manual(let detail):
+            return detail
+        }
+    }
+
+    private func modelCountLabel(_ row: EngineViewModel.WorkspaceModelCatalogRow) -> String {
+        switch row.modelCount {
+        case 0: return "No models cached"
+        case 1: return "1 model"
+        default: return "\(row.modelCount) models"
         }
     }
 }

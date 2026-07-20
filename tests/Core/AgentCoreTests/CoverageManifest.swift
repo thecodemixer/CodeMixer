@@ -421,6 +421,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // Message
 // ModelCatalogLoadError
 // ModelCatalogRefreshKind
+// ModelCatalogTiming
 // MulticastEventBus
 // NetworkAddress
 // NetworkConnection
@@ -431,6 +432,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // NetworkTransportError
 // NewProjectSheet
 // NewWorkspaceSheet
+// OpenProjectView
 // PTYError
 // PTYHost
 // PairFailureReason
@@ -457,7 +459,6 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // ProjectMemoryFile
 // ProjectMemoryFileKind
 // ProjectPaths
-// WorkspacePickerView
 // ProjectRecord
 // ProjectRef
 // ProjectType
@@ -554,12 +555,15 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // WireToolOutput
 // WireToolProgress
 // WireVersion
+// WorkspaceAdapterLocalState
+// WorkspaceAdapterLocalStateStore
 // WorkspaceChip
 // WorkspaceLandingView
 // WorkspaceLifecycle
 // WorkspaceLocalState
 // WorkspaceLocalStateStore
 // WorkspaceModelCatalogRow
+// WorkspacePickerView
 // WorkspaceProjectsStore
 // WorkspaceScene
 // abortOpen
@@ -573,7 +577,6 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // activityDotsHeight
 // adapter
 // adapterEvents
-// adapterModelCaches
 // addExistingProject
 // addition
 // additions
@@ -591,7 +594,9 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // appSupportRelativePath
 // appearance
 // append
+// appendConversationTurn
 // appendLines
+// appendToolTurn
 // apply
 // applyAdapterCapabilities
 // approval
@@ -617,6 +622,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // authURL
 // authenticate
 // autoApprovalRules
+// automaticCatalogMaxAge
 // availableAgentModes
 // availableModels
 // banner
@@ -755,6 +761,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // encode
 // encodeCommand
 // encodePermissionResponse
+// encodeResumeSession
 // encodeSessionMode
 // encodeUserPrompt
 // encoded
@@ -893,6 +900,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // loadOrCreate
 // loadPersisted
 // loadSessions
+// localHistoryEvents
 // locate
 // locateBinary
 // lockoutSeconds
@@ -967,6 +975,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // openFilePanel
 // openProjectMaxWidth
 // openProjectMinWidth
+// openProjectWidth
 // openSession
 // openURL
 // openssl
@@ -1010,6 +1019,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // prefs
 // prefsFileName
 // prefsURL
+// prepareProjectOpen
 // present
 // presentFilename
 // primary
@@ -1118,6 +1128,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // resumePromptReadySettleDelay
 // resumeSessionID
 // resumeStartupStallTimeout
+// resumeUnsupportedAfterInitialize
 // resumedSessionPostSessionStartFallback
 // resumedSessionStartupStallTimeout
 // revealInFinder
@@ -1160,9 +1171,11 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // sendsAsPrompt
 // serviceType
 // sessionBootstrapBytes
+// sessionHandshakeGate
 // sessionID
 // sessionId
 // sessionLister
+// sessionLoad
 // sessionNew
 // sessionOpen
 // sessionSidebarIconRailWidth
@@ -1346,6 +1359,8 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // workingDirectory
 // workingPhrase
 // workspace
+// workspaceAdapterStateFileName
+// workspaceAdapterStateURL
 // workspaceFileName
 // workspaceProjects
 // workspaceRoot
@@ -1357,5 +1372,5 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // write
 // writeAtomically
 // writeBytes
-// MANIFEST_SYMBOLS_END public symbols
+// MANIFEST_SYMBOLS_END  (1134 unique public symbols)
 

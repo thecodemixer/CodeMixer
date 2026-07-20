@@ -79,7 +79,7 @@ Codemixer/
 | Status phrase priority | `Core/AgentCore/Status/StatusPhraseResolver.swift` |
 | Activity heartbeat | `Core/AgentCore/Activity/HeartbeatActivityMonitor.swift` |
 | Prefs / sessions / appearance persistence | `Core/AgentCore/Persistence/{PrefsStore,SessionStore,AppearancePrefs}.swift` |
-| Agent-agnostic Workspace→Projects model + persistence | `Core/AgentCore/Persistence/{WorkspaceProjectsStore,ProjectType,ProjectAgentRouter,ProjectLocalState,WorkspaceLocalState}.swift` (Claude model cache lives in `WorkspaceLocalState.adapterModelCaches`) |
+| Agent-agnostic Workspace→Projects model + persistence | `Core/AgentCore/Persistence/{WorkspaceProjectsStore,ProjectType,ProjectAgentRouter,ProjectLocalState,WorkspaceLocalState,WorkspaceAdapterLocalState}.swift` (per-adapter model caches in `workspace-<AgentID>.json`) |
 | Core framework wrappers (Process, Keychain, FSEvents) | `Core/AgentCore/External/{ProcessRunner,KeychainStore,FSEventsStream}.swift` |
 | Product constants (ports, identity, timing, buffers, paths) | `Core/AgentCore/{RemoteDefaults,RemoteAuthTiming,DaemonDefaults,AppIdentity,ActivityTiming,StreamBufferDefaults}.swift`, `Core/AgentCore/Paths/{AppSupportPaths,SystemPaths,ProjectPaths}.swift` |
 | DI seams | `Core/AgentCore/Seams/{Clock,RandomSource,Environment,FileSystem,Seams}.swift` |
@@ -291,7 +291,7 @@ Use `ClientAction` + `AgentCommand.recordClientAction` (see `Core/AgentProtocol/
 3. Declare `transportDescriptor` (`.interactiveTerminal`, `.stdioJSONRPC`, or a real future ACP descriptor) and the relevant `AgentCapabilities`.
 4. Implement `sessionBootstrapBytes(context:)` and `encodeCommand(_:)` when the agent is not Claude slash-text compatible.
 5. If the CLI has selectable chat modes (Claude Think/Review, Cursor agent/plan/ask, …), override `availableAgentModes()` returning `[AgentModeOption]` — never hardcode the vendor's modes in `AgentUI`; the composer bottom-bar dropdown renders whatever the active adapter publishes.
-6. Override `availableModels()` / `refreshModelCatalog()` as needed. Prefer `.automatic` (in-memory warm via `WorkspaceLifecycle`) unless discovery is expensive — then use `.manual(detail:)` so only that adapter's catalog is persisted in `WorkspaceLocalState.adapterModelCaches` (Claude Code pattern).
+6. Override `availableModels()` / `refreshModelCatalog()` as needed. Prefer `.automatic` (daily disk cache via `WorkspaceLifecycle` + `workspace-<AgentID>.json`) unless discovery is expensive — then use `.manual(detail:)` so that adapter's catalog is persisted without a daily TTL (Claude Code pattern).
 7. Register at startup: `await AdapterRegistry.shared.register(CodexAdapter())`.
 8. Add a test target under `tests/AgenticCLIs/<AgentName>/` with at least a smoke test that the adapter constructs — see [`tests/AgenticCLIs/README.md`](tests/AgenticCLIs/README.md).
 9. **Do not** add any import of the new adapter inside `AgentCore` or `AgentUI`.
@@ -382,10 +382,11 @@ When extending the codebase after the 2026 maintainability pass:
 | `DaemonDefaults` | Headless idle-check interval and exit threshold |
 | `AppIdentity` | Bundle id, log subsystem, LaunchAgent label/plist/log paths/throttle, Keychain service names, queue labels, app-support/caches relative paths |
 | `ActivityTiming` | Activity escalation thresholds, status phrases (`idle`/`thinking`/optimistic send), TUI poll interval |
+| `ModelCatalogTiming` | Automatic model-catalog max age (24h) before re-probe |
 | `StreamBufferDefaults` | Named `AsyncStream` buffer sizes per layer (event history 500, etc.) |
 | `SystemPaths` | `/usr/bin/env`, `/usr/bin/git`, `/usr/bin/openssl`, Terminal.app |
 | `AppSupportPaths` | `prefs.json`, `sessions.json`, `workspaces.json`, attachments dir, `remote-server.p12` |
-| `ProjectPaths` | per-project `.codemixer/project.json`, per-workspace `.codemixer/workspace.json` |
+| `ProjectPaths` | per-project `.codemixer/project.json`, per-workspace `.codemixer/workspace.json`, per-adapter `workspace-<AgentID>.json` |
 | `ClaudeProjectPaths` | Claude transcript/project slug conventions |
 | `AgentUI/External/DesktopActions` | Pasteboard, Finder reveal, save panels |
 | `Remote/AgentRemoteControl/External/CertificateIdentityImporter` | PKCS#12 import + cert fingerprint extraction |
@@ -519,4 +520,4 @@ If any of those isn't true, you aren't ready to merge yet. That's the bar.
 
 ---
 
-*Last revised after workspace model-catalog warm landed (`WorkspaceLifecycle`, Claude-only `adapterModelCaches`, create/open gating). Update this file in the same PR as any change to module layout, top-level types, or merge gates.*
+*Last revised after per-adapter workspace model caches (`workspace-<AgentID>.json`, daily `.automatic` TTL, Claude `.manual` without TTL). Update this file in the same PR as any change to module layout, top-level types, or merge gates.*

@@ -18,7 +18,8 @@ import AgentProtocol
 ///
 /// Each project's `projectType` is *also* written to
 /// `<project>/.codemixer/project.json`, and each workspace writes its project
-/// catalog to `<workspace>/.codemixer/workspace.json`. Opening restores the
+/// catalog to `<workspace>/.codemixer/workspace.json`. Per-adapter model
+/// catalogs live in `workspace-<AgentID.rawValue>.json`. Opening restores the
 /// last *active* workspace unless the user closed it.
 public actor WorkspaceProjectsStore {
 
@@ -508,8 +509,8 @@ public actor WorkspaceProjectsStore {
     }
 
     public func cachedModels(for agentID: AgentID,
-                             in workspace: URL) -> WorkspaceLocalState.CachedAdapterModels? {
-        WorkspaceLocalStateStore.cachedModels(
+                             in workspace: URL) -> WorkspaceAdapterLocalState.CachedAdapterModels? {
+        WorkspaceAdapterLocalStateStore.cachedModels(
             for: agentID,
             in: workspace,
             fileSystem: fileSystem
@@ -520,7 +521,7 @@ public actor WorkspaceProjectsStore {
                            for agentID: AgentID,
                            refreshedAt: Date,
                            in workspace: URL) throws {
-        try WorkspaceLocalStateStore.saveModels(
+        try WorkspaceAdapterLocalStateStore.saveModels(
             models,
             for: agentID,
             refreshedAt: refreshedAt,

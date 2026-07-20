@@ -9,33 +9,18 @@ import AgentProtocol
 /// with the folder. Per-project type still lives in each project's
 /// `.codemixer/project.json`; this file is the ordered index.
 ///
-/// Also caches Claude Code's model picker. That catalog is expensive to refresh
-/// (print-mode probe), so it is stored here and only updated on first empty
-/// load or an explicit user refresh. Other adapters keep models in memory only.
+/// Provider-specific state (model catalogs, …) lives in
+/// `workspace-<AgentID.rawValue>.json` — see `WorkspaceAdapterLocalState`.
 public struct WorkspaceLocalState: Sendable, Codable, Hashable {
-    public static let currentSchemaVersion = 2
+    public static let currentSchemaVersion = 3
 
     public var schemaVersion: Int
     public var projects: [WorkspaceProjectsStore.ProjectRef]
-    /// Keyed by `AgentID.rawValue`.
-    public var adapterModelCaches: [String: CachedAdapterModels]
 
     public init(schemaVersion: Int = Self.currentSchemaVersion,
-                projects: [WorkspaceProjectsStore.ProjectRef],
-                adapterModelCaches: [String: CachedAdapterModels] = [:]) {
+                projects: [WorkspaceProjectsStore.ProjectRef]) {
         self.schemaVersion = schemaVersion
         self.projects = projects
-        self.adapterModelCaches = adapterModelCaches
-    }
-
-    public struct CachedAdapterModels: Sendable, Codable, Hashable {
-        public var models: [AgentModelOption]
-        public var refreshedAt: Date?
-
-        public init(models: [AgentModelOption], refreshedAt: Date? = nil) {
-            self.models = models
-            self.refreshedAt = refreshedAt
-        }
     }
 }
 
@@ -58,7 +43,22 @@ public enum WorkspaceLocalStateStore {
                     """)
                 return nil
             }
-            return try JSONDecoder().decode(WorkspaceLocalState.self, from: data)
+            let disk = try JSONDecoder().decode(DiskPayload.self, from: data)
+            let state = WorkspaceLocalState(
+                schemaVersion: WorkspaceLocalState.currentSchemaVersion,
+                projects: disk.projects
+            )
+            if let caches = disk.adapterModelCaches, !caches.isEmpty {
+                try migrateAdapterCaches(
+                    caches,
+                    from: workspaceRoot,
+                    fileSystem: fileSystem
+                )
+                try save(state, to: workspaceRoot, fileSystem: fileSystem)
+            } else if disk.schemaVersion < WorkspaceLocalState.currentSchemaVersion {
+                try save(state, to: workspaceRoot, fileSystem: fileSystem)
+            }
+            return state
         } catch {
             log.warning("workspace local state load failed: \(String(describing: error), privacy: .public)")
             return nil
@@ -87,25 +87,40 @@ public enum WorkspaceLocalStateStore {
         try save(state, to: workspaceRoot, fileSystem: fileSystem)
     }
 
-    public static func cachedModels(for agentID: AgentID,
-                                    in workspaceRoot: URL,
-                                    fileSystem: any FileSystem) -> WorkspaceLocalState.CachedAdapterModels? {
-        load(from: workspaceRoot, fileSystem: fileSystem)?
-            .adapterModelCaches[agentID.rawValue]
+    private static func migrateAdapterCaches(
+        _ caches: [String: WorkspaceAdapterLocalState.CachedAdapterModels],
+        from workspaceRoot: URL,
+        fileSystem: any FileSystem
+    ) throws {
+        for (key, cached) in caches where !cached.models.isEmpty {
+            guard let agentID = AgentID(rawValue: key) else {
+                log.warning("skipping unknown adapter cache key \(key, privacy: .public)")
+                continue
+            }
+            // Prefer an existing per-adapter file if a newer build already wrote one.
+            if WorkspaceAdapterLocalStateStore.cachedModels(
+                for: agentID,
+                in: workspaceRoot,
+                fileSystem: fileSystem
+            ) != nil {
+                continue
+            }
+            let stamp = cached.refreshedAt ?? Date(timeIntervalSince1970: 0)
+            try WorkspaceAdapterLocalStateStore.saveModels(
+                cached.models,
+                for: agentID,
+                refreshedAt: stamp,
+                in: workspaceRoot,
+                fileSystem: fileSystem
+            )
+        }
     }
 
-    public static func saveModels(_ models: [AgentModelOption],
-                                  for agentID: AgentID,
-                                  refreshedAt: Date,
-                                  in workspaceRoot: URL,
-                                  fileSystem: any FileSystem) throws {
-        var state = load(from: workspaceRoot, fileSystem: fileSystem)
-            ?? WorkspaceLocalState(projects: [])
-        state.adapterModelCaches[agentID.rawValue] = .init(
-            models: models,
-            refreshedAt: refreshedAt
-        )
-        try save(state, to: workspaceRoot, fileSystem: fileSystem)
+    /// On-disk shape that still accepts schema-v2 `adapterModelCaches` for migration.
+    private struct DiskPayload: Decodable {
+        var schemaVersion: Int
+        var projects: [WorkspaceProjectsStore.ProjectRef]
+        var adapterModelCaches: [String: WorkspaceAdapterLocalState.CachedAdapterModels]?
     }
 
     private struct SchemaProbe: Decodable {

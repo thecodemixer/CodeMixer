@@ -261,7 +261,15 @@ public final class CodexAdapter: AgentAdapter {
     }
 
     public func refreshModelCatalog() async throws -> [AgentModelOption] {
-        availableModels()
+        let loaded = CodexModelCatalog.load(
+            codexHome: environment.homeDirectory
+                .appendingPathComponent(".codex", isDirectory: true),
+            fileSystem: fileSystem
+        )
+        if !loaded.isEmpty {
+            modelCache.replace(with: loaded)
+        }
+        return loaded
     }
 
     public func seedModelCatalog(_ models: [AgentModelOption]) {

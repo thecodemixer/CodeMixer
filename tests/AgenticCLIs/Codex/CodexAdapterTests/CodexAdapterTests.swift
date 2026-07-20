@@ -557,6 +557,65 @@ struct CodexAdapterTests {
         #expect(models.first?.thinkingEffort == "medium")
     }
 
+    @Test("refreshModelCatalog reloads models_cache.json even when process cache is warm")
+    func refreshModelCatalogReloadsFile() async throws {
+        let env = FakeEnvironment()
+        let fs = InMemoryFileSystem()
+        let codexHome = env.homeDirectory.appendingPathComponent(".codex", isDirectory: true)
+        try fs.createDirectory(at: codexHome, withIntermediates: true)
+        let cacheURL = codexHome.appendingPathComponent("models_cache.json")
+        try fs.writeAtomically(
+            Data("""
+            {
+              "models": [
+                {
+                  "slug": "old-model",
+                  "display_name": "Old",
+                  "default_reasoning_level": "low",
+                  "priority": 1,
+                  "visibility": "list",
+                  "supported_reasoning_levels": []
+                }
+              ]
+            }
+            """.utf8),
+            to: cacheURL
+        )
+
+        let adapter = CodexAdapter(
+            environment: env,
+            fileSystem: fs,
+            clock: FakeClock(),
+            random: FakeRandomSource(),
+            initialModels: [AgentModelOption(code: "seeded", name: "Seeded")]
+        )
+        #expect(adapter.availableModels().map(\.code) == ["seeded"])
+
+        try fs.writeAtomically(
+            Data("""
+            {
+              "models": [
+                {
+                  "slug": "gpt-5.6-sol",
+                  "display_name": "GPT-5.6-Sol",
+                  "default_reasoning_level": "medium",
+                  "priority": 1,
+                  "visibility": "list",
+                  "supported_reasoning_levels": [
+                    {"effort": "medium", "description": "Balanced"}
+                  ]
+                }
+              ]
+            }
+            """.utf8),
+            to: cacheURL
+        )
+
+        let refreshed = try await adapter.refreshModelCatalog()
+        #expect(refreshed.map(\.code) == ["gpt-5.6-sol"])
+        #expect(adapter.availableModels().map(\.code) == ["gpt-5.6-sol"])
+    }
+
     @Test("Selecting a cached model sends code and thinking effort on turn/start")
     func selectModelSendsEffort() async throws {
         let option = AgentModelOption(

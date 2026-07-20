@@ -658,12 +658,13 @@ Only shipping adapters **used by projects in that workspace** are warmed
 (pinned types → that agent; `.mixed` → every `SupportedBuiltInAgent.shipping`
 id). Custom projects contribute no shipping catalog.
 
-`ModelCatalogRefreshKind` splits persistence:
+`ModelCatalogRefreshKind` splits persistence. Each shipping adapter writes
+`<workspace>/.codemixer/workspace-<AgentID.rawValue>.json` (not `workspace.json`):
 
 | Kind | Adapters | Storage |
 | --- | --- | --- |
-| `.manual(detail:)` | Claude Code | Workspace file cache in `<workspace>/.codemixer/workspace.json` (`adapterModelCaches`). Load from cache whenever non-empty; live probe once on first empty cache, or when the user taps **Refresh models** in Settings → Workspace. |
-| `.automatic` | Codex, Cursor, … | In-memory only (Codex may also read `~/.codex/models_cache.json`). Never written to `workspace.json`. |
+| `.manual(detail:)` | Claude Code | Per-adapter workspace file. Load whenever non-empty; live probe once on first empty cache, or when the user taps **Refresh models** in Settings → Workspace. No daily TTL. |
+| `.automatic` | Codex, Cursor, … | Same per-adapter file. Reuse when `refreshedAt` is within 24h (`ModelCatalogTiming.automaticCatalogMaxAge`); otherwise re-probe and persist. Codex discovery still reads `~/.codex/models_cache.json` on probe; Cursor still runs its `models` CLI. Settings **Refresh models** forces a probe for both kinds. |
 
 Bootstrap sets `isPreparingWorkspace` while create/open awaits catalog warm;
 `RootView` keeps the loading spinner up until that flag clears. Project create /
@@ -1226,7 +1227,7 @@ Persists `AppearancePrefs` and auto-approval rules. Appearance includes theme (`
 
 The agent-agnostic model behind the GUI session navigator. A *workspace* is the loaded folder (one window); each workspace owns an ordered list of `ProjectRef`s (path, display name, required `ProjectType`). The workspace root is seeded as the default project; further projects are created as subfolders or added from anywhere on disk.
 
-Project type is dual-persisted: app-support `workspaces.json` *and* `<project>/.codemixer/project.json` (`ProjectPaths` / `ProjectLocalState`). Each workspace also writes its project catalog to `<workspace>/.codemixer/workspace.json` (`WorkspaceLocalState`). That same file optionally caches **Claude Code** model pickers under `adapterModelCaches` (keyed by `AgentID.rawValue`) so print-mode discovery stays rare — see [Model catalogs](#model-catalogs). Other adapters keep models in memory only. `workspaces.json` schema v3 tracks `activeWorkspacePath` so launch restores the last open workspace unless the user chose **Close Workspace**.
+Project type is dual-persisted: app-support `workspaces.json` *and* `<project>/.codemixer/project.json` (`ProjectPaths` / `ProjectLocalState`). Each workspace also writes its project catalog to `<workspace>/.codemixer/workspace.json` (`WorkspaceLocalState`). Per-adapter model catalogs live in `<workspace>/.codemixer/workspace-<AgentID.rawValue>.json` (`WorkspaceAdapterLocalState`) — see [Model catalogs](#model-catalogs). `workspaces.json` schema v3 tracks `activeWorkspacePath` so launch restores the last open workspace unless the user chose **Close Workspace**.
 
 ```swift
 public actor WorkspaceProjectsStore {
@@ -1240,8 +1241,8 @@ public actor WorkspaceProjectsStore {
     public func renameProject(path:to:in:) async throws -> ProjectRef  // label only
     public func removeProject(path:in:) async throws -> RemovedProject? // never the root
     public func restoreProject(_:in:) async throws                     // undo
-    public func cachedModels(for:in:) async -> WorkspaceLocalState.CachedAdapterModels?
-    public func saveModels(_:for:refreshedAt:in:) async throws         // Claude catalog only
+    public func cachedModels(for:in:) -> WorkspaceAdapterLocalState.CachedAdapterModels?
+    public func saveModels(_:for:refreshedAt:in:) throws               // per-adapter catalog
 }
 ```
 

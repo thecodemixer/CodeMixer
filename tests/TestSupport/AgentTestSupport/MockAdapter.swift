@@ -34,6 +34,7 @@ public final class MockAdapter: AgentAdapter, @unchecked Sendable {
         var models: [AgentModelOption] = []
         var refreshCount = 0
         var refreshResult: [AgentModelOption]?
+        var refreshError: (any Error)?
     }
 
     public init(script: Script = .empty,
@@ -43,7 +44,8 @@ public final class MockAdapter: AgentAdapter, @unchecked Sendable {
                 capabilities: AgentCapabilities = [],
                 models: [AgentModelOption] = [],
                 refreshKind: ModelCatalogRefreshKind = .automatic,
-                refreshResult: [AgentModelOption]? = nil) {
+                refreshResult: [AgentModelOption]? = nil,
+                refreshError: (any Error)? = nil) {
         self.script = script
         self.binary = binary
         self.id = id
@@ -52,7 +54,8 @@ public final class MockAdapter: AgentAdapter, @unchecked Sendable {
         self.refreshKind = refreshKind
         self.state = OSAllocatedUnfairLock(initialState: State(
             models: models,
-            refreshResult: refreshResult
+            refreshResult: refreshResult,
+            refreshError: refreshError
         ))
     }
 
@@ -96,12 +99,16 @@ public final class MockAdapter: AgentAdapter, @unchecked Sendable {
     }
 
     public func refreshModelCatalog() async throws -> [AgentModelOption] {
-        state.withLock {
-            $0.refreshCount += 1
-            let probed = $0.refreshResult ?? $0.models
-            $0.models = probed
-            return probed
+        let outcome: Result<[AgentModelOption], any Error> = state.withLock { state in
+            state.refreshCount += 1
+            if let refreshError = state.refreshError {
+                return .failure(refreshError)
+            }
+            let probed = state.refreshResult ?? state.models
+            state.models = probed
+            return .success(probed)
         }
+        return try outcome.get()
     }
 
     public func seedModelCatalog(_ models: [AgentModelOption]) {

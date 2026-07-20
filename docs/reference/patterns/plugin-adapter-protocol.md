@@ -94,11 +94,12 @@ transport-specific `AgentTransportDescriptor` names — see `AgentAdapter.swift`
 
 **Model catalogs:** override `availableModels()` for the composer picker.
 Use `.manual(detail:)` when discovery is expensive (Claude Code) so Codemixer
-persists the list in `<workspace>/.codemixer/workspace.json` and only re-probes
-on first empty cache or an explicit Settings refresh. Use `.automatic` (default)
-for cheap/local discovery (Codex cache file, Cursor `models` CLI) — those stay
-in memory and are warmed via `WorkspaceLifecycle` when a workspace/project
-introduces the adapter. See [`docs/architecture.md` § Model catalogs](../architecture.md#model-catalogs).
+persists the list in `<workspace>/.codemixer/workspace-<AgentID>.json` and only
+re-probes on first empty cache or an explicit Settings refresh. Use `.automatic`
+(default) for cheap/local discovery (Codex cache file, Cursor `models` CLI) —
+those are also persisted in the same per-adapter file and re-probed at most once
+a day via `WorkspaceLifecycle`. See
+[`docs/architecture.md` § Model catalogs](../architecture.md#model-catalogs).
 
 Each section is a *boundary* — a place where vendor specifics would otherwise
 leak into the core. Skipping a section because "vendor X doesn't need it" is
