@@ -65,6 +65,10 @@ public struct ConversationView: View {
                                 .transition(reduceMotion ? .opacity : .arriving)
                                 .padding(.bottom, spacing(after: idx))
                         }
+                        Color.clear
+                            .frame(height: Theme.spacing.s48)
+                            .accessibilityHidden(true)
+                            .id(ConversationScrollTarget.bottom)
                     }
                     .padding(.vertical, Theme.spacing.s24)
                     // Send→turn lift: new rows arrive with a single motion token; the
@@ -80,14 +84,14 @@ public struct ConversationView: View {
                 }
                 .background(Theme.surface.canvas)
                 .onChange(of: model.messages.last?.id) { _, latest in
-                    guard let latest, !searchVisible else { return }
-                    scrollToLatest(proxy: proxy, id: latest)
+                    guard latest != nil, !searchVisible else { return }
+                    scrollToConversationEnd(proxy: proxy)
                 }
                 // Follow growing prose/thoughts while the ForEach id stays stable.
                 .onChange(of: model.messages.last?.textContent) { _, _ in
                     guard !searchVisible,
-                          let latest = model.messages.last?.id else { return }
-                    scrollToLatest(proxy: proxy, id: latest)
+                          model.messages.last?.id != nil else { return }
+                    scrollToConversationEnd(proxy: proxy)
                 }
                 .onChange(of: searchQuery) { _, q in
                     runSearch(q)
@@ -239,14 +243,18 @@ public struct ConversationView: View {
         withAnimation(Theme.motion.gentle) { proxy.scrollTo(id, anchor: .center) }
     }
 
-    private func scrollToLatest(proxy: ScrollViewProxy, id: String) {
+    private func scrollToConversationEnd(proxy: ScrollViewProxy) {
         let motion = Theme.motion.resolve(Theme.motion.gentle, reduceMotion: reduceMotion)
         if let motion {
-            withAnimation(motion) { proxy.scrollTo(id, anchor: .bottom) }
+            withAnimation(motion) { proxy.scrollTo(ConversationScrollTarget.bottom, anchor: .bottom) }
         } else {
-            proxy.scrollTo(id, anchor: .bottom)
+            proxy.scrollTo(ConversationScrollTarget.bottom, anchor: .bottom)
         }
     }
+}
+
+private enum ConversationScrollTarget: Hashable {
+    case bottom
 }
 
 #if DEBUG
