@@ -32,6 +32,7 @@ struct FolderProjectBrowserView: View {
             if let path, let browser {
                 browser.consumePendingSelection(path)
                 model.pendingFolderSelectionRelativePath = nil
+                model.setActiveFolderSelection(path)
             }
         }
         .onDisappear {
@@ -124,7 +125,13 @@ struct FolderProjectBrowserView: View {
             .keyboardShortcut(.escape, modifiers: [])
             .hidden()
         }
-        .onAppear { searchFocused = false }
+        .onAppear {
+            searchFocused = false
+            model.setActiveFolderSelection(browser.selectedRelativePath)
+        }
+        .onChange(of: browser.selectedRelativePath) { _, path in
+            model.setActiveFolderSelection(path)
+        }
     }
 
     private func header(_ browser: FolderProjectBrowserModel) -> some View {

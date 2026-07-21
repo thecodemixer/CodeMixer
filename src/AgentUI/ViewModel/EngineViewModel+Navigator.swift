@@ -209,7 +209,14 @@ extension EngineViewModel {
         showsFolderBrowser = true
         activeFolderProjectKind = kind
         pendingFolderSelectionRelativePath = relativePath
+        activeFolderSelectionRelativePath = relativePath
         refreshFolderSidebarShortcuts(for: project)
+    }
+
+    /// Keeps the sidebar active-file marker in sync with the folder browser.
+    public func setActiveFolderSelection(_ relativePath: String?) {
+        guard showsFolderBrowser else { return }
+        activeFolderSelectionRelativePath = relativePath
     }
 
     /// Open a sidebar shortcut under a folder project.
@@ -341,6 +348,7 @@ extension EngineViewModel {
         showsFolderBrowser = false
         activeFolderProjectKind = nil
         pendingFolderSelectionRelativePath = nil
+        activeFolderSelectionRelativePath = nil
     }
 
     private func projectRef(at path: String) -> WorkspaceProjectsStore.ProjectRef? {

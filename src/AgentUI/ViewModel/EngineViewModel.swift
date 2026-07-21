@@ -52,6 +52,8 @@ public final class EngineViewModel {
     public internal(set) var activeFolderProjectKind: FolderProjectKind?
     /// Relative path to preselect when opening a folder shortcut from the sidebar.
     public var pendingFolderSelectionRelativePath: String?
+    /// Currently selected file in the folder browser (drives sidebar active marker).
+    public internal(set) var activeFolderSelectionRelativePath: String?
     /// Pinned relative paths keyed by project path (pin-capable folder kinds).
     public internal(set) var folderPinnedPathsByProject: [String: [String]] = [:]
     /// Automatic newest-log shortcuts keyed by project path.
