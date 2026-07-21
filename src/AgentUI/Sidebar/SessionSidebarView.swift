@@ -213,17 +213,12 @@ public struct SessionSidebarView: View {
         let isFolder = model.isFolderProject(project)
         return HStack(spacing: Theme.spacing.s8) {
             Text(project.displayName)
-                .font(Theme.typography.caption)
-                .fontWeight(.semibold)
+                .font(Theme.typography.body)
+                .fontWeight(.bold)
                 .foregroundStyle(isCurrent ? Theme.text.primary : Theme.text.secondary)
                 .lineLimit(1)
-            // Capsules are reserved for single-agent built-ins (Claude / Codex / Cursor).
-            if project.projectType.showsSidebarTypeCapsule {
-                Text(project.projectType.shortLabel)
-                    .font(Theme.typography.caption)
-                    .foregroundStyle(Theme.text.tertiary)
-                    .padding(.horizontal, Theme.spacing.s4)
-                    .background(Theme.surface.bubble, in: .capsule)
+            if shouldShowProjectTypeLabel(for: project) {
+                projectTypeLabel(project.projectType, isCurrent: isCurrent)
             }
             Spacer(minLength: 0)
             if attention > 0 {
@@ -241,7 +236,6 @@ public struct SessionSidebarView: View {
         .padding(.top, Theme.spacing.s8)
         .padding(.bottom, Theme.spacing.s4)
         .padding(.horizontal, Theme.spacing.s8)
-        .background(selectionWash(isCurrent: isCurrent && (isFolder ? model.showsFolderBrowser : true)))
         .onTapGesture { handleProjectTap(project) }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
@@ -279,6 +273,22 @@ public struct SessionSidebarView: View {
         }
     }
 
+    private func shouldShowProjectTypeLabel(for project: WorkspaceProjectsStore.ProjectRef) -> Bool {
+        project.projectType.showsSidebarTypeCapsule
+    }
+
+    private func projectTypeLabel(_ projectType: ProjectType, isCurrent: Bool) -> some View {
+        Text(projectType.shortLabel)
+            .font(Theme.typography.caption)
+            .foregroundStyle(isCurrent ? Theme.text.primary : Theme.text.tertiary)
+            .padding(.horizontal, Theme.spacing.s4)
+            .padding(.vertical, Theme.corner.hairline)
+            .background(
+                isCurrent ? Theme.surface.bubbleUser : Theme.surface.bubble.opacity(Theme.opacity.faint),
+                in: .capsule
+            )
+    }
+
     @ViewBuilder
     private func folderShortcutRows(for project: WorkspaceProjectsStore.ProjectRef) -> some View {
         let shortcuts = model.folderSidebarShortcuts(for: project)
@@ -291,29 +301,37 @@ public struct SessionSidebarView: View {
                                    project: WorkspaceProjectsStore.ProjectRef) -> some View {
         let isCurrent = model.workspace?.path == project.path
             && model.showsFolderBrowser
-            && model.pendingFolderSelectionRelativePath == shortcut.relativePath
+            && model.activeFolderSelectionRelativePath == shortcut.relativePath
         return Button {
             model.openFolderShortcut(projectPath: project.path, relativePath: shortcut.relativePath)
         } label: {
             HStack(spacing: Theme.spacing.s8) {
+                if isCurrent {
+                    Circle()
+                        .fill(Theme.signal.success)
+                        .frame(width: 6, height: 6)
+                        .accessibilityHidden(true)
+                }
                 Image(systemName: "doc")
                     .imageScale(.small)
                     .foregroundStyle(Theme.text.tertiary)
                     .accessibilityHidden(true)
                 Text(shortcut.displayName)
                     .font(Theme.typography.body)
-                    .foregroundStyle(Theme.text.secondary)
+                    .foregroundStyle(isCurrent ? Theme.text.primary : Theme.text.secondary)
                     .lineLimit(1)
                 Spacer(minLength: 0)
             }
             .contentShape(Rectangle())
             .padding(.vertical, Theme.spacing.s4)
-            .padding(.horizontal, Theme.spacing.s8)
+            .padding(.leading, Theme.spacing.s16)
+            .padding(.trailing, Theme.spacing.s8)
             .background(selectionWash(isCurrent: isCurrent))
         }
         .buttonStyle(.plain)
         .help(shortcut.relativePath)
         .accessibilityLabel(shortcut.relativePath)
+        .accessibilityAddTraits(isCurrent ? [.isSelected] : [])
         .contextMenu {
             Button("Open") {
                 model.openFolderShortcut(projectPath: project.path, relativePath: shortcut.relativePath)
@@ -347,7 +365,8 @@ public struct SessionSidebarView: View {
                 Text("No prior sessions. Start a new one.")
                     .font(Theme.typography.caption)
                     .foregroundStyle(Theme.text.tertiary)
-                    .padding(.horizontal, Theme.spacing.s8)
+                    .padding(.leading, Theme.spacing.s16)
+                    .padding(.trailing, Theme.spacing.s8)
                     .padding(.vertical, Theme.spacing.s4)
             } else {
                 ForEach(sessions) { session in
@@ -380,7 +399,8 @@ public struct SessionSidebarView: View {
             }
             .contentShape(Rectangle())
             .padding(.vertical, Theme.spacing.s4)
-            .padding(.horizontal, Theme.spacing.s8)
+            .padding(.leading, Theme.spacing.s16)
+            .padding(.trailing, Theme.spacing.s8)
             .background(selectionWash(isCurrent: isCurrent))
         }
         .buttonStyle(.plain)
@@ -440,7 +460,8 @@ public struct SessionSidebarView: View {
             }
             .contentShape(Rectangle())
             .padding(.vertical, Theme.spacing.s4)
-            .padding(.horizontal, Theme.spacing.s8)
+            .padding(.leading, Theme.spacing.s16)
+            .padding(.trailing, Theme.spacing.s8)
             .background(selectionWash(isCurrent: isCurrent))
         }
         .buttonStyle(.plain)
@@ -470,7 +491,8 @@ public struct SessionSidebarView: View {
                     .frame(height: Theme.spacing.s24)
             }
         }
-        .padding(.horizontal, Theme.spacing.s8)
+        .padding(.leading, Theme.spacing.s16)
+        .padding(.trailing, Theme.spacing.s8)
         .padding(.vertical, Theme.spacing.s4)
         .redacted(reason: .placeholder)
         .accessibilityLabel("Loading sessions")
