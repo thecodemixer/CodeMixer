@@ -3,6 +3,7 @@ import Testing
 @testable import ClaudeCode
 import AgentCore
 import AgentProtocol
+import AgentTestSupport
 
 /// Twin fixture payloads must decode through the production hook decoder.
 @Suite("Twin conformance fixtures")
@@ -26,8 +27,8 @@ struct ConformanceFixturesTests {
 
     @Test("twin stop emitter matches fixture shape")
     func twinStopMatchesFixture() throws {
-        let workspace = URL(fileURLWithPath: "/tmp/test")
-        let claudeDir = URL(fileURLWithPath: "/tmp/.claude")
+        let workspace = TestPaths.underTemporary("test")
+        let claudeDir = TestPaths.underTemporary(".claude")
         let context = ClaudeCodeTwinHookEmitter.Context(sessionID: "sess-fixture-1",
                                                         workspace: workspace,
                                                         claudeDirectory: claudeDir)

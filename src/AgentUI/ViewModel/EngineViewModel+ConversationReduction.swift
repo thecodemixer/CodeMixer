@@ -10,25 +10,40 @@ extension EngineViewModel {
         switch event {
         case .sessionStarted(let id, let model, let cwd):
             let selectedPath = workspace.map {
-                URL(fileURLWithPath: $0.path).standardizedFileURL.path
+                URL(fileURLWithPath: $0.path).standardizedFileURL
             }
-            let eventPath = cwd.standardizedFileURL.path
+            let eventURL = cwd.standardizedFileURL
             // Project selection is owned by the navigator (`newChat` /
             // `openSession`). A late SessionStart from a project the user
             // already left must never yank the sidebar / composer back.
-            if let selectedPath, selectedPath != eventPath {
+            if let selectedPath,
+               selectedPath.path != eventURL.path,
+               selectedPath.resolvingSymlinksInPath().path != eventURL.resolvingSymlinksInPath().path {
                 return
             }
             let projectChanged = selectedPath == nil
             let previousSessionID = sessionID
-            let sessionChanged = previousSessionID != id
+            // Overview is not a chat session — a control SessionStart from
+            // cold `openProject` must not bind `sessionID` or wipe the pane
+            // the navigator already selected.
+            let bindChatSession = !showsOverviewDashboard
+            let sessionChanged = bindChatSession && previousSessionID != id
             let shouldResetConversation = projectChanged || (sessionChanged && activity == .idle)
+            if !id.isEmpty {
+                cachedTranscriptLoadedSessionID = nil
+            }
             // Engine bootstrap may publish an empty id for handshake-gated
             // adapters; do not clobber a resume id the navigator already set.
-            if !id.isEmpty {
-                sessionID = id
-            } else if previousSessionID == nil {
-                sessionID = id
+            if bindChatSession {
+                if !id.isEmpty {
+                    sessionID = id
+                } else if previousSessionID == nil {
+                    sessionID = id
+                }
+            }
+            if sessionChanged {
+                // Re-bind the permission card / waiting state to the new chat.
+                refreshPermissionActivity()
             }
             // First session with no explicit workspace shell: treat cwd as the root.
             if workspaceRoot == nil {
@@ -37,7 +52,14 @@ extension EngineViewModel {
             if projectChanged {
                 workspace = cwd
             }
-            if shouldResetConversation, !id.isEmpty || previousSessionID == nil {
+            // `beginSessionSwitch` already cleared the pane and may have applied
+            // `session/load` history before this SessionStart. Do not wipe that
+            // replay when the navigator owns the switch (session id already set,
+            // or `isSwitchingSession` still true).
+            if shouldResetConversation,
+               !isSwitchingSession,
+               !showsOverviewDashboard,
+               !id.isEmpty || previousSessionID == nil {
                 clearConversationState()
             }
             // SessionStart with a model is the first live signal from the
@@ -153,10 +175,9 @@ extension EngineViewModel {
             }
         case .permissionRequest(let prompt):
             noteAgentReplyObserved()
-            pendingPermission = prompt
-            activity = .waitingPermission
-        case .permissionAlreadyResolved:
-            pendingPermission = nil
+            storePendingPermission(prompt, for: sessionID)
+        case .permissionAlreadyResolved(let id, _):
+            clearPendingPermission(id: id)
         case .statusPhraseChanged(_, let phrase):
             status = .working(phrase: phrase)
             if phrase.hasPrefix("Mode: ") {
@@ -234,6 +255,28 @@ extension EngineViewModel {
             pendingExport = PendingExport(kind: kind, payload: payload)
         case .clientAction(let action):
             messages.append(.clientAction(action))
+        case .agentDashboard(let url, let title):
+            if isRestartingCustomACPCLI {
+                // Drop ads that arrive during close/teardown; only accept after
+                // cold openProject has completed.
+                guard customACPRestartAwaitingDashboard else { return }
+                customACPRestartAwaitingDashboard = false
+                isRestartingCustomACPCLI = false
+                status = .idle
+                dashboardLoadGeneration += 1
+            }
+            dashboardURL = url
+            if let title, !title.isEmpty {
+                dashboardTitle = title
+            }
+            // Navigator owns chat vs overview. An advertisement must never
+            // steal focus from a file chat or New Chat (`sessionID` still nil).
+        case .sessionIndexChanged(let projectPath):
+            loadSessions(for: projectPath.path)
+        case .sessionAttentionChanged(let sessionID, _, let needsAttention):
+            updateSessionAttention(sessionID: sessionID, needsAttention: needsAttention)
+        case .cachedTranscriptLoaded(let id):
+            cachedTranscriptLoadedSessionID = id
         }
     }
 
@@ -273,6 +316,7 @@ extension EngineViewModel {
         stalledToastTask?.cancel()
         stalledToastTask = nil
         stalledToastVisible = false
+        cachedTranscriptLoadedSessionID = nil
     }
 
     func clearConversationState() {
@@ -314,5 +358,40 @@ extension EngineViewModel {
     func noteAgentReplyObserved() {
         isAwaitingFirstReplyForPrompt = false
         stalledToastVisible = false
+    }
+
+    // MARK: - Session-scoped permissions
+
+    func permissionOwnerKey(for sessionID: String?) -> String {
+        sessionID ?? Self.unscopedPermissionSessionKey
+    }
+
+    /// ACP only emits a live `permissionRequest` for the foreground session;
+    /// background reviews park and use the sidebar attention dot instead.
+    func storePendingPermission(_ prompt: PermissionPrompt, for sessionID: String?) {
+        let key = permissionOwnerKey(for: sessionID)
+        // One live prompt per session — a newer request supersedes the older.
+        pendingPermissionsBySession[key] = prompt
+        refreshPermissionActivity()
+    }
+
+    func clearPendingPermission(id: UUID) {
+        pendingPermissionsBySession = pendingPermissionsBySession.filter { $0.value.id != id }
+        refreshPermissionActivity()
+    }
+
+    func clearAllPendingPermissions() {
+        pendingPermissionsBySession.removeAll()
+        refreshPermissionActivity()
+    }
+
+    /// Keep `.waitingPermission` tied to the *active* chat only. Other sessions
+    /// retain their prompts in the map and surface via the orange attention dot.
+    func refreshPermissionActivity() {
+        if activePendingPermission != nil {
+            activity = .waitingPermission
+        } else if activity == .waitingPermission {
+            activity = .idle
+        }
     }
 }

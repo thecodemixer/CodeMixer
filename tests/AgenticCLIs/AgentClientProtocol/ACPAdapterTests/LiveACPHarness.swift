@@ -108,7 +108,7 @@ struct LiveACPHarness {
             id: "live",
             displayName: "Live ACP",
             transport: .agentClientProtocol,
-            executablePath: "/usr/bin/true",
+            executablePath: SystemPaths.trueBinary.path,
             arguments: []
         )).transportDescriptor == .agentClientProtocol
     }

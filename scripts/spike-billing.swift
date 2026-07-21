@@ -73,7 +73,7 @@ enum SpikeHookSupport {
         sock.shutdown(socket.SHUT_WR)
         sys.stdout.buffer.write(sock.recv(65536))
         """
-        return "/usr/bin/python3 -c \(quotedShell(script)) \(quotedShell(socketPath))"
+        return "\(ScriptPaths.python3) -c \(quotedShell(script)) \(quotedShell(socketPath))"
     }
 
     static func writePythonHookSettings(file: URL, socketPath: String, hookNames: [String]) throws {
@@ -94,6 +94,33 @@ enum SpikeHookSupport {
         let root: [String: Any] = ["hooks": hooks]
         let data = try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])
         try data.write(to: file)
+    }
+}
+
+enum ScriptPaths {
+    static let tmp = FileManager.default.temporaryDirectory
+
+    static var python3: String {
+        if let override = ProcessInfo.processInfo.environment["PYTHON3_BIN"], !override.isEmpty {
+            return override
+        }
+        let candidates = [
+            "/usr/bin/python3",
+            "/opt/homebrew/bin/python3",
+        ]
+        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) } ?? candidates[0]
+    }
+
+    static func standardBinary(named name: String) -> [String] {
+        var paths: [String] = []
+        if let prefix = ProcessInfo.processInfo.environment["HOMEBREW_PREFIX"], !prefix.isEmpty {
+            paths.append("\(prefix)/bin/\(name)")
+        }
+        paths.append(contentsOf: [
+            "/opt/homebrew/bin/\(name)",
+            "/usr/local/bin/\(name)",
+        ])
+        return paths
     }
 }
 
@@ -183,9 +210,7 @@ func commandExists(_ path: String) -> Bool {
 
 func locateClaude() -> String? {
     let home = ProcessInfo.processInfo.environment["HOME"] ?? ""
-    let searchPaths = [
-        "/usr/local/bin/claude",
-        "/opt/homebrew/bin/claude",
+    let searchPaths = ScriptPaths.standardBinary(named: "claude") + [
         "\(home)/.local/bin/claude",
         "\(home)/.nvm/current/bin/claude",
         "\(home)/.volta/bin/claude",
@@ -222,7 +247,7 @@ func runHookListener(socketPath: String, captureFile: URL) throws -> Process {
         conn.close()
     """
     let process = Process()
-    process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+    process.executableURL = URL(fileURLWithPath: ScriptPaths.python3)
     process.arguments = ["-c", script, socketPath, captureFile.path]
     process.standardOutput = Pipe()
     process.standardError = Pipe()
@@ -332,8 +357,8 @@ do {
     exit(2)
 }
 
-guard FileManager.default.isExecutableFile(atPath: "/usr/bin/python3") else {
-    fputs("spike-billing: /usr/bin/python3 is required for hook forwarding\n", stderr)
+guard FileManager.default.isExecutableFile(atPath: ScriptPaths.python3) else {
+    fputs("spike-billing: python3 is required for hook forwarding (set PYTHON3_BIN)\n", stderr)
     exit(1)
 }
 
@@ -349,8 +374,8 @@ guard let home = ProcessInfo.processInfo.environment["HOME"] else {
 
 let startedAt = Date()
 let ts = Int(startedAt.timeIntervalSince1970)
-let captureFile = URL(fileURLWithPath: "/tmp/codemixer-spike-billing-\(ts).jsonl")
-let socketPath = "/tmp/codemixer-spike-billing-\(ts).sock"
+let captureFile = ScriptPaths.tmp.appendingPathComponent("codemixer-spike-billing-\(ts).jsonl")
+let socketPath = ScriptPaths.tmp.appendingPathComponent("codemixer-spike-billing-\(ts).sock").path
 let settingsDir = config.workspace.appendingPathComponent(".claude", isDirectory: true)
 let settingsFile = settingsDir.appendingPathComponent("settings.local.json")
 let backupFile = settingsFile.appendingPathExtension("spike-backup")

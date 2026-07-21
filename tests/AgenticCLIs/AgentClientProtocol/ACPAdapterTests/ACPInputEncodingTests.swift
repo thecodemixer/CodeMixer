@@ -3,11 +3,12 @@ import AgentCore
 import AgentProtocol
 import Foundation
 import Testing
+import AgentTestSupport
 
 @Suite("ACP input encoding")
 struct ACPInputEncodingTests {
 
-    private let workspace = URL(fileURLWithPath: "/tmp/acp-ws")
+    private let workspace = TestPaths.underTemporary("acp-ws")
 
     @Test("postInitialize emits initialized and session/new")
     func postInitialize() {
@@ -21,7 +22,7 @@ struct ACPInputEncodingTests {
         let text = String(decoding: ACPInputEncoding.postInitialize(state: state), as: UTF8.self)
         #expect(text.contains("\"method\":\"initialized\""))
         #expect(text.contains("\"method\":\"session/new\""))
-        #expect(text.contains("\"/tmp/acp-ws\""))
+        #expect(text.contains("\"\(workspace.path)\""))
     }
 
     @Test("sessionOpen prefers session/load when resume id and loadSession are supported")

@@ -787,4 +787,516 @@ struct ACPEventDecoderTests {
             return false
         })
     }
+
+    @Test("session/load not-found restores local history from Codemixer cache")
+    func sessionLoadNotFoundRestoresLocalHistory() async {
+        let fixture = ACPDecoderFixture(customAgentID: "migrate", resumeSessionID: "file:Orders.cs")
+        await fixture.sessionIndex.recordSession(
+            id: "file:Orders.cs",
+            customAgentID: "migrate",
+            workspace: fixture.workspace,
+            title: "Orders.cs"
+        )
+        await fixture.sessionIndex.appendConversationTurn(
+            sessionID: "file:Orders.cs",
+            customAgentID: "migrate",
+            role: "assistant",
+            text: "cached migration transcript"
+        )
+
+        let id = fixture.state.nextRequestID(for: .sessionLoad)
+        let batch = await fixture.decode(.response(
+            id: id,
+            result: nil,
+            error: .init(code: -32_004, message: "Unknown session file:Orders.cs", data: nil)
+        ))
+
+        #expect(batch.events.contains {
+            if case .assistantText(_, _, let text, true) = $0 {
+                return text == "cached migration transcript"
+            }
+            return false
+        })
+        #expect(batch.events.contains {
+            if case .sessionStarted(let id, _, _) = $0 {
+                return id == "file:Orders.cs"
+            }
+            return false
+        })
+        #expect(batch.events.contains {
+            if case .cachedTranscriptLoaded(let id) = $0 {
+                return id == "file:Orders.cs"
+            }
+            return false
+        })
+        #expect(!batch.events.contains {
+            if case .error = $0 { return true }
+            return false
+        })
+    }
+
+    @Test("initialize emits agentDashboard from _meta")
+    func initializeDashboard() async {
+        let fixture = ACPDecoderFixture()
+        let batch = await fixture.decode(.response(
+            id: .number(1),
+            result: .object([
+                "protocolVersion": .number(1),
+                "agentCapabilities": .object([:]),
+                "authMethods": .array([]),
+                "_meta": .object([
+                    "codemixer.dev/dashboardUrl": .string("http://127.0.0.1:8423/dashboard"),
+                    "codemixer.dev/dashboardTitle": .string("Migration Dashboard"),
+                ]),
+            ]),
+            error: nil
+        ))
+        #expect(batch.events.contains {
+            if case .agentDashboard(let url, let title) = $0 {
+                return url.absoluteString == "http://127.0.0.1:8423/dashboard"
+                    && title == "Migration Dashboard"
+            }
+            return false
+        })
+    }
+
+    @Test("reverse session/new records session and emits sessionIndexChanged")
+    func reverseSessionNew() async {
+        let fixture = ACPDecoderFixture(customAgentID: "migrate")
+        let batch = await fixture.decode(.serverRequest(
+            id: .number(42),
+            method: "session/new",
+            params: .object([
+                "sessionId": .string("agent-sess-1"),
+                "title": .string("Agent created"),
+                "cwd": .string(fixture.workspace.path),
+            ])
+        ))
+        #expect(batch.replies.count == 1)
+        #expect(batch.events.contains {
+            if case .sessionIndexChanged(let path) = $0 {
+                return path.path == fixture.workspace.path
+            }
+            return false
+        })
+        let summaries = await fixture.sessionIndex.summaries(
+            workspace: fixture.workspace,
+            customAgentID: "migrate"
+        )
+        #expect(summaries.contains { $0.id == "agent-sess-1" })
+    }
+
+    @Test("reverse session/new can unarchive a recreated file session")
+    func reverseSessionNewUnarchivesRecreatedSession() async {
+        let fixture = ACPDecoderFixture(customAgentID: "migrate")
+        await fixture.sessionIndex.recordSession(
+            id: "file:A.cs",
+            customAgentID: "migrate",
+            workspace: fixture.workspace,
+            title: "A.cs"
+        )
+        await fixture.sessionIndex.setArchived(
+            sessionID: "file:A.cs",
+            customAgentID: "migrate",
+            archived: true
+        )
+
+        let batch = await fixture.decode(.serverRequest(
+            id: .number(43),
+            method: "session/new",
+            params: .object([
+                "sessionId": .string("file:A.cs"),
+                "title": .string("A.cs"),
+                "cwd": .string(fixture.workspace.path),
+                "_meta": .object([
+                    "codemixer.dev/overviewSession": .bool(false),
+                    "archived": .bool(false),
+                    "needsAttention": .bool(false),
+                ]),
+            ])
+        ))
+
+        #expect(batch.events.contains {
+            if case .sessionIndexChanged(let path) = $0 {
+                return path.path == fixture.workspace.path
+            }
+            return false
+        })
+        let summaries = await fixture.sessionIndex.summaries(
+            workspace: fixture.workspace,
+            customAgentID: "migrate"
+        )
+        let recreated = summaries.first { $0.id == "file:A.cs" }
+        #expect(recreated?.isOverview == false)
+        #expect(recreated?.needsAttention == false)
+    }
+
+    @Test("background permission parks and emits attention without permissionRequest")
+    func backgroundPermission() async {
+        let fixture = ACPDecoderFixture(customAgentID: "migrate")
+        _ = await fixture.openSession(id: "foreground")
+        let batch = await fixture.decode(.serverRequest(
+            id: .number(9001),
+            method: "session/request_permission",
+            params: .object([
+                "sessionId": .string("background"),
+                "options": .array([
+                    .object(["kind": .string("allow_once"), "optionId": .string("allow-once")]),
+                ]),
+                "toolCall": .object(["title": .string("Shell")]),
+            ])
+        ))
+        #expect(!batch.events.contains {
+            if case .permissionRequest = $0 { return true }
+            return false
+        })
+        #expect(batch.events.contains {
+            if case .sessionAttentionChanged(let id, _, true) = $0 { return id == "background" }
+            return false
+        })
+    }
+
+    @Test("session/load restores foreign-buffered turns into the chat pane")
+    func sessionLoadSurfacesForeignBuffer() async {
+        let fixture = ACPDecoderFixture(customAgentID: "migrate", resumeSessionID: "file:Orders.cs")
+        _ = await fixture.decode(.response(
+            id: .number(1),
+            result: .object([
+                "protocolVersion": .number(1),
+                "agentCapabilities": .object(["loadSession": .bool(true)]),
+                "authMethods": .array([]),
+            ]),
+            error: nil
+        ))
+        _ = await fixture.openSession(id: "overview")
+        await fixture.sessionIndex.recordSession(
+            id: "file:Orders.cs",
+            customAgentID: "migrate",
+            workspace: fixture.workspace,
+            title: "Orders.cs"
+        )
+
+        // File session streams while overview is foreground — UI drops, cache keeps.
+        _ = await fixture.decode(.notification(
+            method: "session/update",
+            params: .object([
+                "sessionId": .string("file:Orders.cs"),
+                "update": .object([
+                    "sessionUpdate": .string("agent_message_chunk"),
+                    "content": .object(["text": .string("migrating Orders")]),
+                ]),
+            ])
+        ))
+        // Role boundary persists the agent turn into the local cache.
+        _ = await fixture.decode(.notification(
+            method: "session/update",
+            params: .object([
+                "sessionId": .string("file:Orders.cs"),
+                "update": .object([
+                    "sessionUpdate": .string("user_message_chunk"),
+                    "content": .object(["text": .string("follow up")]),
+                ]),
+            ])
+        ))
+
+        fixture.state.prepareLoadSession(sessionID: "file:Orders.cs")
+        let loadID = fixture.state.nextRequestID(for: .sessionLoad)
+        fixture.state.setPhase(.awaitingSession)
+        let openBatch = await fixture.decode(.response(
+            id: loadID,
+            result: .object([
+                "sessionId": .string("file:Orders.cs"),
+                "modes": .object([:]),
+                "models": .object([:]),
+            ]),
+            error: nil
+        ))
+        #expect(openBatch.events.contains {
+            if case .assistantText(_, _, let text, true) = $0 {
+                return text.contains("migrating Orders")
+            }
+            return false
+        })
+        #expect(openBatch.events.contains {
+            if case .userTurn(_, let text) = $0 { return text.contains("follow up") }
+            return false
+        })
+        let sessionIdx = openBatch.events.firstIndex {
+            if case .sessionStarted = $0 { return true }
+            return false
+        }
+        let historyIdx = openBatch.events.firstIndex {
+            if case .assistantText = $0 { return true }
+            return false
+        }
+        if let sessionIdx, let historyIdx {
+            #expect(historyIdx < sessionIdx)
+        }
+    }
+
+    @Test("foreign streaming sessionId chunks are dropped while another session is foreground")
+    func foreignStreamingSessionIdGuard() async {
+        let fixture = ACPDecoderFixture()
+        _ = await fixture.openSession(id: "A")
+        await fixture.sessionIndex.recordSession(
+            id: "B",
+            customAgentID: fixture.customAgentID,
+            workspace: fixture.workspace,
+            title: "B"
+        )
+        let foreign = await fixture.decode(.notification(
+            method: "session/update",
+            params: .object([
+                "sessionId": .string("B"),
+                "update": .object([
+                    "sessionUpdate": .string("agent_message_chunk"),
+                    "content": .object(["text": .string("from-B")]),
+                ]),
+            ])
+        ))
+        #expect(foreign.events.isEmpty)
+
+        // Flush the coalesced foreign buffer via a role boundary, then assert cache.
+        let boundary = await fixture.decode(.notification(
+            method: "session/update",
+            params: .object([
+                "sessionId": .string("B"),
+                "update": .object([
+                    "sessionUpdate": .string("user_message_chunk"),
+                    "content": .object(["text": .string("user-B")]),
+                ]),
+            ])
+        ))
+        #expect(boundary.events.isEmpty)
+        let afterBoundary = await fixture.sessionIndex.localHistoryEvents(
+            sessionID: "B",
+            customAgentID: fixture.customAgentID,
+            random: SystemRandomSource()
+        )
+        #expect(afterBoundary.contains {
+            if case .assistantText(_, _, let text, true) = $0 { return text.contains("from-B") }
+            return false
+        })
+
+        let promptID = fixture.state.nextRequestID(for: .sessionPrompt)
+        _ = await fixture.decode(.notification(
+            method: "session/update",
+            params: .object([
+                "sessionId": .string("A"),
+                "update": .object([
+                    "sessionUpdate": .string("agent_message_chunk"),
+                    "content": .object(["text": .string("from-A")]),
+                ]),
+            ])
+        ))
+        let done = await fixture.decode(.response(
+            id: promptID,
+            result: .object(["stopReason": .string("end_turn")]),
+            error: nil
+        ))
+        #expect(done.events.contains {
+            if case .assistantText(_, _, let text, true) = $0 { return text == "from-A" }
+            return false
+        })
+        #expect(!done.events.contains {
+            if case .assistantText(_, _, let text, _) = $0 { return text.contains("from-B") }
+            return false
+        })
+    }
+
+    @Test("parked permission re-emits permissionRequest after session/load")
+    func parkedPermissionReEmitOnLoad() async {
+        let fixture = ACPDecoderFixture(customAgentID: "migrate")
+        _ = await fixture.openSession(id: "foreground")
+        _ = await fixture.decode(.serverRequest(
+            id: .number(9001),
+            method: "session/request_permission",
+            params: .object([
+                "sessionId": .string("background"),
+                "options": .array([
+                    .object(["kind": .string("allow_once"), "optionId": .string("allow-once")]),
+                ]),
+                "toolCall": .object(["title": .string("Shell")]),
+            ])
+        ))
+
+        fixture.state.prepareLoadSession(sessionID: "background")
+        let loadID = fixture.state.nextRequestID(for: .sessionLoad)
+        fixture.state.setPhase(.awaitingSession)
+        let loadBatch = await fixture.decode(.response(
+            id: loadID,
+            result: .object(["sessionId": .string("background")]),
+            error: nil
+        ))
+        #expect(loadBatch.events.contains {
+            if case .permissionRequest(let prompt) = $0 {
+                return prompt.summary == "Shell"
+            }
+            return false
+        })
+        #expect(fixture.state.sessionID() == "background")
+    }
+
+    @Test("initialize without dashboard meta emits no agentDashboard")
+    func degradedNoDashboard() async {
+        let fixture = ACPDecoderFixture()
+        let batch = await fixture.decode(.response(
+            id: .number(1),
+            result: .object([
+                "protocolVersion": .number(1),
+                "agentCapabilities": .object([:]),
+                "authMethods": .array([]),
+            ]),
+            error: nil
+        ))
+        #expect(!batch.events.contains {
+            if case .agentDashboard = $0 { return true }
+            return false
+        })
+    }
+
+    @Test("session_info_update archived hides session from summaries")
+    func archivedSessionInfoUpdate() async {
+        let fixture = ACPDecoderFixture(customAgentID: "migrate")
+        _ = await fixture.openSession(id: "to-archive")
+        let before = await fixture.sessionIndex.summaries(
+            workspace: fixture.workspace,
+            customAgentID: "migrate"
+        )
+        #expect(before.contains { $0.id == "to-archive" })
+
+        _ = await fixture.decode(.notification(
+            method: "session/update",
+            params: .object([
+                "sessionId": .string("to-archive"),
+                "update": .object([
+                    "sessionUpdate": .string("session_info_update"),
+                    "title": .string("Gone"),
+                    "_meta": .object(["archived": .bool(true)]),
+                ]),
+            ])
+        ))
+        let after = await fixture.sessionIndex.summaries(
+            workspace: fixture.workspace,
+            customAgentID: "migrate"
+        )
+        #expect(!after.contains { $0.id == "to-archive" })
+    }
+
+    @Test("archiving a session drops parked permissions so restart cannot re-fire them")
+    func archivingDropsParkedPermissions() async {
+        let fixture = ACPDecoderFixture(customAgentID: "migrate")
+        _ = await fixture.openSession(id: "foreground")
+        _ = await fixture.decode(.serverRequest(
+            id: .number(9001),
+            method: "session/request_permission",
+            params: .object([
+                "sessionId": .string("file:Orders.cs"),
+                "options": .array([
+                    .object(["kind": .string("allow_once"), "optionId": .string("accept_a")]),
+                ]),
+                "toolCall": .object(["title": .string("Human review: Orders.cs")]),
+            ])
+        ))
+
+        let archiveBatch = await fixture.decode(.notification(
+            method: "session/update",
+            params: .object([
+                "sessionId": .string("file:Orders.cs"),
+                "update": .object([
+                    "sessionUpdate": .string("session_info_update"),
+                    "title": .string("Orders.cs"),
+                    "_meta": .object([
+                        "archived": .bool(true),
+                        "needsAttention": .bool(false),
+                    ]),
+                ]),
+            ])
+        ))
+        #expect(fixture.state.takeParkedPermissions(sessionID: "file:Orders.cs").isEmpty)
+        #expect(archiveBatch.events.contains {
+            if case .permissionAlreadyResolved(_, let by) = $0 {
+                return by == "session-archived"
+            }
+            return false
+        })
+        #expect(archiveBatch.events.contains {
+            if case .sessionAttentionChanged(let id, _, false) = $0 {
+                return id == "file:Orders.cs"
+            }
+            return false
+        })
+        #expect(!archiveBatch.replies.isEmpty)
+    }
+
+    @Test("warm A to B to A switch scopes streaming to the foreground sessionId")
+    func warmSessionSwitchScoping() async {
+        let fixture = ACPDecoderFixture()
+        _ = await fixture.openSession(id: "A")
+
+        fixture.state.prepareLoadSession(sessionID: "B")
+        let loadB = fixture.state.nextRequestID(for: .sessionLoad)
+        fixture.state.setPhase(.awaitingSession)
+        _ = await fixture.decode(.response(
+            id: loadB,
+            result: .object(["sessionId": .string("B")]),
+            error: nil
+        ))
+        #expect(fixture.state.sessionID() == "B")
+
+        let droppedA = await fixture.decode(.notification(
+            method: "session/update",
+            params: .object([
+                "sessionId": .string("A"),
+                "update": .object([
+                    "sessionUpdate": .string("agent_message_chunk"),
+                    "content": .object(["text": .string("stale-A")]),
+                ]),
+            ])
+        ))
+        #expect(droppedA.events.isEmpty)
+
+        let promptB = fixture.state.nextRequestID(for: .sessionPrompt)
+        _ = await fixture.decode(.notification(
+            method: "session/update",
+            params: .object([
+                "sessionId": .string("B"),
+                "update": .object([
+                    "sessionUpdate": .string("agent_message_chunk"),
+                    "content": .object(["text": .string("live-B")]),
+                ]),
+            ])
+        ))
+        let doneB = await fixture.decode(.response(
+            id: promptB,
+            result: .object(["stopReason": .string("end_turn")]),
+            error: nil
+        ))
+        #expect(doneB.events.contains {
+            if case .assistantText(_, _, let text, true) = $0 { return text == "live-B" }
+            return false
+        })
+
+        fixture.state.prepareLoadSession(sessionID: "A")
+        let loadA = fixture.state.nextRequestID(for: .sessionLoad)
+        fixture.state.setPhase(.awaitingSession)
+        _ = await fixture.decode(.response(
+            id: loadA,
+            result: .object(["sessionId": .string("A")]),
+            error: nil
+        ))
+        #expect(fixture.state.sessionID() == "A")
+
+        let droppedB = await fixture.decode(.notification(
+            method: "session/update",
+            params: .object([
+                "sessionId": .string("B"),
+                "update": .object([
+                    "sessionUpdate": .string("agent_message_chunk"),
+                    "content": .object(["text": .string("stale-B")]),
+                ]),
+            ])
+        ))
+        #expect(droppedB.events.isEmpty)
+    }
 }

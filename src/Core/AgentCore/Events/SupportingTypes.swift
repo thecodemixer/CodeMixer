@@ -2,6 +2,19 @@ import Foundation
 import CryptoKit
 import AgentProtocol
 
+/// Custom permission option surfaced by ACP agents with non-standard choices.
+public struct PermissionOption: Sendable, Hashable, Identifiable {
+    public let optionId: String
+    public let label: String
+
+    public var id: String { optionId }
+
+    public init(optionId: String, label: String) {
+        self.optionId = optionId
+        self.label = label
+    }
+}
+
 /// Permission prompt the agent surfaced before executing a tool.
 public struct PermissionPrompt: Sendable, Hashable, Identifiable {
     public let id: UUID
@@ -9,23 +22,27 @@ public struct PermissionPrompt: Sendable, Hashable, Identifiable {
     public let summary: String
     public let argumentsSummary: String
     public let requestedAt: Date
+    public let options: [PermissionOption]?
 
     public init(id: UUID,
                 toolName: String,
                 summary: String,
                 argumentsSummary: String,
-                requestedAt: Date) {
+                requestedAt: Date,
+                options: [PermissionOption]? = nil) {
         self.id = id
         self.toolName = toolName
         self.summary = summary
         self.argumentsSummary = argumentsSummary
         self.requestedAt = requestedAt
+        self.options = options
     }
 
     public init(toolName: String,
                 summary: String,
                 argumentsSummary: String,
-                requestedAt: Date) {
+                requestedAt: Date,
+                options: [PermissionOption]? = nil) {
         self.init(id: PermissionPrompt.stableID(
             toolName: toolName,
             summary: summary,
@@ -35,7 +52,8 @@ public struct PermissionPrompt: Sendable, Hashable, Identifiable {
         toolName: toolName,
         summary: summary,
         argumentsSummary: argumentsSummary,
-        requestedAt: requestedAt)
+        requestedAt: requestedAt,
+        options: options)
     }
 
     private static func stableID(toolName: String,
@@ -158,6 +176,13 @@ public struct SessionSummary: Sendable, Hashable, Identifiable {
     /// Git branch captured at the time of the session, when known. Optional and
     /// purely additive (not carried on the wire).
     public let gitBranch: String?
+    /// True when a background session has a parked permission or other attention signal.
+    public let needsAttention: Bool
+    /// True when this session is the project's overview / control session (hosted
+    /// dashboard). File-scoped sessions leave this false so the UI stays chat-only.
+    public let isOverview: Bool
+    /// Last dashboard URL advertised for overview sessions, when known.
+    public let overviewURL: URL?
 
     public init(id: String,
                 agentID: AgentID,
@@ -165,7 +190,10 @@ public struct SessionSummary: Sendable, Hashable, Identifiable {
                 title: String,
                 lastActivity: Date,
                 messageCount: Int,
-                gitBranch: String? = nil) {
+                gitBranch: String? = nil,
+                needsAttention: Bool = false,
+                isOverview: Bool = false,
+                overviewURL: URL? = nil) {
         self.id = id
         self.agentID = agentID
         self.workspace = workspace
@@ -173,6 +201,9 @@ public struct SessionSummary: Sendable, Hashable, Identifiable {
         self.lastActivity = lastActivity
         self.messageCount = messageCount
         self.gitBranch = gitBranch
+        self.needsAttention = needsAttention
+        self.isOverview = isOverview
+        self.overviewURL = overviewURL
     }
 }
 

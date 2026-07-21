@@ -12,9 +12,9 @@ struct ClaudeAdapterEventStreamTests {
     @Test("SessionStart hook binds the tailer before Stop drains the transcript")
     func sessionStartBindsTailerBeforeStopDrain() async throws {
         let fileSystem = InMemoryFileSystem()
-        let home = URL(fileURLWithPath: "/tmp/codemixer-adapter-event")
+        let home = TestPaths.underTemporary("codemixer-adapter-event")
         let environment = FakeEnvironment(home: home)
-        let workspace = URL(fileURLWithPath: "/tmp/codemixer-workspace")
+        let workspace = TestPaths.underTemporary("codemixer-workspace")
         let sessionID = "hook-session"
         let projects = ClaudeProjectPaths.projectDirectory(for: workspace,
                                                            claudeDirectory: environment.claudeDirectory)
@@ -54,9 +54,9 @@ struct ClaudeAdapterEventStreamTests {
     @Test("Stop hook with session_id drains the exact fresh transcript without SessionStart")
     func stopHookSessionIDBindsFreshTranscript() async throws {
         let fileSystem = InMemoryFileSystem()
-        let home = URL(fileURLWithPath: "/tmp/codemixer-adapter-stop")
+        let home = TestPaths.underTemporary("codemixer-adapter-stop")
         let environment = FakeEnvironment(home: home)
-        let workspace = URL(fileURLWithPath: "/tmp/codemixer-workspace")
+        let workspace = TestPaths.underTemporary("codemixer-workspace")
         let sessionID = "stop-session"
         let projects = ClaudeProjectPaths.projectDirectory(for: workspace,
                                                            claudeDirectory: environment.claudeDirectory)
@@ -93,9 +93,9 @@ struct ClaudeAdapterEventStreamTests {
     @Test("Stop last_assistant_message is dropped when transcript already supplied assistantText")
     func stopDropsDuplicateAssistantFromHook() async throws {
         let fileSystem = InMemoryFileSystem()
-        let home = URL(fileURLWithPath: "/tmp/codemixer-adapter-dedup")
+        let home = TestPaths.underTemporary("codemixer-adapter-dedup")
         let environment = FakeEnvironment(home: home)
-        let workspace = URL(fileURLWithPath: "/tmp/codemixer-workspace")
+        let workspace = TestPaths.underTemporary("codemixer-workspace")
         let sessionID = "dedup-session"
         let projects = ClaudeProjectPaths.projectDirectory(for: workspace,
                                                            claudeDirectory: environment.claudeDirectory)

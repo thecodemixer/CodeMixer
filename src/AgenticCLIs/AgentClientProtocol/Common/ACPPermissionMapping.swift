@@ -13,6 +13,8 @@ public enum ACPPermissionMapping {
             return options["allow_once"] ?? options["allow_always"]
         case .deny:
             return options["reject_once"] ?? options["reject_always"]
+        case .option(let id):
+            return id
         }
     }
 }

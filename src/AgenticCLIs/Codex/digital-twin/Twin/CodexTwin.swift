@@ -52,7 +52,7 @@ public final class CodexTwin: AgentAdapter {
     }
 
     public func locateBinary(env: ResolvedEnvironment) async throws -> URL {
-        URL(fileURLWithPath: "/usr/bin/true")
+        SystemPaths.trueBinary
     }
 
     public func defaultEnvOverrides() -> [String: String] { [:] }

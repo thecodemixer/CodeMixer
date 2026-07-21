@@ -7,7 +7,7 @@ import Testing
 @Suite("ACP reverse filesystem RPC")
 struct ACPFileAccessTests {
 
-    private let workspace = URL(fileURLWithPath: "/tmp/acp-ws")
+    private let workspace = TestPaths.underTemporary("acp-ws")
 
     @Test("read returns workspace file contents")
     func readInsideWorkspace() async throws {

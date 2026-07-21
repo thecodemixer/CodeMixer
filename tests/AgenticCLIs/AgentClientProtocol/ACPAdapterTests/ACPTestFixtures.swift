@@ -12,12 +12,14 @@ struct ACPDecoderFixture {
     let fileSystem: InMemoryFileSystem
     let clock: FakeClock
     let random: FakeRandomSource
+    let customAgentID: String
 
-    init(workspace: URL = URL(fileURLWithPath: "/tmp/acp-ws"),
+    init(workspace: URL = TestPaths.underTemporary("acp-ws"),
          customAgentID: String = "test-agent",
          displayName: String = "Test Agent",
          resumeSessionID: String? = nil) {
         self.workspace = workspace
+        self.customAgentID = customAgentID
         self.fileSystem = InMemoryFileSystem()
         self.clock = FakeClock()
         self.random = FakeRandomSource()
@@ -86,7 +88,7 @@ actor ACPEventSink {
 }
 
 func acpAdapter(customAgentID: String = "test",
-                executablePath: String = "/usr/bin/true",
+                executablePath: String = SystemPaths.trueBinary.path,
                 arguments: [String] = ["acp"]) -> ACPAdapter {
     ACPAdapter(
         ref: CustomAgentRef(

@@ -67,6 +67,18 @@ public enum WireCodec {
             return .snapshotReady(kind: kind, payloadBase64: payload.base64EncodedString())
         case .clientAction(let action):
             return .clientAction(action)
+        case .agentDashboard(let url, let title):
+            return .agentDashboard(url: url.absoluteString, title: title)
+        case .sessionIndexChanged(let projectPath):
+            return .sessionIndexChanged(projectPath: projectPath.path)
+        case .sessionAttentionChanged(let sessionID, let title, let needsAttention):
+            return .sessionAttentionChanged(
+                sessionID: sessionID,
+                title: title,
+                needsAttention: needsAttention
+            )
+        case .cachedTranscriptLoaded(let sessionID):
+            return .cachedTranscriptLoaded(sessionID: sessionID)
         }
     }
 
@@ -131,6 +143,21 @@ public enum WireCodec {
             return .snapshotReady(kind: kind, payload: Data(base64Encoded: b64) ?? Data())
         case .clientAction(let action):
             return .clientAction(action)
+        case .agentDashboard(let s, let title):
+            guard let url = URL(string: s) else {
+                return .error(.internalInvariant(detail: "invalid agentDashboard URL"))
+            }
+            return .agentDashboard(url: url, title: title)
+        case .sessionIndexChanged(let path):
+            return .sessionIndexChanged(projectPath: URL(fileURLWithPath: path))
+        case .sessionAttentionChanged(let sessionID, let title, let needsAttention):
+            return .sessionAttentionChanged(
+                sessionID: sessionID,
+                title: title,
+                needsAttention: needsAttention
+            )
+        case .cachedTranscriptLoaded(let sessionID):
+            return .cachedTranscriptLoaded(sessionID: sessionID)
         }
     }
 
@@ -166,18 +193,28 @@ public enum WireCodec {
     }
 
     private static func encode(_ p: PermissionPrompt) -> WirePermissionPrompt {
-        WirePermissionPrompt(id: p.id,
-                             toolName: p.toolName,
-                             summary: p.summary,
-                             argumentsSummary: p.argumentsSummary,
-                             requestedAt: p.requestedAt)
+        WirePermissionPrompt(
+            id: p.id,
+            toolName: p.toolName,
+            summary: p.summary,
+            argumentsSummary: p.argumentsSummary,
+            requestedAt: p.requestedAt,
+            options: p.options?.map {
+                WirePermissionOption(optionId: $0.optionId, label: $0.label)
+            }
+        )
     }
     private static func decode(_ p: WirePermissionPrompt) -> PermissionPrompt {
-        PermissionPrompt(id: p.id,
-                         toolName: p.toolName,
-                         summary: p.summary,
-                         argumentsSummary: p.argumentsSummary,
-                         requestedAt: p.requestedAt)
+        PermissionPrompt(
+            id: p.id,
+            toolName: p.toolName,
+            summary: p.summary,
+            argumentsSummary: p.argumentsSummary,
+            requestedAt: p.requestedAt,
+            options: p.options?.map {
+                PermissionOption(optionId: $0.optionId, label: $0.label)
+            }
+        )
     }
 
     private static func ms(of duration: Duration) -> Int {

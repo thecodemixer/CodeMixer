@@ -480,6 +480,12 @@ public actor AgentEngine: AgentEngineCommandPort {
             }
             pendingPermissions[prompt.id] = prompt
             startPermissionTimeout(for: prompt.id)
+        case .permissionAlreadyResolved(let id, _):
+            // Adapter-side resolve (e.g. migration Restart archived the session).
+            // Cancel the auto-deny timer without delivering a second response.
+            permissionTimeouts.removeValue(forKey: id)?.cancel()
+            pendingPermissions.removeValue(forKey: id)
+            resumePollingAfterPermissionIfNeeded()
         case .stopped(let reason):
             requestShutdown(reason: reason)
             return

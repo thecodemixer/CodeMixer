@@ -53,4 +53,14 @@ public protocol ACPSessionIndexing: Sendable {
                             random: any RandomSource) async -> [AgentEvent]
 
     func summaries(workspace: URL, customAgentID: String) async -> [SessionSummary]
+
+    func setArchived(sessionID: String, customAgentID: String, archived: Bool) async
+
+    func setNeedsAttention(sessionID: String, customAgentID: String, needsAttention: Bool) async
+
+    /// Marks a session as the project overview / control session (hosted dashboard).
+    func setIsOverview(sessionID: String,
+                       customAgentID: String,
+                       isOverview: Bool,
+                       overviewURL: URL?) async
 }

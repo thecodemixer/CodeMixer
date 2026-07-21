@@ -33,13 +33,15 @@ public enum ClaudeInputEncoding {
             return "allow"
         case .deny:
             return "deny"
+        case .option:
+            return "allow"
         }
     }
 
     private static func ptyPermissionBytes(for decision: PermissionDecision) -> Data {
         let key: String
         switch decision {
-        case .allow:       key = "1\r"
+        case .allow, .option: key = "1\r"
         case .allowAlways: key = "2\r"
         case .deny:        key = "3\r"
         }

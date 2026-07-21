@@ -2,6 +2,7 @@ import Foundation
 import Testing
 @testable import ClaudeCode
 import AgentTestSupport
+import AgentCore
 
 @Suite("ClaudeHookInstaller — idempotent settings merge")
 struct ClaudeHookInstallerTests {
@@ -10,8 +11,9 @@ struct ClaudeHookInstallerTests {
     func writesManagedEntries() throws {
         let fs = InMemoryFileSystem()
         let installer = ClaudeHookInstaller(fileSystem: fs)
-        let workspace = URL(fileURLWithPath: "/tmp/workspace")
-        let url = try installer.install(socketPath: "/tmp/hook.sock", into: workspace)
+        let workspace = TestPaths.underTemporary("workspace")
+        let socket = TestPaths.underTemporary("hook.sock", isDirectory: false).path
+        let url = try installer.install(socketPath: socket, into: workspace)
 
         let data = try fs.readData(at: url)
         let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -23,8 +25,8 @@ struct ClaudeHookInstallerTests {
         #expect(preToolUse.first?["matcher"] as? String == "*")
         let commands = (preToolUse.first?["hooks"] as? [[String: Any]] ?? [])
             .compactMap { $0["command"] as? String }
-        #expect(commands.contains { $0.contains("/usr/bin/python3 -c") })
-        #expect(commands.contains { $0.contains("/tmp/hook.sock") })
+        #expect(commands.contains { $0.contains("\(SystemPaths.python3.path) -c") })
+        #expect(commands.contains { $0.contains(socket) })
 
         #expect(hooks["PostToolUse"] as? [[String: Any]] != nil)
         #expect(hooks["UserPromptSubmit"] as? [[String: Any]] != nil)
@@ -35,9 +37,10 @@ struct ClaudeHookInstallerTests {
     func idempotent() throws {
         let fs = InMemoryFileSystem()
         let installer = ClaudeHookInstaller(fileSystem: fs)
-        let workspace = URL(fileURLWithPath: "/tmp/workspace")
-        let url1 = try installer.install(socketPath: "/tmp/a.sock", into: workspace)
-        let url2 = try installer.install(socketPath: "/tmp/a.sock", into: workspace)
+        let workspace = TestPaths.underTemporary("workspace")
+        let sockA = TestPaths.underTemporary("a.sock", isDirectory: false).path
+        let url1 = try installer.install(socketPath: sockA, into: workspace)
+        let url2 = try installer.install(socketPath: sockA, into: workspace)
         #expect(url1 == url2)
         let first = try fs.readData(at: url1)
         let second = try fs.readData(at: url2)
@@ -48,9 +51,10 @@ struct ClaudeHookInstallerTests {
     func replacesStaleSpikeHooksPreservingUserHooks() throws {
         let fs = InMemoryFileSystem()
         let installer = ClaudeHookInstaller(fileSystem: fs)
-        let workspace = URL(fileURLWithPath: "/tmp/workspace")
+        let workspace = TestPaths.underTemporary("workspace")
         let url = installer.settingsURL(for: workspace)
         try fs.createDirectory(at: url.deletingLastPathComponent(), withIntermediates: true)
+        let userHook = SystemPaths.trueBinary.path
         let existing = Data("""
         {
           "hooks": {
@@ -69,7 +73,7 @@ struct ClaudeHookInstallerTests {
                 "hooks": [
                   {
                     "type": "command",
-                    "command": "/usr/bin/true"
+                    "command": "\(userHook)"
                   }
                 ]
               }
@@ -79,7 +83,8 @@ struct ClaudeHookInstallerTests {
         """.utf8)
         try fs.writeAtomically(existing, to: url)
 
-        try installer.install(socketPath: "/tmp/live.sock", into: workspace)
+        let liveSocket = TestPaths.underTemporary("live.sock", isDirectory: false).path
+        try installer.install(socketPath: liveSocket, into: workspace)
 
         let data = try fs.readData(at: url)
         let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -88,8 +93,8 @@ struct ClaudeHookInstallerTests {
         let commands = preToolUse.flatMap {
             ($0["hooks"] as? [[String: Any]] ?? []).compactMap { $0["command"] as? String }
         }
-        #expect(commands.contains("/usr/bin/true"))
+        #expect(commands.contains(userHook))
         #expect(!commands.contains { $0.contains("codemixer-spike-hook") })
-        #expect(commands.contains { $0.contains("/tmp/live.sock") })
+        #expect(commands.contains { $0.contains(liveSocket) })
     }
 }

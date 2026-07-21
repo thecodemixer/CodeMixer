@@ -1,4 +1,5 @@
 import Foundation
+import AgentCore
 
 /// Claude Code filesystem conventions shared by the adapter and digital twin.
 ///
@@ -57,12 +58,12 @@ public enum ClaudeProjectPaths {
     private static func privateVarAlias(for workspace: URL) -> URL? {
         let path = workspace.path
         guard path.hasPrefix("/var/") else { return nil }
-        return URL(fileURLWithPath: "/private" + path, isDirectory: true)
+        return URL(fileURLWithPath: SystemPaths.privatePrefix + path, isDirectory: true)
     }
 
     private static func logicalVarAlias(for workspace: URL) -> URL? {
         let path = workspace.path
-        guard path.hasPrefix("/private/var/") else { return nil }
-        return URL(fileURLWithPath: String(path.dropFirst("/private".count)), isDirectory: true)
+        guard path.hasPrefix(SystemPaths.privatePrefix + "/var/") else { return nil }
+        return URL(fileURLWithPath: String(path.dropFirst(SystemPaths.privatePrefix.count)), isDirectory: true)
     }
 }

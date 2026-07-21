@@ -24,7 +24,7 @@ struct CodexTwinTests {
             clock: FakeClock(),
             random: FakeRandomSource(uuids: [replyID])
         )
-        let workspace = URL(fileURLWithPath: "/tmp/project")
+        let workspace = TestPaths.underTemporary("project")
         let stream = twin.makeEventStream(inputs: AgentInputs(
             outputBytes: AsyncStream { $0.finish() },
             terminal: nil,
@@ -60,7 +60,7 @@ struct CodexTwinTests {
         )
 
         let sessions = await twin.listResumableSessions(
-            workspace: URL(fileURLWithPath: "/tmp/project")
+            workspace: TestPaths.underTemporary("project")
         )
 
         #expect(sessions.count == 1)

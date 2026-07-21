@@ -33,8 +33,8 @@ public struct CodexBinaryLocator: Sendable {
             home.appendingPathComponent(".local/bin/codex"),
             home.appendingPathComponent(".npm-global/bin/codex"),
             home.appendingPathComponent(".bun/bin/codex"),
-            URL(fileURLWithPath: "/opt/homebrew/bin/codex"),
-            URL(fileURLWithPath: "/usr/local/bin/codex"),
+            SystemPaths.binary(in: SystemPaths.homebrewBin, named: "codex"),
+            SystemPaths.binary(in: SystemPaths.usrLocalBin, named: "codex"),
         ])
 
         var checked: [String] = []

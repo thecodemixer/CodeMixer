@@ -1,13 +1,76 @@
 import Foundation
 
 /// User response to a tool-permission prompt.
-public enum PermissionDecision: String, Sendable, Codable, Hashable {
+public enum PermissionDecision: Sendable, Hashable, Equatable {
     /// Allow this single invocation.
     case allow
     /// Allow this and every future matching invocation in the current session.
     case allowAlways
     /// Deny this invocation.
     case deny
+    /// Select a custom ACP permission option by id.
+    case option(id: String)
+}
+
+extension PermissionDecision: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case kind, id
+    }
+
+    private enum Kind: String, Codable {
+        case allow, allowAlways, deny, option
+    }
+
+    /// Stable string for wire error context and legacy persistence.
+    public var wireValue: String {
+        switch self {
+        case .allow: "allow"
+        case .allowAlways: "allowAlways"
+        case .deny: "deny"
+        case .option(let id): "option:\(id)"
+        }
+    }
+
+    public init(from decoder: any Decoder) throws {
+        if let container = try? decoder.singleValueContainer(),
+           let raw = try? container.decode(String.self) {
+            switch raw {
+            case "allow": self = .allow
+            case "allowAlways": self = .allowAlways
+            case "deny": self = .deny
+            default:
+                if raw.hasPrefix("option:") {
+                    self = .option(id: String(raw.dropFirst("option:".count)))
+                } else {
+                    throw DecodingError.dataCorruptedError(
+                        in: container,
+                        debugDescription: "Unknown PermissionDecision: \(raw)"
+                    )
+                }
+            }
+            return
+        }
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch try container.decode(Kind.self, forKey: .kind) {
+        case .allow: self = .allow
+        case .allowAlways: self = .allowAlways
+        case .deny: self = .deny
+        case .option:
+            self = .option(id: try container.decode(String.self, forKey: .id))
+        }
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        switch self {
+        case .allow, .allowAlways, .deny:
+            var container = encoder.singleValueContainer()
+            try container.encode(wireValue)
+        case .option(let id):
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(Kind.option, forKey: .kind)
+            try container.encode(id, forKey: .id)
+        }
+    }
 }
 
 /// Coarse permission policy for a session — mirrors `claude --permission-mode`.

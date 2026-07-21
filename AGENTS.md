@@ -101,6 +101,7 @@ Codemixer/
 | Live Codex harness (opt-in tests) | `tests/AgenticCLIs/Codex/CodexAdapterTests/LiveCodexHarness.swift` — docs in `tests/AgenticCLIs/README.md` |
 | ACP adapter top-level | `AgenticCLIs/AgentClientProtocol/Adapter/ACPAdapter.swift` |
 | ACP framing / codec / session index / reverse FS+terminal | `AgenticCLIs/AgentClientProtocol/Common/*.swift` |
+| ACP dashboard / attention / parked permissions | `ACPEventDecoder` (`agentDashboard`, `sessionIndexChanged`, `sessionAttentionChanged`); background `session/request_permission` parks until `session/load` |
 | ACP reverse-terminal process wrapper | `AgenticCLIs/AgentClientProtocol/External/ACPTerminalProcess.swift` |
 | ACP digital twin | `AgenticCLIs/AgentClientProtocol/digital-twin/Twin/ACPTwin.swift` |
 | Shipping ACP CLIs (Cursor) | `AgenticCLIs/ACPCLIs/Cursor/` — `CursorACPAdapter`, binary locator, mode commands |
@@ -131,8 +132,10 @@ Codemixer/
 | Conversation motion (arriving rows, turn spine, streaming caret, empty-state hero) | `AgentUI/Conversation/ConversationMotion.swift` |
 | Tool-call card (rendered inline in turn order) | `AgentUI/Conversation/ToolCallCardView.swift` |
 | Permission prompt | `AgentUI/Conversation/PermissionPromptView.swift` |
+| Agent dashboard WebView (Custom ACP overview) | `AgentUI/Dashboard/AgentDashboardView.swift` |
+| WKWebView wrapper | `AgentUI/External/WebViewRepresentable.swift` |
 | Conversation scroller | `AgentUI/Conversation/ConversationView.swift` |
-| Session navigator (projects → sessions, icon-rail focus mode) | `AgentUI/Sidebar/SessionSidebarView.swift` |
+| Session navigator (projects → sessions, icon-rail focus mode; attention rollup badge) | `AgentUI/Sidebar/SessionSidebarView.swift` |
 | Cmd+K command palette | `AgentUI/Palette/CommandPaletteView.swift` |
 | Composer (prompt input, modes, mic, send/cancel) | `AgentUI/Composer/{PromptComposerView,PromptComposerSupportViews,PromptComposerDraftLogic,ComposerAttachmentHandling}.swift` |
 | Silent diagnostics (opt-in) | `AgentUI/Debug/SilentDiagnosticsView.swift`, `Core/AgentCore/Diagnostics/SilentDiagnostics.swift` |

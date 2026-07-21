@@ -30,20 +30,30 @@ struct PermissionPromptView: View {
             }
 
             HStack(spacing: Theme.spacing.s8) {
-                Button("Allow") { onDecision(.allow) }
-                    .keyboardShortcut(.return, modifiers: [])
-                    .buttonStyle(.borderedProminent)
-                    .accessibilityLabel("Allow this tool call")
+                if let options = prompt.options, !options.isEmpty {
+                    ForEach(options) { option in
+                        Button(option.label) {
+                            onDecision(.option(id: option.optionId))
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .accessibilityLabel("Permission option: \(option.label)")
+                    }
+                } else {
+                    Button("Allow") { onDecision(.allow) }
+                        .keyboardShortcut(.return, modifiers: [])
+                        .buttonStyle(.borderedProminent)
+                        .accessibilityLabel("Allow this tool call")
 
-                Button("Allow always") { onDecision(.allowAlways) }
-                    .keyboardShortcut(.return, modifiers: [.command])
-                    .buttonStyle(.bordered)
-                    .accessibilityLabel("Allow this and similar tool calls in the future")
+                    Button("Allow always") { onDecision(.allowAlways) }
+                        .keyboardShortcut(.return, modifiers: [.command])
+                        .buttonStyle(.bordered)
+                        .accessibilityLabel("Allow this and similar tool calls in the future")
 
-                Button("Deny") { onDecision(.deny) }
-                    .keyboardShortcut(.escape, modifiers: [])
-                    .buttonStyle(.bordered)
-                    .accessibilityLabel("Deny this tool call")
+                    Button("Deny") { onDecision(.deny) }
+                        .keyboardShortcut(.escape, modifiers: [])
+                        .buttonStyle(.bordered)
+                        .accessibilityLabel("Deny this tool call")
+                }
             }
         }
         .padding(Theme.spacing.s16)

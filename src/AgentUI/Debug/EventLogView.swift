@@ -102,6 +102,15 @@ private struct Line: Identifiable {
         case .clientAction(let action):
             let text = action.detail.map { "\(action.title): \($0)" } ?? action.title
             (kind, body, tint) = ("action", text, Theme.text.tertiary)
+        case .agentDashboard(let u, let title):
+            let label = title.map { "\($0) " } ?? ""
+            (kind, body, tint) = ("dashboard", "\(label)\(u.absoluteString)", Theme.signal.info)
+        case .sessionIndexChanged(let path):
+            (kind, body, tint) = ("sessions", path.path, Theme.text.tertiary)
+        case .sessionAttentionChanged(let id, let title, let flag):
+            (kind, body, tint) = ("attention", "\(title) (\(id)) \(flag)", Theme.signal.warning)
+        case .cachedTranscriptLoaded(let id):
+            (kind, body, tint) = ("cached", id, Theme.signal.info)
         }
     }
 }

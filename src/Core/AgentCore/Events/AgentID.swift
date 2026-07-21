@@ -40,4 +40,8 @@ public struct AgentCapabilities: OptionSet, Sendable, Hashable {
     /// (ACP initialize → auth → session/new). UI gates the composer; same-project
     /// New Chat prefers `.newSession` over respawning the agent process.
     public static let sessionHandshakeGate = AgentCapabilities(rawValue: 1 << 7)
+    /// Agent hosts an overview / mission-control page (URL via `agentDashboard`).
+    /// Overview sessions select that page by default; the UI keeps chat available
+    /// whenever the agent has advertised a dashboard URL.
+    public static let overviewDashboard = AgentCapabilities(rawValue: 1 << 8)
 }

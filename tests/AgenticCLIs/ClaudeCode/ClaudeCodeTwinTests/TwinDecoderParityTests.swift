@@ -3,6 +3,7 @@ import Foundation
 import AgentCore
 import AgentProtocol
 import ClaudeCode
+import AgentTestSupport
 
 /// Cross-package parity: the *exact* JSON shape the twin emits via
 /// `ClaudeCodeTwinHookEmitter` must round-trip through `ClaudeHookDecoder`
@@ -21,7 +22,7 @@ struct TwinDecoderParityTests {
     func sessionStartPayloadIsJSON() {
         let payload = ClaudeCodeTwinHookEmitter.sessionStart(
             sessionID: UUID().uuidString,
-            project: URL(fileURLWithPath: "/tmp/codemixer"),
+            project: TestPaths.underTemporary("codemixer"),
             model: "claude-sonnet-4"
         )
         let object = try? JSONSerialization.jsonObject(with: payload) as? [String: Any]

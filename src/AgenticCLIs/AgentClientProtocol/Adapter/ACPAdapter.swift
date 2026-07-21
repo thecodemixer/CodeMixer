@@ -191,10 +191,13 @@ public final class ACPAdapter: AgentAdapter {
             let signature = "\(prompt.toolName)|\(prompt.summary)"
             state.rememberAutoApproval(signature: signature)
         }
-        let optionID = ACPPermissionMapping.optionID(
-            for: decision,
-            options: approval.optionIDs
-        )
+        let optionID: String?
+        switch decision {
+        case .option(let id):
+            optionID = id
+        default:
+            optionID = ACPPermissionMapping.optionID(for: decision, options: approval.optionIDs)
+        }
         return .writePTY(ACPInputEncoding.permissionResponse(
             id: approval.requestID,
             optionID: optionID,

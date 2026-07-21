@@ -7,7 +7,7 @@ struct PrefsAndDecisionsCodableTests {
 
     @Test("PermissionDecision raw values are stable + Codable")
     func permissionDecision() throws {
-        for decision in [PermissionDecision.allow, .allowAlways, .deny] {
+        for decision in [PermissionDecision.allow, .allowAlways, .deny, .option(id: "opt-1")] {
             try roundTrip(decision)
         }
     }

@@ -48,12 +48,7 @@ private struct FakeACPServer {
 
     init(scenario: ACPTwinScenario) {
         self.scenario = scenario
-        switch scenario {
-        case .auth, .authFail:
-            authenticated = false
-        case .text, .permission, .fsRead, .resume:
-            authenticated = true
-        }
+        authenticated = scenario.isPreAuthenticated
     }
 
     mutating func handle(_ incoming: ACPIncoming) -> [Data] {
@@ -167,7 +162,22 @@ private struct FakeACPServer {
                     method: "fs/read_text_file",
                     params: .object(["path": .string(path)])
                 )]
-            case .text, .auth, .authFail, .resume:
+            case .degradedArchived:
+                return [
+                    ACPRPCCodec.notification(
+                        method: "session/update",
+                        params: .object([
+                            "sessionId": .string(sessionID),
+                            "update": .object([
+                                "sessionUpdate": .string("session_info_update"),
+                                "title": .string("Archived session"),
+                                "_meta": .object(["archived": .bool(true)]),
+                            ]),
+                        ])
+                    ),
+                ] + completePrompt(reply: scenario.defaultReply)
+            case .text, .auth, .authFail, .resume, .dashboard, .backgroundPermission,
+                 .degradedNoDashboard:
                 return completePrompt(reply: scenario.defaultReply)
             }
         default:

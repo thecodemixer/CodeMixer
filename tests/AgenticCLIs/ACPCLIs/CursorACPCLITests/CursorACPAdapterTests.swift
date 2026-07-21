@@ -24,7 +24,7 @@ struct CursorACPAdapterTests {
     func argv() {
         let adapter = CursorACPAdapter()
         let argv = adapter.buildLaunchArgv(context: LaunchContext(
-            workspace: URL(fileURLWithPath: "/tmp"),
+            workspace: TestPaths.temporaryRoot,
             permissionMode: .default
         ))
         #expect(argv == ["cursor-agent", "acp"])
@@ -33,8 +33,8 @@ struct CursorACPAdapterTests {
     @Test("binary locator prefers CURSOR_BIN override")
     func locatorOverride() throws {
         let fs = InMemoryFileSystem()
-        let home = URL(fileURLWithPath: "/tmp/cursor-home", isDirectory: true)
-        let override = URL(fileURLWithPath: "/tmp/custom-cursor-agent")
+        let home = TestPaths.underTemporary("cursor-home")
+        let override = TestPaths.underTemporary("custom-cursor-agent", isDirectory: false)
         try fs.writeAtomically(Data(), to: override)
         let env = FakeEnvironment(
             processEnv: ["CURSOR_BIN": override.path, "PATH": "/usr/bin"],
@@ -43,9 +43,9 @@ struct CursorACPAdapterTests {
         let locator = CursorBinaryLocator(environment: env, fileSystem: fs)
         let resolved = ResolvedEnvironment(
             variables: env.processEnvironment(),
-            shell: URL(fileURLWithPath: "/bin/zsh")
+            shell: SystemPaths.zsh
         )
-        #expect(try locator.locate(env: resolved) == override)
+        #expect(try locator.locate(env: resolved).resolvingSymlinksInPath() == override.resolvingSymlinksInPath())
     }
 
     @Test("slash catalog includes agent plan ask and diagnostic debug")
@@ -60,7 +60,7 @@ struct CursorACPAdapterTests {
     @Test("permission and slash mode commands encode session/set_mode")
     func modeEncoding() {
         let adapter = CursorACPAdapter()
-        let workspace = URL(fileURLWithPath: "/tmp/cursor-ws")
+        let workspace = TestPaths.underTemporary("cursor-ws")
         _ = adapter.sessionBootstrapBytes(context: LaunchContext(
             workspace: workspace,
             permissionMode: .default

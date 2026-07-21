@@ -11,7 +11,7 @@ struct ProcessRunnerTests {
     @Test("Captures stdout from /bin/echo")
     func capturesStdout() async throws {
         let runner = ProcessRunner()
-        let result = try await runner.run(executable: URL(fileURLWithPath: "/bin/echo"),
+        let result = try await runner.run(executable: SystemPaths.echo,
                                           arguments: ["hello"])
         #expect(result.exitCode == 0)
         #expect(String(data: result.stdout, encoding: .utf8) == "hello\n")
@@ -22,7 +22,7 @@ struct ProcessRunnerTests {
     func nonZeroExit() async throws {
         let runner = ProcessRunner()
         do {
-            _ = try await runner.run(executable: URL(fileURLWithPath: "/bin/sh"),
+            _ = try await runner.run(executable: SystemPaths.sh,
                                      arguments: ["-c", "exit 7"])
             Issue.record("expected throw")
         } catch let ProcessRunner.ProcessError.nonZeroExit(code, _) {
@@ -46,7 +46,7 @@ struct ProcessRunnerTests {
     func honoursCwd() async throws {
         let runner = ProcessRunner()
         let tmp = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-        let result = try await runner.run(executable: URL(fileURLWithPath: "/bin/pwd"),
+        let result = try await runner.run(executable: SystemPaths.pwd,
                                           arguments: [],
                                           cwd: tmp)
         let resolved = tmp.resolvingSymlinksInPath().path
@@ -59,7 +59,7 @@ struct ProcessRunnerTests {
     @Test("Honours env")
     func honoursEnv() async throws {
         let runner = ProcessRunner()
-        let result = try await runner.run(executable: URL(fileURLWithPath: "/bin/sh"),
+        let result = try await runner.run(executable: SystemPaths.sh,
                                           arguments: ["-c", "printf %s \"$CODEMIXER_TEST\""],
                                           env: ["CODEMIXER_TEST": "abc"])
         #expect(String(data: result.stdout, encoding: .utf8) == "abc")
@@ -76,7 +76,7 @@ struct ProcessRunnerTests {
         done
         printf done
         """
-        let result = try await runner.run(executable: URL(fileURLWithPath: "/bin/sh"),
+        let result = try await runner.run(executable: SystemPaths.sh,
                                           arguments: ["-c", script])
         #expect(String(data: result.stdout, encoding: .utf8) == "done")
         #expect(result.stderr.count > 128_000)
@@ -87,7 +87,7 @@ struct ProcessRunnerTests {
         let runner = ProcessRunner()
         let started = ContinuousClock.now
         let task = Task {
-            try await runner.run(executable: URL(fileURLWithPath: "/bin/sleep"),
+            try await runner.run(executable: SystemPaths.sleep,
                                  arguments: ["30"])
         }
 

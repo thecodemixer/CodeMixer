@@ -39,7 +39,11 @@ public actor ACPSessionIndex: ACPSessionIndexing {
             title: title.flatMap { $0.isEmpty ? nil : $0 } ?? existing?.title ?? id,
             lastActivity: clock.now(),
             messageCount: existing?.messageCount ?? 0,
-            turns: existing?.turns ?? []
+            turns: existing?.turns ?? [],
+            archived: existing?.archived,
+            needsAttention: existing?.needsAttention,
+            isOverview: existing?.isOverview,
+            overviewURL: existing?.overviewURL
         )
         await persist()
     }
@@ -108,7 +112,11 @@ public actor ACPSessionIndex: ACPSessionIndexing {
         await loadIfNeeded()
         let path = workspace.standardizedFileURL.path
         return entries.values
-            .filter { $0.workspacePath == path && $0.customAgentID == customAgentID }
+            .filter {
+                $0.workspacePath == path
+                    && $0.customAgentID == customAgentID
+                    && $0.archived != true
+            }
             .map {
                 SessionSummary(
                     id: $0.id,
@@ -116,10 +124,68 @@ public actor ACPSessionIndex: ACPSessionIndexing {
                     workspace: workspace,
                     title: $0.title,
                     lastActivity: $0.lastActivity,
-                    messageCount: $0.messageCount
+                    messageCount: $0.messageCount,
+                    needsAttention: $0.needsAttention == true,
+                    isOverview: $0.isOverview == true,
+                    overviewURL: $0.overviewURL.flatMap(URL.init(string:))
                 )
             }
             .sorted { $0.lastActivity > $1.lastActivity }
+    }
+
+    public func setArchived(sessionID: String, customAgentID: String, archived: Bool) async {
+        await loadIfNeeded()
+        let key = ACPSessionStoreCodec.key(customAgentID: customAgentID, sessionID: sessionID)
+        guard var entry = entries[key] else { return }
+        entry.archived = archived
+        if archived {
+            entry.needsAttention = false
+        }
+        entries[key] = entry
+        await persist()
+    }
+
+    public func setNeedsAttention(sessionID: String, customAgentID: String, needsAttention: Bool) async {
+        await loadIfNeeded()
+        let key = ACPSessionStoreCodec.key(customAgentID: customAgentID, sessionID: sessionID)
+        guard var entry = entries[key] else { return }
+        entry.needsAttention = needsAttention
+        entries[key] = entry
+        await persist()
+    }
+
+    public func setIsOverview(sessionID: String,
+                              customAgentID: String,
+                              isOverview: Bool,
+                              overviewURL: URL?) async {
+        await loadIfNeeded()
+        let key = ACPSessionStoreCodec.key(customAgentID: customAgentID, sessionID: sessionID)
+        guard var entry = entries[key] else { return }
+        if isOverview {
+            for (otherKey, var other) in entries where otherKey != key {
+                guard other.customAgentID == customAgentID,
+                      other.workspacePath == entry.workspacePath else { continue }
+                var changed = false
+                if other.isOverview == true {
+                    other.isOverview = false
+                    other.overviewURL = nil
+                    changed = true
+                }
+                if other.title == entry.title {
+                    other.archived = true
+                    changed = true
+                }
+                if changed {
+                    entries[otherKey] = other
+                }
+            }
+        }
+        entry.isOverview = isOverview
+        if let overviewURL {
+            entry.overviewURL = overviewURL.absoluteString
+        }
+        entries[key] = entry
+        await persist()
     }
 
     /// Entries matching `customAgentID` + workspace path — used when migrating
@@ -138,7 +204,17 @@ public actor ACPSessionIndex: ACPSessionIndexing {
                             titleFromUserText: String?) async {
         await loadIfNeeded()
         let key = ACPSessionStoreCodec.key(customAgentID: customAgentID, sessionID: sessionID)
-        guard var entry = entries[key] else { return }
+        // Foreign stream cache can land before `recordSession` for a reverse
+        // session/new — mint a minimal entry so turns are not dropped.
+        var entry = entries[key] ?? ACPSessionStoreCodec.Entry(
+            id: sessionID,
+            customAgentID: customAgentID,
+            workspacePath: "",
+            title: titleFromUserText.map { String($0.prefix(80)) } ?? sessionID,
+            lastActivity: clock.now(),
+            messageCount: 0,
+            turns: []
+        )
         entry.turns.append(turn)
         entry.turns = ACPSessionStoreCodec.trimmedTurns(entry.turns)
         entry.lastActivity = clock.now()

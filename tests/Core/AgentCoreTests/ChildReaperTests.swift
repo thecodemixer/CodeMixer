@@ -36,7 +36,7 @@ struct ChildReaperTests {
             defer { argv.compactMap { $0 }.forEach { free($0) } }
             let envp: [UnsafeMutablePointer<CChar>?] = [nil]
 
-            let rc = posix_spawn(&pid, "/usr/bin/true", nil, nil, argv, envp)
+            let rc = posix_spawn(&pid, SystemPaths.trueBinary.path, nil, nil, argv, envp)
             #expect(rc == 0)
         }
 

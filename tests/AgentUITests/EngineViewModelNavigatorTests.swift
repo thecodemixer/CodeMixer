@@ -75,7 +75,7 @@ struct EngineViewModelNavigatorTests {
         vm.subscribe()
         defer { vm.unsubscribe() }
 
-        let ws = URL(fileURLWithPath: "/Users/me/ws")
+        let ws = TestPaths.workspace("ws")
         await bus.publish(.sessionStarted(sessionID: "", model: nil, cwd: ws))
         await drain()
 
@@ -139,15 +139,15 @@ struct EngineViewModelNavigatorTests {
     func loadSessionsNonResumable() async {
         let (vm, bus, _) = makeModel()
         vm.supportsResumableSessions = false
-        vm.loadSessions(for: "/Users/me/ws")
-        #expect(vm.sessionsByProject["/Users/me/ws"] == [])
+        vm.loadSessions(for: TestPaths.workspacePath("ws"))
+        #expect(vm.sessionsByProject[TestPaths.workspacePath("ws")] == [])
         await bus.shutdown()
     }
 
     @Test("loadSessions uses project-specific support when the current adapter is non-resumable")
     func loadSessionsUsesProjectSpecificSupport() async {
         let (vm, bus, _) = makeModel()
-        let path = "/Users/me/ws/claude"
+        let path = TestPaths.workspacePath("ws/claude")
         vm.supportsResumableSessions = false
         vm.projectCapabilities[path] = .init(
             supportsResumableSessions: true,
@@ -171,7 +171,7 @@ struct EngineViewModelNavigatorTests {
     @Test("loadSessions populates sessions from the injected lister")
     func loadSessionsPopulates() async {
         let (vm, bus, _) = makeModel()
-        let path = "/Users/me/ws"
+        let path = TestPaths.workspacePath("ws")
         vm.supportsResumableSessions = true
         vm.sessionLister = { url in
             [SessionSummary(id: "s1", agentID: .claudeCode,
@@ -188,15 +188,71 @@ struct EngineViewModelNavigatorTests {
         await bus.shutdown()
     }
 
+    @Test("openOverview with known dashboard URL selects dashboard without session load")
+    func openOverviewKnownDashboardSkipsSessionLoad() async {
+        let port = RecordingPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
+        let project = TestPaths.workspace("ws/migration")
+        let dashboardURL = URL(string: "http://127.0.0.1:9422/")!
+        vm.workspace = project
+        vm.sessionID = "file:Orders.cs"
+        vm.dashboardURL = dashboardURL
+        vm.dashboardTitle = "Migration Dashboard"
+        vm.messages = [.assistant(bubbleID: UUID(), text: "file chat")]
+        vm.showsOverviewDashboard = false
+        vm.supportsResumableSessions = true
+        vm.projectCapabilities[project.path] = .init(
+            supportsResumableSessions: true,
+            requiresSessionHandshakeGate: true,
+            supportsOverviewDashboard: true
+        )
+        vm.sessionsByProject[project.path] = [
+            SessionSummary(
+                id: "control",
+                agentID: .other,
+                workspace: project,
+                title: "Migration Dashboard",
+                lastActivity: .distantPast,
+                messageCount: 0,
+                isOverview: true,
+                overviewURL: dashboardURL
+            ),
+            SessionSummary(
+                id: "file:Orders.cs",
+                agentID: .other,
+                workspace: project,
+                title: "Orders.cs",
+                lastActivity: .distantPast,
+                messageCount: 1,
+                isOverview: false
+            ),
+        ]
+
+        vm.openOverview(projectPath: project.path)
+        await drain()
+
+        #expect(vm.showsOverviewDashboard)
+        #expect(vm.sessionID == nil)
+        #expect(vm.dashboardURL == dashboardURL)
+        #expect(vm.messages.isEmpty)
+        #expect(!port.commands.contains {
+            if case .openProject = $0 { return true }
+            return false
+        })
+
+        await bus.shutdown()
+    }
+
     @Test("renameProject follows the renamed active project path")
     func renameProjectFollowsRenamedActivePath() async throws {
         let port = RecordingPort()
         let bus = MulticastEventBus()
         let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
         let fileSystem = InMemoryFileSystem()
-        let environment = FakeEnvironment(home: URL(fileURLWithPath: "/Users/me"))
+        let environment = FakeEnvironment(home: TestPaths.fakeHome)
         let store = WorkspaceProjectsStore(environment: environment, fileSystem: fileSystem)
-        let workspace = URL(fileURLWithPath: "/Users/me/ws")
+        let workspace = TestPaths.workspace("ws")
         let ref = try await store.createProject(name: "api", projectType: .codex, in: workspace)
         let oldPath = ref.path
         let newPath = workspace.appendingPathComponent("Backend").path
@@ -240,9 +296,9 @@ struct EngineViewModelNavigatorTests {
     func renameProjectBlocksWhileTurnIsActive() async throws {
         let (vm, bus, _) = makeModel()
         let fileSystem = InMemoryFileSystem()
-        let environment = FakeEnvironment(home: URL(fileURLWithPath: "/Users/me"))
+        let environment = FakeEnvironment(home: TestPaths.fakeHome)
         let store = WorkspaceProjectsStore(environment: environment, fileSystem: fileSystem)
-        let workspace = URL(fileURLWithPath: "/Users/me/ws")
+        let workspace = TestPaths.workspace("ws")
         let ref = try await store.createProject(name: "api", projectType: .codex, in: workspace)
         let oldPath = ref.path
         let newPath = workspace.appendingPathComponent("Backend").path
@@ -273,13 +329,13 @@ struct EngineViewModelNavigatorTests {
         vm.subscribe()
         defer { vm.unsubscribe() }
 
-        let ws = URL(fileURLWithPath: "/Users/me/ws")
+        let ws = TestPaths.workspace("ws")
         await bus.publish(.sessionStarted(sessionID: "s1", model: nil, cwd: ws))
         await drain()
 
         vm.messages = [.user(bubbleID: UUID(), text: "old")]
         vm.newChat(in: ws.path)
-        vm.newChat(in: "/Users/me/other")
+        vm.newChat(in: TestPaths.workspacePath("other"))
         try? await Task.sleep(for: .milliseconds(60))
 
         let commands = port.commands
@@ -291,12 +347,12 @@ struct EngineViewModelNavigatorTests {
         }.count >= 1)
         #expect(commands.contains {
             if case .openProject(let path, let resume) = $0 {
-                return path == "/Users/me/other" && resume == nil
+                return path == TestPaths.workspacePath("other") && resume == nil
             }
             return false
         })
         #expect(vm.messages.isEmpty)
-        #expect(vm.workspace?.path == "/Users/me/other")
+        #expect(vm.workspace?.path == TestPaths.workspacePath("other"))
 
         await bus.shutdown()
     }
@@ -313,7 +369,7 @@ struct EngineViewModelNavigatorTests {
         try? await Task.sleep(for: .milliseconds(40))
         #expect(port.commands.isEmpty)
 
-        let project = URL(fileURLWithPath: "/Users/me/ws/api")
+        let project = TestPaths.workspace("ws/api")
         await bus.publish(.sessionStarted(sessionID: "s1", model: nil, cwd: project))
         await drain()
 
@@ -339,19 +395,19 @@ struct EngineViewModelNavigatorTests {
         let bus = MulticastEventBus()
         let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
         vm.projects = [
-            .init(path: "/Users/me/ws/api", displayName: "API", projectType: .codex),
-            .init(path: "/Users/me/ws/web", displayName: "Web", projectType: .claudeCode),
+            .init(path: TestPaths.workspacePath("ws/api"), displayName: "API", projectType: .codex),
+            .init(path: TestPaths.workspacePath("ws/web"), displayName: "Web", projectType: .claudeCode),
         ]
         vm.subscribe()
         defer { vm.unsubscribe() }
 
         await bus.publish(.sessionStarted(sessionID: "old", model: nil,
-                                          cwd: URL(fileURLWithPath: "/Users/me/ws/web")))
+                                          cwd: TestPaths.workspace("ws/web")))
         await drain()
         #expect(vm.currentProjectDisplayName == "Web")
 
-        vm.openSession(projectPath: "/Users/me/ws/api", id: "sess-42")
-        #expect(vm.workspace?.path == "/Users/me/ws/api")
+        vm.openSession(projectPath: TestPaths.workspacePath("ws/api"), id: "sess-42")
+        #expect(vm.workspace?.path == TestPaths.workspacePath("ws/api"))
         #expect(vm.currentProjectDisplayName == "API")
 
         await bus.shutdown()
@@ -362,7 +418,7 @@ struct EngineViewModelNavigatorTests {
         let port = RecordingPort()
         let bus = MulticastEventBus()
         let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
-        let api = URL(fileURLWithPath: "/Users/me/ws/api")
+        let api = TestPaths.workspace("ws/api")
         vm.sessionsByProject[api.path] = [
             SessionSummary(id: "recent", agentID: .codex, workspace: api,
                            title: "Latest", lastActivity: Date(), messageCount: 3),
@@ -371,7 +427,7 @@ struct EngineViewModelNavigatorTests {
         defer { vm.unsubscribe() }
 
         await bus.publish(.sessionStarted(sessionID: "web-1", model: nil,
-                                          cwd: URL(fileURLWithPath: "/Users/me/ws/web")))
+                                          cwd: TestPaths.workspace("ws/web")))
         await drain()
 
         vm.selectProject(path: api.path)
@@ -396,12 +452,12 @@ struct EngineViewModelNavigatorTests {
         vm.subscribe()
         defer { vm.unsubscribe() }
 
-        vm.openSession(projectPath: "/Users/me/ws", id: "sess-42")
+        vm.openSession(projectPath: TestPaths.workspacePath("ws"), id: "sess-42")
         try? await Task.sleep(for: .milliseconds(60))
 
         #expect(port.commands.contains {
             if case .openProject(let path, let resume) = $0 {
-                return path == "/Users/me/ws" && resume == "sess-42"
+                return path == TestPaths.workspacePath("ws") && resume == "sess-42"
             }
             return false
         })
@@ -421,7 +477,7 @@ struct EngineViewModelNavigatorTests {
         await drain()
         #expect(vm.messages.count == 1)
 
-        vm.openSession(projectPath: "/Users/me/ws", id: "sess-42")
+        vm.openSession(projectPath: TestPaths.workspacePath("ws"), id: "sess-42")
         #expect(vm.isSwitchingSession)
         #expect(vm.messages.isEmpty)
 
@@ -443,7 +499,7 @@ struct EngineViewModelNavigatorTests {
         vm.subscribe()
         defer { vm.unsubscribe() }
 
-        vm.openSession(projectPath: "/Users/me/ws", id: "sess-42")
+        vm.openSession(projectPath: TestPaths.workspacePath("ws"), id: "sess-42")
         #expect(vm.isComposerLockedForSessionResume)
 
         vm.sendPrompt("too early")
@@ -471,7 +527,7 @@ struct EngineViewModelNavigatorTests {
         let bus = MulticastEventBus()
         let clock = FakeClock()
         let vm = EngineViewModel(engine: port, bus: bus, clock: clock, random: FakeRandomSource())
-        let project = URL(fileURLWithPath: "/Users/me/ws/cursor")
+        let project = TestPaths.workspace("ws/cursor")
         vm.projects = [
             .init(path: project.path, displayName: "Cursor", projectType: .cursorCLI),
         ]
@@ -522,12 +578,49 @@ struct EngineViewModelNavigatorTests {
         await bus.shutdown()
     }
 
+    @Test("same-project openSession on a live ACP process uses warm switch lock")
+    func openSessionOnLiveProjectUsesWarmSwitchLock() async {
+        let port = RecordingPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
+        let project = TestPaths.workspace("ws/custom-acp")
+        vm.workspace = project
+        vm.sessionID = "overview"
+        vm.dashboardURL = URL(string: "http://127.0.0.1:9/")
+        vm.projects = [
+            .init(path: project.path, displayName: "Migration", projectType: .cursorCLI),
+        ]
+        vm.projectCapabilities[project.path] = .init(
+            supportsResumableSessions: true,
+            requiresSessionHandshakeGate: true,
+            supportsOverviewDashboard: true
+        )
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        vm.openSession(projectPath: project.path, id: "file:Orders.cs")
+        #expect(vm.isWarmSessionSwitch)
+        #expect(vm.isComposerLockedForSessionHandshake)
+        #expect(vm.isComposerLockedForSessionResume)
+
+        await bus.publish(.sessionStarted(
+            sessionID: "file:Orders.cs",
+            model: "auto",
+            cwd: project
+        ))
+        await drain()
+        #expect(!vm.isComposerLockedForSessionResume)
+        #expect(!vm.isWarmSessionSwitch)
+
+        await bus.shutdown()
+    }
+
     @Test("new Cursor chat locks composer until the ACP session is ready")
     func newCursorChatLocksComposerUntilACPSessionReady() async {
         let port = RecordingPort()
         let bus = MulticastEventBus()
         let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
-        let project = URL(fileURLWithPath: "/Users/me/ws/cursor")
+        let project = TestPaths.workspace("ws/cursor")
         vm.projects = [
             .init(path: project.path, displayName: "Cursor", projectType: .cursorCLI),
         ]
@@ -572,7 +665,7 @@ struct EngineViewModelNavigatorTests {
         let port = RecordingPort()
         let bus = MulticastEventBus()
         let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
-        let project = URL(fileURLWithPath: "/Users/me/ws/cursor")
+        let project = TestPaths.workspace("ws/cursor")
         vm.projects = [
             .init(path: project.path, displayName: "Cursor", projectType: .cursorCLI),
         ]
@@ -613,7 +706,7 @@ struct EngineViewModelNavigatorTests {
         let port = RecordingPort()
         let bus = MulticastEventBus()
         let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
-        let project = URL(fileURLWithPath: "/Users/me/ws/api")
+        let project = TestPaths.workspace("ws/api")
         vm.projects = [
             .init(path: project.path, displayName: "API", projectType: .codex),
         ]
@@ -639,7 +732,7 @@ struct EngineViewModelNavigatorTests {
         let port = RecordingPort()
         let bus = MulticastEventBus()
         let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
-        let project = URL(fileURLWithPath: "/Users/me/ws/mixed")
+        let project = TestPaths.workspace("ws/mixed")
 
         await vm.prepareProjectOpen(url: project, projectType: .mixed(defaultAgent: nil))
         #expect(vm.isComposerLockedForSessionResume)
@@ -657,7 +750,7 @@ struct EngineViewModelNavigatorTests {
         vm.subscribe()
         defer { vm.unsubscribe() }
 
-        let workspace = URL(fileURLWithPath: "/Users/me/ws")
+        let workspace = TestPaths.workspace("ws")
         vm.sessionsByProject[workspace.path] = [
             SessionSummary(id: "sess-42",
                            agentID: .claudeCode,
@@ -697,12 +790,12 @@ struct EngineViewModelNavigatorTests {
         vm.subscribe()
         defer { vm.unsubscribe() }
 
-        vm.openSession(projectPath: "/Users/me/ws", id: "sess-42")
+        vm.openSession(projectPath: TestPaths.workspacePath("ws"), id: "sess-42")
         #expect(vm.isComposerLockedForSessionResume)
 
         await bus.publish(.sessionStarted(sessionID: "sess-42",
                                           model: "sonnet",
-                                          cwd: URL(fileURLWithPath: "/Users/me/ws")))
+                                          cwd: TestPaths.workspace("ws")))
         await drain()
 
         #expect(!vm.isComposerLockedForSessionResume)
@@ -719,7 +812,7 @@ struct EngineViewModelNavigatorTests {
         vm.subscribe()
         defer { vm.unsubscribe() }
 
-        vm.openSession(projectPath: "/Users/me/ws", id: "sess-42")
+        vm.openSession(projectPath: TestPaths.workspacePath("ws"), id: "sess-42")
         #expect(vm.isSwitchingSession)
         #expect(vm.isComposerLockedForSessionResume)
 
@@ -748,7 +841,7 @@ struct EngineViewModelNavigatorTests {
         vm.subscribe()
         defer { vm.unsubscribe() }
 
-        vm.openSession(projectPath: "/Users/me/ws", id: "sess-42")
+        vm.openSession(projectPath: TestPaths.workspacePath("ws"), id: "sess-42")
         #expect(vm.isComposerLockedForSessionResume)
 
         await waitForPendingSleeps(clock, count: 2)
@@ -768,7 +861,7 @@ struct EngineViewModelNavigatorTests {
         vm.subscribe()
         defer { vm.unsubscribe() }
 
-        vm.openSession(projectPath: "/Users/me/ws", id: "sess-42")
+        vm.openSession(projectPath: TestPaths.workspacePath("ws"), id: "sess-42")
         #expect(vm.isSwitchingSession)
 
         await bus.publish(.stopped(reason: .userCancel))
@@ -795,13 +888,13 @@ struct EngineViewModelNavigatorTests {
         let bus = MulticastEventBus()
         let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
         let fileSystem = InMemoryFileSystem()
-        let environment = FakeEnvironment(home: URL(fileURLWithPath: "/Users/me"))
+        let environment = FakeEnvironment(home: TestPaths.fakeHome)
         let store = WorkspaceProjectsStore(environment: environment, fileSystem: fileSystem)
         vm.workspaceProjects = store
         vm.subscribe()
         defer { vm.unsubscribe() }
 
-        let workspace = URL(fileURLWithPath: "/Users/me/ws")
+        let workspace = TestPaths.workspace("ws")
         try await vm.adoptEmptyWorkspace(workspace)
 
         await AdapterRegistry.shared.register(MockAdapter(
@@ -843,9 +936,9 @@ struct EngineViewModelNavigatorTests {
         vm.subscribe()
         defer { vm.unsubscribe() }
 
-        let cursor = URL(fileURLWithPath: "/Users/me/ws/cursor")
-        let claude = URL(fileURLWithPath: "/Users/me/ws/claude")
-        vm.workspaceRoot = URL(fileURLWithPath: "/Users/me/ws")
+        let cursor = TestPaths.workspace("ws/cursor")
+        let claude = TestPaths.workspace("ws/claude")
+        vm.workspaceRoot = TestPaths.workspace("ws")
         vm.workspace = claude
         vm.sessionID = "claude-1"
         vm.availableModels = [AgentModelOption(id: "sonnet", label: "Sonnet")]
@@ -871,13 +964,13 @@ struct EngineViewModelNavigatorTests {
         let bus = MulticastEventBus()
         let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
         let fileSystem = InMemoryFileSystem()
-        let environment = FakeEnvironment(home: URL(fileURLWithPath: "/Users/me"))
+        let environment = FakeEnvironment(home: TestPaths.fakeHome)
         let store = WorkspaceProjectsStore(environment: environment, fileSystem: fileSystem)
         vm.workspaceProjects = store
         vm.subscribe()
         defer { vm.unsubscribe() }
 
-        let workspace = URL(fileURLWithPath: "/Users/me/ws")
+        let workspace = TestPaths.workspace("ws")
         try? fileSystem.createDirectory(at: workspace, withIntermediates: true)
         try await vm.adoptEmptyWorkspace(workspace)
 
@@ -912,7 +1005,7 @@ struct EngineViewModelNavigatorTests {
         vm.subscribe()
         defer { vm.unsubscribe() }
 
-        let ws = URL(fileURLWithPath: "/Users/me/ws")
+        let ws = TestPaths.workspace("ws")
         await bus.publish(.sessionStarted(sessionID: "s1", model: nil, cwd: ws))
         await drain()
         #expect(listerCalls.count == 1)
@@ -945,7 +1038,7 @@ struct EngineViewModelNavigatorTests {
         vm.subscribe()
         defer { vm.unsubscribe() }
 
-        let project = URL(fileURLWithPath: "/Users/me/ws/api")
+        let project = TestPaths.workspace("ws/api")
         // Engine bootstrap publishes an empty session id before Codex thread/start.
         await bus.publish(.sessionStarted(sessionID: "", model: nil, cwd: project))
         await drain()
@@ -980,7 +1073,7 @@ struct EngineViewModelNavigatorTests {
         vm.subscribe()
         defer { vm.unsubscribe() }
 
-        let project = URL(fileURLWithPath: "/Users/me/ws/api")
+        let project = TestPaths.workspace("ws/api")
         await bus.publish(.sessionStarted(sessionID: "thread-1", model: nil, cwd: project))
         await drain()
         #expect(listerCalls.count == 1)
@@ -990,6 +1083,114 @@ struct EngineViewModelNavigatorTests {
         await drain()
         #expect(listerCalls.count == 2)
         #expect(vm.sessionsByProject[project.path]?.first?.id == "thread-2")
+
+        await bus.shutdown()
+    }
+
+    @Test("restartCustomACPCLI closes then cold-opens and waits for a fresh dashboard")
+    func restartCustomACPCLIRespawnsProcess() async {
+        let port = RecordingPort()
+        let bus = MulticastEventBus()
+        let clock = FakeClock()
+        let vm = EngineViewModel(engine: port, bus: bus, clock: clock, random: FakeRandomSource())
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        let customRef = CustomAgentRef(
+            id: "mig",
+            displayName: "Migrator",
+            transport: .agentClientProtocol,
+            executablePath: "/usr/bin/env",
+            arguments: ["bun", "run", "src/main.ts"]
+        )
+        let custom = WorkspaceProjectsStore.ProjectRef(
+            path: TestPaths.workspacePath("ws/mig"),
+            displayName: "mig",
+            projectType: .custom(customRef)
+        )
+        let claude = WorkspaceProjectsStore.ProjectRef(
+            path: TestPaths.workspacePath("ws/claude"),
+            displayName: "claude",
+            projectType: .claudeCode
+        )
+        vm.projects = [custom, claude]
+        vm.projectCapabilities[custom.path] = .init(
+            supportsResumableSessions: true,
+            requiresSessionHandshakeGate: true,
+            supportsOverviewDashboard: true
+        )
+        vm.dashboardURL = URL(string: "http://127.0.0.1:9/")
+        vm.dashboardTitle = "Migration Dashboard"
+        vm.messages = [.user(bubbleID: UUID(), text: "stale")]
+        vm.showsOverviewDashboard = true
+        let reviewPrompt = PermissionPrompt(toolName: "Review",
+                                            summary: "stale review",
+                                            argumentsSummary: "{}",
+                                            requestedAt: Date())
+        vm.sessionsByProject[custom.path] = [
+            SessionSummary(
+                id: "file:Orders.cs",
+                agentID: .other,
+                workspace: URL(fileURLWithPath: custom.path),
+                title: "Orders.cs",
+                lastActivity: .distantPast,
+                messageCount: 1,
+                needsAttention: true
+            ),
+        ]
+        vm.pendingPermissionsBySession["file:Orders.cs"] = reviewPrompt
+
+        #expect(vm.isCustomACPProject(custom))
+        #expect(!vm.isCustomACPProject(claude))
+
+        vm.restartCustomACPCLI(projectPath: claude.path)
+        try? await Task.sleep(for: .milliseconds(40))
+        #expect(port.commands.isEmpty)
+        #expect(vm.dashboardURL != nil)
+
+        vm.restartCustomACPCLI(projectPath: custom.path)
+        #expect(vm.isRestartingCustomACPCLI)
+        #expect(vm.dashboardURL == nil)
+        #expect(vm.showsOverviewDashboard)
+        #expect(vm.pendingPermissionsBySession.isEmpty)
+        #expect(vm.sessionsByProject[custom.path]?.allSatisfy { !$0.needsAttention } == true)
+
+        await bus.publish(.agentDashboard(url: URL(string: "http://127.0.0.1:9/")!, title: "Old Dashboard"))
+        await drain()
+        #expect(vm.isRestartingCustomACPCLI)
+        #expect(vm.dashboardURL == nil)
+
+        await waitForPendingSleeps(clock, count: 1)
+        clock.advance(by: .milliseconds(300))
+        try? await Task.sleep(for: .milliseconds(80))
+
+        let commands = port.commands
+        let closeIndex = commands.firstIndex { $0 == .closeSession }
+        let openIndex = commands.firstIndex {
+            if case .openProject(let path, let resume) = $0 {
+                return path == custom.path && resume == nil
+            }
+            return false
+        }
+        #expect(closeIndex != nil)
+        #expect(openIndex != nil)
+        if let closeIndex, let openIndex {
+            #expect(closeIndex < openIndex)
+        }
+        #expect(commands.contains {
+            if case .recordClientAction(let action) = $0 {
+                return action.detail == "Restart ACP CLI"
+            }
+            return false
+        })
+        #expect(vm.isRestartingCustomACPCLI)
+        #expect(vm.customACPRestartAwaitingDashboard)
+        #expect(vm.workspace?.path == custom.path)
+
+        await bus.publish(.agentDashboard(url: URL(string: "http://127.0.0.1:99/")!, title: "Migration Dashboard"))
+        await drain()
+        #expect(!vm.isRestartingCustomACPCLI)
+        #expect(vm.dashboardURL?.absoluteString == "http://127.0.0.1:99/")
 
         await bus.shutdown()
     }

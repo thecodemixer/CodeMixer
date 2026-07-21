@@ -68,12 +68,12 @@ public final class ClaudeCodeTwin: AgentAdapter, @unchecked Sendable {
     //
     // The twin doesn't *spawn* anything; the engine still wants a real
     // executable to run under a PTY because PTYHost owns the lifecycle. We
-    // return `/usr/bin/true` so the spawn succeeds and exits immediately,
+    // return `SystemPaths.trueBinary` so the spawn succeeds and exits immediately,
     // and the twin emits its event stream from `makeEventStream` without
     // touching the PTY.
 
     public func locateBinary(env: ResolvedEnvironment) async throws -> URL {
-        URL(fileURLWithPath: "/usr/bin/true")
+        SystemPaths.trueBinary
     }
 
     public func defaultEnvOverrides() -> [String: String] { [:] }

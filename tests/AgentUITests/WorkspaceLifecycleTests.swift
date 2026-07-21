@@ -12,7 +12,7 @@ struct WorkspaceLifecycleTests {
     @Test("openEmptyWorkspace marks active, sets root, and warms with no projects")
     func openEmptyWorkspaceWarmsWithoutProjects() async throws {
         let (vm, bus, store, fileSystem, _) = makeHarness()
-        let folder = URL(fileURLWithPath: "/Users/me/ws-empty")
+        let folder = TestPaths.workspace("ws-empty")
         try fileSystem.createDirectory(at: folder, withIntermediates: true)
 
         try await WorkspaceLifecycle(model: vm).openEmptyWorkspace(folder)
@@ -28,7 +28,7 @@ struct WorkspaceLifecycleTests {
     @Test("loadModelCatalogs warms only adapters present in the workspace")
     func loadModelCatalogsWarmsWorkspaceAdapters() async throws {
         let (vm, bus, store, fileSystem, _) = makeHarness()
-        let folder = URL(fileURLWithPath: "/Users/me/ws-claude")
+        let folder = TestPaths.workspace("ws-claude")
         try fileSystem.createDirectory(at: folder, withIntermediates: true)
         _ = try await store.createProject(name: "api", projectType: .claudeCode, in: folder)
 
@@ -55,7 +55,7 @@ struct WorkspaceLifecycleTests {
     @Test("ensureModels for a new project type loads that adapter catalog")
     func ensureModelsForNewProjectType() async throws {
         let (vm, bus, store, fileSystem, _) = makeHarness()
-        let folder = URL(fileURLWithPath: "/Users/me/ws-add")
+        let folder = TestPaths.workspace("ws-add")
         try fileSystem.createDirectory(at: folder, withIntermediates: true)
         try await WorkspaceLifecycle(model: vm).openEmptyWorkspace(folder)
 
@@ -78,7 +78,7 @@ struct WorkspaceLifecycleTests {
     @Test("ensureModels for mixed requires every shipping adapter catalog")
     func ensureModelsForMixedRequiresAllShipping() async throws {
         let (vm, bus, _, _, _) = makeHarness()
-        vm.workspaceRoot = URL(fileURLWithPath: "/Users/me/ws")
+        vm.workspaceRoot = TestPaths.workspace("ws")
 
         // Replace whatever prior suites left in the shared registry with a
         // incomplete set (empty Codex catalog) so ensure must fail.
@@ -119,7 +119,7 @@ struct WorkspaceLifecycleTests {
     @Test("Claude-style manual catalog loads from workspace cache without probing")
     func manualCatalogPrefersWorkspaceCache() async throws {
         let (vm, bus, store, fileSystem, _) = makeHarness()
-        let folder = URL(fileURLWithPath: "/Users/me/ws-claude-cache")
+        let folder = TestPaths.workspace("ws-claude-cache")
         try fileSystem.createDirectory(at: folder, withIntermediates: true)
         _ = try await store.createProject(name: "api", projectType: .claudeCode, in: folder)
 
@@ -152,7 +152,7 @@ struct WorkspaceLifecycleTests {
     @Test("automatic catalog with fresh disk cache skips probe")
     func automaticFreshDiskCacheSkipsProbe() async throws {
         let (vm, bus, store, fileSystem, clock) = makeHarness()
-        let folder = URL(fileURLWithPath: "/Users/me/ws-auto-fresh")
+        let folder = TestPaths.workspace("ws-auto-fresh")
         try fileSystem.createDirectory(at: folder, withIntermediates: true)
         _ = try await store.createProject(name: "api", projectType: .cursorCLI, in: folder)
 
@@ -182,7 +182,7 @@ struct WorkspaceLifecycleTests {
     @Test("automatic catalog with stale disk cache re-probes")
     func automaticStaleDiskCacheReprobes() async throws {
         let (vm, bus, store, fileSystem, clock) = makeHarness()
-        let folder = URL(fileURLWithPath: "/Users/me/ws-auto-stale")
+        let folder = TestPaths.workspace("ws-auto-stale")
         try fileSystem.createDirectory(at: folder, withIntermediates: true)
         _ = try await store.createProject(name: "api", projectType: .cursorCLI, in: folder)
 
@@ -215,7 +215,7 @@ struct WorkspaceLifecycleTests {
     @Test("automatic catalog with nil refreshedAt re-probes")
     func automaticNilRefreshedAtReprobes() async throws {
         let (vm, bus, store, fileSystem, _) = makeHarness()
-        let folder = URL(fileURLWithPath: "/Users/me/ws-auto-nil")
+        let folder = TestPaths.workspace("ws-auto-nil")
         try fileSystem.createDirectory(at: folder, withIntermediates: true)
         _ = try await store.createProject(name: "api", projectType: .codex, in: folder)
 
@@ -248,7 +248,7 @@ struct WorkspaceLifecycleTests {
     @Test("empty automatic probe retains prior disk cache")
     func emptyAutomaticProbeRetainsCache() async throws {
         let (vm, bus, store, fileSystem, clock) = makeHarness()
-        let folder = URL(fileURLWithPath: "/Users/me/ws-auto-retain")
+        let folder = TestPaths.workspace("ws-auto-retain")
         try fileSystem.createDirectory(at: folder, withIntermediates: true)
         _ = try await store.createProject(name: "api", projectType: .cursorCLI, in: folder)
 
@@ -286,7 +286,7 @@ struct WorkspaceLifecycleTests {
     @Test("throwing automatic probe retains prior disk cache and warns")
     func throwingAutomaticProbeRetainsCache() async throws {
         let (vm, bus, store, fileSystem, clock) = makeHarness()
-        let folder = URL(fileURLWithPath: "/Users/me/ws-auto-throw")
+        let folder = TestPaths.workspace("ws-auto-throw")
         try fileSystem.createDirectory(at: folder, withIntermediates: true)
         _ = try await store.createProject(name: "api", projectType: .cursorCLI, in: folder)
 
@@ -335,7 +335,7 @@ private func makeHarness() -> (
 ) {
     let bus = MulticastEventBus()
     let fileSystem = InMemoryFileSystem()
-    let environment = FakeEnvironment(home: URL(fileURLWithPath: "/Users/me"))
+    let environment = FakeEnvironment(home: TestPaths.fakeHome)
     let store = WorkspaceProjectsStore(environment: environment, fileSystem: fileSystem)
     let clock = FakeClock()
     let vm = EngineViewModel(

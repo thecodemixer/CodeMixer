@@ -10,7 +10,7 @@ import AgentTestSupport
 struct CustomACPAdapterTests {
 
     private func sampleRef(id: String = "migration-assistant",
-                           path: String = "/usr/local/bin/migration-acp") -> CustomAgentRef {
+                           path: String = SystemPaths.binary(in: SystemPaths.usrLocalBin, named: "migration-acp").path) -> CustomAgentRef {
         CustomAgentRef(
             id: id,
             displayName: "Migration Assistant",
@@ -34,7 +34,7 @@ struct CustomACPAdapterTests {
     func argv() {
         let adapter = CustomACPAdapter(ref: sampleRef(path: "/opt/tools/migration-acp"))
         let argv = adapter.buildLaunchArgv(context: LaunchContext(
-            workspace: URL(fileURLWithPath: "/tmp"),
+            workspace: TestPaths.temporaryRoot,
             permissionMode: .default
         ))
         #expect(argv == ["migration-acp", "acp"])
@@ -43,14 +43,14 @@ struct CustomACPAdapterTests {
     @Test("binary locator prefers CODEMIXER_CUSTOM_ACP_BIN")
     func locatorOverride() throws {
         let fs = InMemoryFileSystem()
-        let override = URL(fileURLWithPath: "/tmp/custom-acp-bin")
+        let override = TestPaths.underTemporary("custom-acp-bin", isDirectory: false)
         try fs.writeAtomically(Data(), to: override)
         let env = FakeEnvironment(
             processEnv: [
                 "CODEMIXER_CUSTOM_ACP_BIN": override.path,
                 "PATH": "/usr/bin",
             ],
-            home: URL(fileURLWithPath: "/tmp/home", isDirectory: true)
+            home: TestPaths.underTemporary("home")
         )
         let locator = CustomACPBinaryLocator(
             executablePath: "/missing/migration-acp",
@@ -60,9 +60,9 @@ struct CustomACPAdapterTests {
         )
         let resolved = ResolvedEnvironment(
             variables: env.processEnvironment(),
-            shell: URL(fileURLWithPath: "/bin/zsh")
+            shell: SystemPaths.zsh
         )
-        #expect(try locator.locate(env: resolved) == override)
+        #expect(try locator.locate(env: resolved).resolvingSymlinksInPath() == override.resolvingSymlinksInPath())
     }
 
     @Test("binary locator finds basename on PATH when absolute path is missing")
@@ -72,7 +72,7 @@ struct CustomACPAdapterTests {
         try fs.writeAtomically(Data(), to: onPath)
         let env = FakeEnvironment(
             processEnv: ["PATH": "/opt/bin:/usr/bin"],
-            home: URL(fileURLWithPath: "/tmp/home", isDirectory: true)
+            home: TestPaths.underTemporary("home")
         )
         let locator = CustomACPBinaryLocator(
             executablePath: "migration-acp",
@@ -82,7 +82,7 @@ struct CustomACPAdapterTests {
         )
         let resolved = ResolvedEnvironment(
             variables: env.processEnvironment(),
-            shell: URL(fileURLWithPath: "/bin/zsh")
+            shell: SystemPaths.zsh
         )
         #expect(try locator.locate(env: resolved) == onPath)
     }
@@ -137,14 +137,14 @@ struct CustomACPAdapterTests {
     @Test("cached factory adapter surfaces modes after session/new (composer refresh)")
     func factoryModesVisibleAfterSessionNew() async throws {
         let factory = CustomACPAdapterFactory()
-        let ref = sampleRef(id: "composer-refresh", path: "/usr/bin/true")
+        let ref = sampleRef(id: "composer-refresh", path: SystemPaths.trueBinary.path)
         guard let adapter = factory.makeAdapter(for: ref) as? CustomACPAdapter else {
             Issue.record("expected CustomACPAdapter")
             return
         }
         #expect(adapter.availableAgentModes().isEmpty)
 
-        let workspace = URL(fileURLWithPath: "/tmp/custom-composer-ws")
+        let workspace = TestPaths.underTemporary("custom-composer-ws")
         let (outputBytes, outputContinuation) = AsyncStream<Data>.makeStream()
         let inputs = AgentInputs(
             outputBytes: outputBytes,
@@ -193,7 +193,7 @@ struct CustomACPAdapterTests {
 
     @Test("encodeCommand remaps /document slash to session/set_mode after session modes load")
     func encodeDocumentModeWire() async throws {
-        let ref = sampleRef(id: "wire-test", path: "/usr/bin/true")
+        let ref = sampleRef(id: "wire-test", path: SystemPaths.trueBinary.path)
         let adapter = CustomACPAdapter(
             ref: ref,
             environment: FakeEnvironment(),
@@ -201,7 +201,7 @@ struct CustomACPAdapterTests {
             clock: FakeClock(),
             random: FakeRandomSource()
         )
-        let workspace = URL(fileURLWithPath: "/tmp/custom-wire-ws")
+        let workspace = TestPaths.underTemporary("custom-wire-ws")
         let (outputBytes, outputContinuation) = AsyncStream<Data>.makeStream()
         let inputs = AgentInputs(
             outputBytes: outputBytes,

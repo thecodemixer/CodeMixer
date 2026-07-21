@@ -14,7 +14,7 @@ struct ACPSessionIndexTests {
         let fs = InMemoryFileSystem()
         let clock = FakeClock()
         let index = ACPSessionIndex(environment: env, fileSystem: fs, clock: clock)
-        let workspace = URL(fileURLWithPath: "/tmp/acp-ws")
+        let workspace = TestPaths.underTemporary("acp-ws")
         await index.recordSession(
             id: "s1",
             customAgentID: "cursor",
@@ -48,7 +48,7 @@ struct ACPSessionIndexTests {
         let env = FakeEnvironment()
         let fs = InMemoryFileSystem()
         let clock = FakeClock()
-        let workspace = URL(fileURLWithPath: "/tmp/acp-ws")
+        let workspace = TestPaths.underTemporary("acp-ws")
         let first = ACPSessionIndex(environment: env, fileSystem: fs, clock: clock)
         await first.recordSession(
             id: "persisted",
@@ -67,11 +67,80 @@ struct ACPSessionIndexTests {
         let fs = InMemoryFileSystem()
         let clock = FakeClock()
         let index = ACPSessionIndex(environment: env, fileSystem: fs, clock: clock)
-        let workspace = URL(fileURLWithPath: "/tmp/acp-ws")
+        let workspace = TestPaths.underTemporary("acp-ws")
         await index.recordSession(id: "old", customAgentID: "cursor", workspace: workspace, title: "Old")
         clock.advance(by: .seconds(30))
         await index.recordSession(id: "new", customAgentID: "cursor", workspace: workspace, title: "New")
         let summaries = await index.summaries(workspace: workspace, customAgentID: "cursor")
         #expect(summaries.map(\.id) == ["new", "old"])
+    }
+
+    @Test("recordSession preserves overview and attention flags across list merges")
+    func recordSessionPreservesOverviewFlags() async {
+        let env = FakeEnvironment()
+        let fs = InMemoryFileSystem()
+        let clock = FakeClock()
+        let index = ACPSessionIndex(environment: env, fileSystem: fs, clock: clock)
+        let workspace = TestPaths.underTemporary("acp-ws")
+        await index.recordSession(
+            id: "control",
+            customAgentID: "cursor",
+            workspace: workspace,
+            title: "Migration Dashboard"
+        )
+        await index.setIsOverview(
+            sessionID: "control",
+            customAgentID: "cursor",
+            isOverview: true,
+            overviewURL: URL(string: "http://127.0.0.1:9/")
+        )
+        await index.setNeedsAttention(sessionID: "control", customAgentID: "cursor", needsAttention: true)
+        await index.recordSession(
+            id: "control",
+            customAgentID: "cursor",
+            workspace: workspace,
+            title: "Migration Dashboard"
+        )
+        let summaries = await index.summaries(workspace: workspace, customAgentID: "cursor")
+        let control = summaries.first { $0.id == "control" }
+        #expect(control?.isOverview == true)
+        #expect(control?.needsAttention == true)
+        #expect(control?.overviewURL?.absoluteString == "http://127.0.0.1:9/")
+    }
+
+    @Test("setIsOverview keeps a single overview and archives same-title controls")
+    func setIsOverviewDedupesControls() async {
+        let env = FakeEnvironment()
+        let fs = InMemoryFileSystem()
+        let clock = FakeClock()
+        let index = ACPSessionIndex(environment: env, fileSystem: fs, clock: clock)
+        let workspace = TestPaths.underTemporary("acp-ws")
+        await index.recordSession(
+            id: "old",
+            customAgentID: "cursor",
+            workspace: workspace,
+            title: "Migration Dashboard"
+        )
+        await index.setIsOverview(
+            sessionID: "old",
+            customAgentID: "cursor",
+            isOverview: true,
+            overviewURL: URL(string: "http://127.0.0.1:8/")
+        )
+        await index.recordSession(
+            id: "new",
+            customAgentID: "cursor",
+            workspace: workspace,
+            title: "Migration Dashboard"
+        )
+        await index.setIsOverview(
+            sessionID: "new",
+            customAgentID: "cursor",
+            isOverview: true,
+            overviewURL: URL(string: "http://127.0.0.1:9/")
+        )
+        let summaries = await index.summaries(workspace: workspace, customAgentID: "cursor")
+        #expect(summaries.map(\.id) == ["new"])
+        #expect(summaries.first?.isOverview == true)
     }
 }

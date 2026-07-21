@@ -26,6 +26,17 @@ public final class UserNotificationBridge {
         notifications.post(title: title, body: body)
     }
 
+    static func notificationContent(for event: AgentEvent) -> NotificationContent? {
+        switch event {
+        case .statusPhraseChanged(let source, let phrase) where source == .hookHint:
+            NotificationContent(title: AppIdentity.displayName, body: phrase)
+        case .sessionAttentionChanged(_, let title, let needsAttention) where needsAttention:
+            NotificationContent(title: AppIdentity.displayName, body: "\(title) needs human review")
+        default:
+            nil
+        }
+    }
+
     /// Convenience: tail a bus and route notifications/bells.
     public func tail(bus: MulticastEventBus) async {
         let sub = await bus.subscribe()
@@ -33,11 +44,16 @@ public final class UserNotificationBridge {
             switch entry.event {
             case .bell:
                 bell()
-            case .statusPhraseChanged(let source, let phrase) where source == .hookHint:
-                notify(title: "Claude", body: phrase)
             default:
-                break
+                if let content = Self.notificationContent(for: entry.event) {
+                    notify(title: content.title, body: content.body)
+                }
             }
         }
+    }
+
+    struct NotificationContent: Equatable {
+        let title: String
+        let body: String
     }
 }

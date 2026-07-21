@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import AgentTestSupport
 @testable import AgentCore
 
 @Suite("GitDiffEngine — unified-diff parsing")
@@ -7,7 +8,7 @@ struct GitDiffEngineParsingTests {
 
     @Test("Single hunk with mixed additions, deletions, and context")
     func parsesMixedHunk() {
-        let engine = GitDiffEngine(workspace: URL(fileURLWithPath: "/tmp"))
+        let engine = GitDiffEngine(workspace: TestPaths.temporaryRoot)
         let raw = [
             "diff --git a/foo.swift b/foo.swift",
             "index 1111..2222 100644",
@@ -32,7 +33,7 @@ struct GitDiffEngineParsingTests {
 
     @Test("Two hunks are split at @@ boundaries")
     func parsesTwoHunks() {
-        let engine = GitDiffEngine(workspace: URL(fileURLWithPath: "/tmp"))
+        let engine = GitDiffEngine(workspace: TestPaths.temporaryRoot)
         let raw = """
         @@ -1,1 +1,1 @@
         -a
@@ -47,7 +48,7 @@ struct GitDiffEngineParsingTests {
 
     @Test("Hunk ids are stable across parses")
     func hunkIDsAreStable() {
-        let engine = GitDiffEngine(workspace: URL(fileURLWithPath: "/tmp"))
+        let engine = GitDiffEngine(workspace: TestPaths.temporaryRoot)
         let raw = """
         @@ -1,1 +1,1 @@
         -a
@@ -60,7 +61,7 @@ struct GitDiffEngineParsingTests {
 
     @Test("No-hunk diff returns empty hunks and zero counters")
     func noHunksYieldsEmptyDiff() {
-        let engine = GitDiffEngine(workspace: URL(fileURLWithPath: "/tmp"))
+        let engine = GitDiffEngine(workspace: TestPaths.temporaryRoot)
         let raw = """
         diff --git a/foo.swift b/foo.swift
         index 1111..2222 100644
@@ -75,7 +76,7 @@ struct GitDiffEngineParsingTests {
 
     @Test("Parses hunk headers that omit an explicit length")
     func parsesSingleLineHeaderRanges() {
-        let engine = GitDiffEngine(workspace: URL(fileURLWithPath: "/tmp"))
+        let engine = GitDiffEngine(workspace: TestPaths.temporaryRoot)
         let raw = """
         @@ -7 +7 @@
         -before
@@ -93,7 +94,7 @@ struct GitDiffEngineParsingTests {
 
     @Test("Ignores no-newline sentinel marker in unified diff body")
     func ignoresNoNewlineSentinel() {
-        let engine = GitDiffEngine(workspace: URL(fileURLWithPath: "/tmp"))
+        let engine = GitDiffEngine(workspace: TestPaths.temporaryRoot)
         let raw = """
         @@ -1,2 +1,2 @@
         -old
@@ -112,7 +113,7 @@ struct GitDiffEngineParsingTests {
 
     @Test("Handles new-file style ranges with zero old-length")
     func parsesZeroLengthOldRange() {
-        let engine = GitDiffEngine(workspace: URL(fileURLWithPath: "/tmp"))
+        let engine = GitDiffEngine(workspace: TestPaths.temporaryRoot)
         let raw = """
         @@ -0,0 +1,3 @@
         +a

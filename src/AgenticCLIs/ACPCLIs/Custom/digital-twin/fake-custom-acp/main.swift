@@ -49,15 +49,11 @@ private struct FakeCustomACPServer {
     var workspacePath: String?
     var pendingPromptID: JSONValue?
     var currentModeID = "migrate"
+    var sentReverseSessionNew = false
 
     init(scenario: ACPTwinScenario) {
         self.scenario = scenario
-        switch scenario {
-        case .auth, .authFail:
-            authenticated = false
-        case .text, .permission, .fsRead, .resume:
-            authenticated = true
-        }
+        authenticated = scenario.isPreAuthenticated
     }
 
     mutating func handle(_ incoming: ACPIncoming) -> [Data] {
@@ -91,7 +87,7 @@ private struct FakeCustomACPServer {
             workspacePath = params["cwd"]?.stringValue
             sessionID = UUID().uuidString
             currentModeID = "migrate"
-            return [ACPRPCCodec.response(
+            var replies: [Data] = [ACPRPCCodec.response(
                 id: id,
                 result: .object([
                     "sessionId": .string(sessionID),
@@ -99,6 +95,11 @@ private struct FakeCustomACPServer {
                     "models": modelsPayload(),
                 ])
             )]
+            if scenario == .dashboard, !sentReverseSessionNew {
+                sentReverseSessionNew = true
+                replies.append(reverseSessionNewRequest())
+            }
+            return replies
         case "session/load", "session/resume":
             workspacePath = params["cwd"]?.stringValue
             if let resume = params["sessionId"]?.stringValue {
@@ -134,7 +135,23 @@ private struct FakeCustomACPServer {
             pendingPromptID = id
             switch scenario {
             case .permission:
-                return [permissionRequest(id: .number(9001))]
+                return [permissionRequest(id: .number(9001), backgroundSessionID: nil)]
+            case .backgroundPermission:
+                return [permissionRequest(id: .number(9001), backgroundSessionID: "bg-session")]
+            case .dashboard:
+                return [
+                    sessionInfoUpdate(meta: [
+                        "needsAttention": .bool(true),
+                        "archived": .bool(false),
+                        "codemixer.dev/overviewSession": .bool(true),
+                    ]),
+                ] + completePrompt(reply: Self.defaultReply)
+            case .degradedArchived:
+                return [
+                    sessionInfoUpdate(meta: [
+                        "archived": .bool(true),
+                    ]),
+                ] + completePrompt(reply: Self.defaultReply)
             case .fsRead:
                 let path = (workspacePath ?? "/tmp").appending("/probe.txt")
                 return [ACPRPCCodec.request(
@@ -142,7 +159,7 @@ private struct FakeCustomACPServer {
                     method: "fs/read_text_file",
                     params: .object(["path": .string(path)])
                 )]
-            case .text, .auth, .authFail, .resume:
+            case .text, .auth, .authFail, .resume, .degradedNoDashboard:
                 return completePrompt(reply: Self.defaultReply)
             }
         default:
@@ -214,6 +231,12 @@ private struct FakeCustomACPServer {
                 "title": .string("Fake Custom ACP"),
             ]),
         ]
+        if scenario.advertisesDashboard {
+            result["_meta"] = .object([
+                "codemixer.dev/dashboardUrl": .string("http://127.0.0.1:8423/dashboard"),
+                "codemixer.dev/dashboardTitle": .string("Fake Migration Dashboard"),
+            ])
+        }
         if scenario == .auth || scenario == .authFail, !authenticated {
             result["authMethods"] = .array([
                 .object([
@@ -227,18 +250,56 @@ private struct FakeCustomACPServer {
         return [ACPRPCCodec.response(id: id, result: .object(result))]
     }
 
-    private func permissionRequest(id: JSONValue) -> Data {
-        ACPRPCCodec.request(
+    private func permissionRequest(id: JSONValue, backgroundSessionID: String?) -> Data {
+        var params: [String: JSONValue] = [
+            "options": .array([
+                .object([
+                    "kind": .string("allow_once"),
+                    "optionId": .string("allow-once"),
+                    "name": .string("Allow once"),
+                ]),
+                .object([
+                    "kind": .string("reject_once"),
+                    "optionId": .string("reject-once"),
+                    "name": .string("Reject"),
+                ]),
+            ]),
+            "toolCall": .object([
+                "title": .string("Shell"),
+                "kind": .string("execute"),
+            ]),
+        ]
+        if let backgroundSessionID {
+            params["sessionId"] = .string(backgroundSessionID)
+        }
+        return ACPRPCCodec.request(
             id: id,
             method: "session/request_permission",
+            params: .object(params)
+        )
+    }
+
+    private func reverseSessionNewRequest() -> Data {
+        ACPRPCCodec.request(
+            id: .number(9100),
+            method: "session/new",
             params: .object([
-                "options": .array([
-                    .object(["kind": .string("allow_once"), "optionId": .string("allow-once")]),
-                    .object(["kind": .string("reject_once"), "optionId": .string("reject-once")]),
-                ]),
-                "toolCall": .object([
-                    "title": .string("Shell"),
-                    "kind": .string("execute"),
+                "sessionId": .string("agent-created-session"),
+                "title": .string("Agent session"),
+                "cwd": .string(workspacePath ?? "/tmp"),
+            ])
+        )
+    }
+
+    private func sessionInfoUpdate(meta: [String: JSONValue]) -> Data {
+        ACPRPCCodec.notification(
+            method: "session/update",
+            params: .object([
+                "sessionId": .string(sessionID),
+                "update": .object([
+                    "sessionUpdate": .string("session_info_update"),
+                    "title": .string("Updated session"),
+                    "_meta": .object(meta),
                 ]),
             ])
         )

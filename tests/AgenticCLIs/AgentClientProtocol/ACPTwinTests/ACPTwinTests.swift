@@ -17,7 +17,7 @@ struct ACPTwinTests {
             outputBytes: stream,
             terminal: nil,
             hookSocket: nil,
-            workspace: URL(fileURLWithPath: "/tmp/acp-twin"),
+            workspace: TestPaths.underTemporary("acp-twin"),
             sessionID: AsyncStream { $0.finish() }
         ))
         var collected: [AgentEvent] = []
@@ -43,7 +43,7 @@ struct ACPTwinTests {
             outputBytes: stream,
             terminal: nil,
             hookSocket: nil,
-            workspace: URL(fileURLWithPath: "/tmp/acp-twin"),
+            workspace: TestPaths.underTemporary("acp-twin"),
             sessionID: AsyncStream { $0.finish() }
         ))
         var collected: [AgentEvent] = []
@@ -60,7 +60,7 @@ struct ACPTwinTests {
     func encoding() {
         let twin = ACPTwin()
         let context = LaunchContext(
-            workspace: URL(fileURLWithPath: "/tmp/acp-twin"),
+            workspace: TestPaths.underTemporary("acp-twin"),
             permissionMode: .default
         )
         let bootstrap = String(decoding: twin.sessionBootstrapBytes(context: context), as: UTF8.self)
@@ -73,7 +73,7 @@ struct ACPTwinTests {
     func newSessionCommand() {
         let twin = ACPTwin()
         _ = twin.sessionBootstrapBytes(context: LaunchContext(
-            workspace: URL(fileURLWithPath: "/tmp/acp-twin"),
+            workspace: TestPaths.underTemporary("acp-twin"),
             permissionMode: .default
         ))
         let text = String(decoding: twin.encodeCommand(.newSession)!, as: UTF8.self)
@@ -83,7 +83,7 @@ struct ACPTwinTests {
     @Test("listResumableSessions returns configured twin session")
     func sessions() async {
         let twin = ACPTwin()
-        let sessions = await twin.listResumableSessions(workspace: URL(fileURLWithPath: "/tmp"))
+        let sessions = await twin.listResumableSessions(workspace: TestPaths.temporaryRoot)
         #expect(sessions.contains { $0.id == "acp-twin-session" })
     }
 }

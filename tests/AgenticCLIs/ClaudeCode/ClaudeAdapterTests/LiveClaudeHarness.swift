@@ -2,6 +2,7 @@ import Foundation
 import AgentCore
 import AgentProtocol
 import ClaudeCode
+import AgentTestSupport
 
 /// Opt-in harness for driving the production `ClaudeAdapter` + `AgentEngine`
 /// path against a logged-in `claude` binary (interactive PTY billing — no `-p`).
@@ -113,7 +114,7 @@ struct LiveClaudeHarness {
                                         resumeSessionID: String? = nil) -> Bool {
         let adapter = ClaudeAdapter()
         let context = LaunchContext(
-            workspace: URL(fileURLWithPath: "/tmp/codemixer-live"),
+            workspace: TestPaths.underTemporary("codemixer-live"),
             resumeSessionID: resumeSessionID,
             permissionMode: permissionMode
         )
@@ -301,7 +302,7 @@ struct LiveClaudeHarness {
 
     private static func locateClaudeBinary(environment: any AgentEnvironment,
                                            fileSystem: any FileSystem) -> URL? {
-        let shell = URL(fileURLWithPath: environment.processEnvironment()["SHELL"] ?? "/bin/zsh")
+        let shell = URL(fileURLWithPath: environment.processEnvironment()["SHELL"] ?? SystemPaths.zsh.path)
         let resolved = ResolvedEnvironment(variables: environment.processEnvironment(), shell: shell)
         return try? ClaudeBinaryLocator(fileSystem: fileSystem).locate(env: resolved)
     }

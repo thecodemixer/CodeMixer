@@ -234,6 +234,9 @@ extension AgentEngine {
             return
         }
 
+        if resumeSessionID != nil {
+            log.notice("cold openProject after warm miss session=\(resumeSessionID ?? "", privacy: .public)")
+        }
         await shutdown(reason: .userCancel)
         try await start(adapter: nextAdapter,
                         workspace: projectURL,
@@ -245,15 +248,39 @@ extension AgentEngine {
     private func tryWarmResume(projectURL: URL,
                                resumeSessionID: String,
                                nextAdapter: any AgentAdapter) async -> Bool {
-        guard case .running = state else { return false }
-        guard let live = adapter, live.id == nextAdapter.id else { return false }
-        guard live.capabilities.contains(.sessionHandshakeGate) else { return false }
+        guard case .running = state else {
+            await recordWarmMiss(reason: "engine not running", sessionID: resumeSessionID)
+            return false
+        }
+        guard let live = adapter else {
+            await recordWarmMiss(reason: "no live adapter", sessionID: resumeSessionID)
+            return false
+        }
+        // Custom ACP adapters all use AgentID.other — prefer instance identity when
+        // both sides are class instances so a cache-miss adapter cannot block warm.
+        let sameAdapter: Bool = {
+            if let liveObj = live as AnyObject?, let nextObj = nextAdapter as AnyObject? {
+                return liveObj === nextObj || live.id == nextAdapter.id
+            }
+            return live.id == nextAdapter.id
+        }()
+        guard sameAdapter else {
+            await recordWarmMiss(reason: "adapter mismatch live=\(live.id.rawValue) next=\(nextAdapter.id.rawValue)",
+                                 sessionID: resumeSessionID)
+            return false
+        }
+        guard live.capabilities.contains(.sessionHandshakeGate) else {
+            await recordWarmMiss(reason: "adapter lacks sessionHandshakeGate", sessionID: resumeSessionID)
+            return false
+        }
         guard let currentWorkspace = workspace,
-              currentWorkspace.standardizedFileURL.path == projectURL.path else {
+              Self.sameWorkspacePath(currentWorkspace, projectURL) else {
+            await recordWarmMiss(reason: "workspace path mismatch", sessionID: resumeSessionID)
             return false
         }
         guard let bytes = live.encodeResumeSession(sessionID: resumeSessionID),
               !bytes.isEmpty else {
+            await recordWarmMiss(reason: "encodeResumeSession empty", sessionID: resumeSessionID)
             return false
         }
         transcript = []
@@ -279,6 +306,23 @@ extension AgentEngine {
             )
             return false
         }
+    }
+
+    private func recordWarmMiss(reason: String, sessionID: String) async {
+        await SilentDiagnostics.shared.record(
+            kind: .other,
+            owner: "AgentEngine",
+            summary: "warm session/load skipped; cold open",
+            details: "\(reason) session=\(sessionID)"
+        )
+    }
+
+    /// `standardizedFileURL` does not resolve symlinks (`/var` vs `/private/var`).
+    private static func sameWorkspacePath(_ a: URL, _ b: URL) -> Bool {
+        let aStd = a.standardizedFileURL.path
+        let bStd = b.standardizedFileURL.path
+        if aStd == bStd { return true }
+        return a.resolvingSymlinksInPath().path == b.resolvingSymlinksInPath().path
     }
 
     private func sessionAgentID(for resumeSessionID: String?,

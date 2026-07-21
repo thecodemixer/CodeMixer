@@ -82,8 +82,9 @@ extension EngineViewModel {
         case .allow: label = "Allow"
         case .allowAlways: label = "Allow Always"
         case .deny: label = "Deny"
+        case .option(let id): label = id
         }
-        pendingPermission = nil
+        clearPendingPermission(id: id)
         recordAndSend(
             ClientAction(
                 id: random.uuid(),

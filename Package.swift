@@ -101,7 +101,8 @@ let package = Package(
             name: "AgentUI",
             dependencies: ["AgentCore"],
             path: "src/AgentUI",
-            swiftSettings: swiftSettings
+            swiftSettings: swiftSettings,
+            linkerSettings: [.linkedFramework("WebKit")]
         ),
         .target(
             name: "AgentTestSupport",

@@ -10,7 +10,7 @@ import AgentTestSupport
 @Suite("WorkspaceProjectsStore — projects model + persistence")
 struct WorkspaceProjectsStoreTests {
 
-    private let workspace = URL(fileURLWithPath: "/Users/me/ws")
+    private let workspace = TestPaths.workspace("ws")
 
     @Test("projects(for:) seeds the workspace root as the default project")
     func seedsRoot() async {

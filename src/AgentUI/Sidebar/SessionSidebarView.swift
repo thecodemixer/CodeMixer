@@ -126,20 +126,33 @@ public struct SessionSidebarView: View {
 
     private func railProjectButton(_ project: WorkspaceProjectsStore.ProjectRef) -> some View {
         let isCurrent = model.workspace?.path == project.path
+        let attention = attentionSessionCount(for: project.path)
         return Button { model.selectProject(path: project.path) } label: {
-            Image(systemName: "folder")
-                .accessibilityHidden(true)
-                .imageScale(.medium)
-                .foregroundStyle(isCurrent ? Theme.text.primary : Theme.text.tertiary)
-                .frame(width: Theme.spacing.s32, height: Theme.spacing.s32)
-                .background(
-                    RoundedRectangle(cornerRadius: Theme.corner.small, style: .continuous)
-                        .fill(isCurrent ? Theme.surface.bubbleUser : Color.clear)
-                )
+            ZStack(alignment: .topTrailing) {
+                Image(systemName: "folder")
+                    .accessibilityHidden(true)
+                    .imageScale(.medium)
+                    .foregroundStyle(isCurrent ? Theme.text.primary : Theme.text.tertiary)
+                    .frame(width: Theme.spacing.s32, height: Theme.spacing.s32)
+                    .background(
+                        RoundedRectangle(cornerRadius: Theme.corner.small, style: .continuous)
+                            .fill(isCurrent ? Theme.surface.bubbleUser : Color.clear)
+                    )
+                if attention > 0 {
+                    Circle()
+                        .fill(Theme.signal.warning)
+                        .frame(width: Theme.spacing.s8, height: Theme.spacing.s8)
+                        .accessibilityHidden(true)
+                }
+            }
         }
         .buttonStyle(.plain)
         .help("Select \(project.displayName)")
-        .accessibilityLabel("Select project \(project.displayName)")
+        .accessibilityLabel(
+            attention > 0
+                ? "Select project \(project.displayName), \(attention) sessions need attention"
+                : "Select project \(project.displayName)"
+        )
         .accessibilityAddTraits(isCurrent ? [.isSelected] : [])
     }
 
@@ -177,8 +190,13 @@ public struct SessionSidebarView: View {
         let isExpanded = expandedProjects.contains(project.path)
         VStack(alignment: .leading, spacing: Theme.spacing.s4) {
             projectRow(project, isExpanded: isExpanded)
-            if isExpanded && model.supportsResumableSessions(for: project) {
-                sessionRows(for: project)
+            if isExpanded {
+                if model.supportsOverviewDashboard(forProjectPath: project.path) {
+                    overviewRow(for: project)
+                }
+                if model.supportsResumableSessions(for: project) {
+                    sessionRows(for: project)
+                }
             }
         }
         .padding(.top, Theme.spacing.s4)
@@ -188,18 +206,26 @@ public struct SessionSidebarView: View {
                             isExpanded: Bool) -> some View {
         let isHovering = hoveredProjectPath == project.path
         let isCurrent = model.workspace?.path == project.path
+        let attention = attentionSessionCount(for: project.path)
         return HStack(spacing: Theme.spacing.s8) {
             Text(project.displayName)
                 .font(Theme.typography.caption)
                 .fontWeight(.semibold)
                 .foregroundStyle(isCurrent ? Theme.text.primary : Theme.text.secondary)
                 .lineLimit(1)
-            Text(project.projectType.shortLabel)
-                .font(Theme.typography.caption)
-                .foregroundStyle(Theme.text.tertiary)
-                .padding(.horizontal, Theme.spacing.s4)
-                .background(Theme.surface.bubble, in: .capsule)
+            // Custom ACP projects already identify themselves by name; the type
+            // capsule (agent displayName) is redundant next to the title.
+            if !model.isCustomACPProject(project) {
+                Text(project.projectType.shortLabel)
+                    .font(Theme.typography.caption)
+                    .foregroundStyle(Theme.text.tertiary)
+                    .padding(.horizontal, Theme.spacing.s4)
+                    .background(Theme.surface.bubble, in: .capsule)
+            }
             Spacer(minLength: 0)
+            if attention > 0 {
+                attentionCountBadge(attention)
+            }
             Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                 .font(Theme.typography.iconSmall)
                 .foregroundStyle(Theme.text.tertiary)
@@ -213,8 +239,12 @@ public struct SessionSidebarView: View {
         .background(selectionWash(isCurrent: isCurrent))
         .onTapGesture { handleProjectTap(project) }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Project \(project.displayName)")
-        .accessibilityHint(isCurrent ? "Current project" : "Select project")
+        .accessibilityLabel(
+            attention > 0
+                ? "Project \(project.displayName), \(attention) sessions need attention"
+                : "Project \(project.displayName)"
+        )
+        .accessibilityHint(isExpanded ? "Collapse project" : "Expand project")
         .accessibilityAddTraits(isCurrent ? [.isSelected] : [])
         .onHover { hovering in
             hoveredProjectPath = hovering ? project.path : nil
@@ -222,6 +252,12 @@ public struct SessionSidebarView: View {
         .contextMenu {
             Button("New Chat") { model.newChat(in: project.path) }
             Button("Reveal in Finder") { revealInFinder(project.path) }
+            if model.isCustomACPProject(project) {
+                Button("Restart ACP CLI") {
+                    model.restartCustomACPCLI(projectPath: project.path)
+                }
+                .accessibilityLabel("Restart ACP CLI")
+            }
             Divider()
             if canRenameProject(project) {
                 Button("Rename…") { beginRename(project) }
@@ -254,6 +290,61 @@ public struct SessionSidebarView: View {
         }
     }
 
+    private func overviewRow(for project: WorkspaceProjectsStore.ProjectRef) -> some View {
+        let title = overviewTitle(for: project)
+        let isCurrent = model.workspace?.path == project.path && model.showsOverviewDashboard
+        let attention = attentionSessionCount(for: project.path)
+        return Button {
+            model.openOverview(projectPath: project.path)
+        } label: {
+            HStack(spacing: Theme.spacing.s8) {
+                Image(systemName: "rectangle.grid.2x2")
+                    .imageScale(.small)
+                    .foregroundStyle(isCurrent ? Theme.text.primary : Theme.text.secondary)
+                    .accessibilityHidden(true)
+                Text(title)
+                    .font(Theme.typography.body)
+                    .foregroundStyle(isCurrent ? Theme.text.primary : Theme.text.secondary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                if attention > 0 {
+                    attentionCountBadge(attention)
+                }
+            }
+            .contentShape(Rectangle())
+            .padding(.vertical, Theme.spacing.s4)
+            .padding(.horizontal, Theme.spacing.s8)
+            .background(selectionWash(isCurrent: isCurrent))
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            attention > 0
+                ? "\(title), \(attention) sessions need attention"
+                : title
+        )
+        .accessibilityAddTraits(isCurrent ? [.isSelected] : [])
+        .contextMenu {
+            Button("Open") { model.openOverview(projectPath: project.path) }
+        }
+    }
+
+    private func attentionCountBadge(_ count: Int) -> some View {
+        Text("\(count)")
+            .font(Theme.typography.caption)
+            .foregroundStyle(Theme.text.primary)
+            .padding(.horizontal, Theme.spacing.s4)
+            .padding(.vertical, Theme.corner.hairline)
+            .background(Theme.signal.warning.opacity(0.35), in: Capsule())
+            .accessibilityLabel("\(count) sessions need attention")
+    }
+
+    private func attentionSessionCount(for projectPath: String) -> Int {
+        (model.sessionsByProject[projectPath] ?? [])
+            .filter { $0.needsAttention && !$0.isOverview }
+            .count
+    }
+
     private func sessionRow(_ session: SessionSummary, projectPath: String) -> some View {
         let isCurrent = model.isCurrentSession(projectPath: projectPath, sessionID: session.id)
         return Button {
@@ -273,6 +364,12 @@ public struct SessionSidebarView: View {
                         .lineLimit(1)
                 }
                 Spacer(minLength: 0)
+                if session.needsAttention {
+                    Circle()
+                        .fill(Theme.signal.warning)
+                        .frame(width: 8, height: 8)
+                        .accessibilityLabel("Needs attention")
+                }
             }
             .contentShape(Rectangle())
             .padding(.vertical, Theme.spacing.s4)
@@ -327,26 +424,40 @@ public struct SessionSidebarView: View {
     private func handleProjectTap(_ project: WorkspaceProjectsStore.ProjectRef) {
         let isCurrent = model.workspace?.path == project.path
         let isExpanded = expandedProjects.contains(project.path)
+        let isOverviewCapable = model.supportsOverviewDashboard(forProjectPath: project.path)
         let animation = Theme.motion.resolve(Theme.motion.changing, reduceMotion: reduceMotion)
         withAnimation(animation) {
-            if isCurrent && isExpanded {
+            if isExpanded {
                 expandedProjects.remove(project.path)
             } else {
                 expandedProjects.insert(project.path)
-                if model.supportsResumableSessions(for: project) {
+                if model.supportsResumableSessions(for: project)
+                    || model.supportsOverviewDashboard(forProjectPath: project.path) {
                     model.loadSessions(for: project.path)
                 }
             }
         }
-        if !isCurrent {
+        if !isOverviewCapable, !isCurrent {
             model.selectProject(path: project.path)
         }
     }
 
     private func filteredSessions(for projectPath: String) -> [SessionSummary] {
-        let all = model.sessionsByProject[projectPath] ?? []
-        guard !searchText.isEmpty else { return all }
-        return all.filter { $0.title.localizedCaseInsensitiveContains(searchText) }
+        let chats = SessionNavigatorFiltering.chatSessions(
+            from: model.sessionsByProject[projectPath] ?? [],
+            dashboardTitle: model.dashboardTitle
+        )
+        guard !searchText.isEmpty else { return chats }
+        return chats.filter { $0.title.localizedCaseInsensitiveContains(searchText) }
+    }
+
+    private func overviewTitle(for project: WorkspaceProjectsStore.ProjectRef) -> String {
+        if model.workspace?.path == project.path,
+           let title = model.dashboardTitle,
+           !title.isEmpty {
+            return title
+        }
+        return project.displayName
     }
 
     private func beginRename(_ project: WorkspaceProjectsStore.ProjectRef) {

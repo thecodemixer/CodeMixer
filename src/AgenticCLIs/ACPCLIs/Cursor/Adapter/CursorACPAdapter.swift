@@ -43,7 +43,7 @@ public final class CursorACPAdapter: AgentAdapter {
                 id: "cursor",
                 displayName: "Cursor",
                 transport: .agentClientProtocol,
-                executablePath: "/usr/bin/false",
+                executablePath: SystemPaths.falseBinary.path,
                 arguments: ["acp"]
             ),
             environment: environment,

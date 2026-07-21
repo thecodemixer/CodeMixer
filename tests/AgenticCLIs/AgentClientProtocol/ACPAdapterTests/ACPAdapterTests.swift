@@ -25,7 +25,7 @@ struct ACPAdapterTests {
     func bootstrapInitializeOnly() throws {
         let adapter = makeAdapter()
         let context = LaunchContext(
-            workspace: URL(fileURLWithPath: "/tmp/acp-ws"),
+            workspace: TestPaths.underTemporary("acp-ws"),
             permissionMode: .default
         )
         let data = adapter.sessionBootstrapBytes(context: context)
@@ -46,7 +46,7 @@ struct ACPAdapterTests {
     func cancel() {
         let adapter = makeAdapter()
         let context = LaunchContext(
-            workspace: URL(fileURLWithPath: "/tmp/acp-ws"),
+            workspace: TestPaths.underTemporary("acp-ws"),
             permissionMode: .default
         )
         _ = adapter.sessionBootstrapBytes(context: context)
@@ -74,14 +74,14 @@ struct ACPAdapterTests {
             id: "gemini",
             displayName: "Gemini",
             transport: .agentClientProtocol,
-            executablePath: "/usr/bin/true",
+            executablePath: SystemPaths.trueBinary.path,
             arguments: []
         )
         let stdio = CustomAgentRef(
             id: "other",
             displayName: "Other",
             transport: .stdioJSONRPC,
-            executablePath: "/usr/bin/true",
+            executablePath: SystemPaths.trueBinary.path,
             arguments: []
         )
         #expect(await CustomAgentAdapterFactories.shared.makeAdapter(for: acp) != nil)
@@ -95,7 +95,7 @@ struct ACPAdapterTests {
         let clock = FakeClock()
         let state = ACPClientState()
         let context = LaunchContext(
-            workspace: URL(fileURLWithPath: "/tmp/acp-ws"),
+            workspace: TestPaths.underTemporary("acp-ws"),
             permissionMode: .default
         )
         _ = ACPInputEncoding.bootstrap(
@@ -113,11 +113,11 @@ struct ACPAdapterTests {
                 clock: clock
             ),
             fileAccess: ACPFileAccess(
-                workspace: URL(fileURLWithPath: "/tmp/acp-ws"),
+                workspace: TestPaths.underTemporary("acp-ws"),
                 fileSystem: fs
             ),
             terminals: ACPTerminalSession(
-                workspace: URL(fileURLWithPath: "/tmp/acp-ws"),
+                workspace: TestPaths.underTemporary("acp-ws"),
                 random: SystemRandomSource()
             ),
             clock: clock,
@@ -147,7 +147,7 @@ struct ACPAdapterTests {
         let clock = FakeClock()
         let state = ACPClientState()
         let context = LaunchContext(
-            workspace: URL(fileURLWithPath: "/tmp/acp-ws"),
+            workspace: TestPaths.underTemporary("acp-ws"),
             permissionMode: .default
         )
         _ = ACPInputEncoding.bootstrap(
@@ -164,11 +164,11 @@ struct ACPAdapterTests {
                 clock: clock
             ),
             fileAccess: ACPFileAccess(
-                workspace: URL(fileURLWithPath: "/tmp/acp-ws"),
+                workspace: TestPaths.underTemporary("acp-ws"),
                 fileSystem: fs
             ),
             terminals: ACPTerminalSession(
-                workspace: URL(fileURLWithPath: "/tmp/acp-ws"),
+                workspace: TestPaths.underTemporary("acp-ws"),
                 random: SystemRandomSource()
             ),
             clock: clock,
@@ -203,7 +203,7 @@ struct ACPAdapterTests {
         let clock = FakeClock()
         let state = ACPClientState()
         let context = LaunchContext(
-            workspace: URL(fileURLWithPath: "/tmp/acp-ws"),
+            workspace: TestPaths.underTemporary("acp-ws"),
             permissionMode: .default
         )
         _ = ACPInputEncoding.bootstrap(
@@ -220,11 +220,11 @@ struct ACPAdapterTests {
                 clock: clock
             ),
             fileAccess: ACPFileAccess(
-                workspace: URL(fileURLWithPath: "/tmp/acp-ws"),
+                workspace: TestPaths.underTemporary("acp-ws"),
                 fileSystem: fs
             ),
             terminals: ACPTerminalSession(
-                workspace: URL(fileURLWithPath: "/tmp/acp-ws"),
+                workspace: TestPaths.underTemporary("acp-ws"),
                 random: SystemRandomSource()
             ),
             clock: clock,
@@ -251,7 +251,7 @@ struct ACPAdapterTests {
         let random = SystemRandomSource()
         let state = ACPClientState()
         let context = LaunchContext(
-            workspace: URL(fileURLWithPath: "/tmp/acp-ws"),
+            workspace: TestPaths.underTemporary("acp-ws"),
             permissionMode: .default
         )
         _ = ACPInputEncoding.bootstrap(
@@ -268,11 +268,11 @@ struct ACPAdapterTests {
                 clock: clock
             ),
             fileAccess: ACPFileAccess(
-                workspace: URL(fileURLWithPath: "/tmp/acp-ws"),
+                workspace: TestPaths.underTemporary("acp-ws"),
                 fileSystem: fs
             ),
             terminals: ACPTerminalSession(
-                workspace: URL(fileURLWithPath: "/tmp/acp-ws"),
+                workspace: TestPaths.underTemporary("acp-ws"),
                 random: random
             ),
             clock: clock,
@@ -318,7 +318,7 @@ struct ACPAdapterTests {
         let random = FakeRandomSource(uuids: [firstID, secondID])
         let state = ACPClientState()
         let context = LaunchContext(
-            workspace: URL(fileURLWithPath: "/tmp/acp-ws"),
+            workspace: TestPaths.underTemporary("acp-ws"),
             permissionMode: .default
         )
         _ = ACPInputEncoding.bootstrap(
@@ -335,11 +335,11 @@ struct ACPAdapterTests {
                 clock: clock
             ),
             fileAccess: ACPFileAccess(
-                workspace: URL(fileURLWithPath: "/tmp/acp-ws"),
+                workspace: TestPaths.underTemporary("acp-ws"),
                 fileSystem: fs
             ),
             terminals: ACPTerminalSession(
-                workspace: URL(fileURLWithPath: "/tmp/acp-ws"),
+                workspace: TestPaths.underTemporary("acp-ws"),
                 random: random
             ),
             clock: clock,
@@ -380,7 +380,7 @@ struct ACPAdapterTests {
         let state = ACPClientState()
         _ = ACPInputEncoding.bootstrap(
             context: LaunchContext(
-                workspace: URL(fileURLWithPath: "/tmp/acp-ws"),
+                workspace: TestPaths.underTemporary("acp-ws"),
                 permissionMode: .default
             ),
             state: state,
@@ -395,11 +395,11 @@ struct ACPAdapterTests {
                 clock: clock
             ),
             fileAccess: ACPFileAccess(
-                workspace: URL(fileURLWithPath: "/tmp/acp-ws"),
+                workspace: TestPaths.underTemporary("acp-ws"),
                 fileSystem: fs
             ),
             terminals: ACPTerminalSession(
-                workspace: URL(fileURLWithPath: "/tmp/acp-ws"),
+                workspace: TestPaths.underTemporary("acp-ws"),
                 random: random
             ),
             clock: clock,
@@ -450,7 +450,7 @@ struct ACPAdapterTests {
     func fsSandbox() async {
         let fs = InMemoryFileSystem()
         let access = ACPFileAccess(
-            workspace: URL(fileURLWithPath: "/tmp/acp-ws"),
+            workspace: TestPaths.underTemporary("acp-ws"),
             fileSystem: fs
         )
         let batch = await access.read(
@@ -467,7 +467,7 @@ struct ACPAdapterTests {
         let fs = InMemoryFileSystem()
         let clock = FakeClock()
         let index = ACPSessionIndex(environment: env, fileSystem: fs, clock: clock)
-        let workspace = URL(fileURLWithPath: "/tmp/acp-ws")
+        let workspace = TestPaths.underTemporary("acp-ws")
         await index.recordSession(
             id: "s1",
             customAgentID: "gemini",
@@ -548,7 +548,7 @@ struct ACPAdapterTests {
     func encodeCustomCommand() {
         let twin = ACPTwin()
         _ = twin.sessionBootstrapBytes(context: LaunchContext(
-            workspace: URL(fileURLWithPath: "/tmp/acp-ws"),
+            workspace: TestPaths.underTemporary("acp-ws"),
             permissionMode: .default
         ))
         let text = String(decoding: twin.encodeUserPrompt("/review src"), as: UTF8.self)
@@ -560,10 +560,10 @@ struct ACPAdapterTests {
     func transportFactory() async throws {
         #expect(AgentTransportDescriptor.agentClientProtocol.kind == .agentClientProtocol)
         let launch = AgentTransportLaunchSpec(
-            executable: URL(fileURLWithPath: "/usr/bin/true"),
+            executable: SystemPaths.trueBinary,
             arguments: [],
             environment: ProcessInfo.processInfo.environment,
-            workingDirectory: URL(fileURLWithPath: "/tmp")
+            workingDirectory: TestPaths.temporaryRoot
         )
         let transport = try LiveAgentTransportFactory.make(
             descriptor: .agentClientProtocol,
@@ -578,7 +578,7 @@ struct ACPAdapterTests {
         let adapter = acpAdapter(executablePath: "/tmp/missing-acp-agent")
         do {
             _ = try await adapter.locateBinary(
-                env: ResolvedEnvironment(variables: [:], shell: URL(fileURLWithPath: "/bin/zsh"))
+                env: ResolvedEnvironment(variables: [:], shell: SystemPaths.zsh)
             )
             Issue.record("expected binaryNotFound")
         } catch let error as AgentError {
@@ -602,7 +602,7 @@ struct ACPAdapterTests {
     func encodeNewSession() {
         let adapter = makeAdapter()
         let context = LaunchContext(
-            workspace: URL(fileURLWithPath: "/tmp/acp-ws"),
+            workspace: TestPaths.underTemporary("acp-ws"),
             permissionMode: .default
         )
         _ = adapter.sessionBootstrapBytes(context: context)
@@ -613,7 +613,7 @@ struct ACPAdapterTests {
     @Test("encodeCommand selectModel emits session/set_model")
     func encodeSelectModel() {
         let state = ACPClientState()
-        let workspace = URL(fileURLWithPath: "/tmp/acp-ws")
+        let workspace = TestPaths.underTemporary("acp-ws")
         _ = ACPInputEncoding.bootstrap(
             context: LaunchContext(workspace: workspace, permissionMode: .default),
             state: state,
@@ -632,11 +632,11 @@ struct ACPAdapterTests {
             id: "cursor",
             displayName: "Cursor",
             transport: .agentClientProtocol,
-            executablePath: "/Users/me/.local/bin/cursor-agent",
+            executablePath: TestPaths.fakeHome.appendingPathComponent(".local/bin/cursor-agent").path,
             arguments: ["acp"]
         ))
         let argv = adapter.buildLaunchArgv(context: LaunchContext(
-            workspace: URL(fileURLWithPath: "/tmp/acp-ws"),
+            workspace: TestPaths.underTemporary("acp-ws"),
             permissionMode: .default
         ))
         #expect(argv == ["cursor-agent", "acp"])
@@ -646,7 +646,7 @@ struct ACPAdapterTests {
     func encodeSlashCommand() {
         let adapter = makeAdapter()
         let context = LaunchContext(
-            workspace: URL(fileURLWithPath: "/tmp/acp-ws"),
+            workspace: TestPaths.underTemporary("acp-ws"),
             permissionMode: .default
         )
         _ = adapter.sessionBootstrapBytes(context: context)
@@ -660,7 +660,7 @@ struct ACPAdapterTests {
     @Test("listResumableSessions is empty before any session is recorded")
     func listResumableSessionsEmpty() async {
         let adapter = makeAdapter()
-        let sessions = await adapter.listResumableSessions(workspace: URL(fileURLWithPath: "/tmp/acp-ws"))
+        let sessions = await adapter.listResumableSessions(workspace: TestPaths.underTemporary("acp-ws"))
         #expect(sessions.isEmpty)
     }
 
@@ -668,7 +668,7 @@ struct ACPAdapterTests {
     func encodePermissionResponse() {
         let adapter = makeAdapter()
         let context = LaunchContext(
-            workspace: URL(fileURLWithPath: "/tmp/acp-ws"),
+            workspace: TestPaths.underTemporary("acp-ws"),
             permissionMode: .default
         )
         _ = adapter.sessionBootstrapBytes(context: context)
@@ -726,7 +726,7 @@ struct ACPAdapterTests {
             id: "test",
             displayName: "Test ACP",
             transport: .agentClientProtocol,
-            executablePath: "/usr/bin/true",
+            executablePath: SystemPaths.trueBinary.path,
             arguments: ["--acp"]
         ))
     }

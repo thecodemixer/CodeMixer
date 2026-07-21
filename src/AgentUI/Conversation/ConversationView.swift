@@ -15,6 +15,10 @@ public struct ConversationView: View {
     @State private var matchIndices: [Int] = []
     @State private var currentMatchIndex: Int = 0
 
+    /// Explicit follow gate — user scroll pauses; Resume (or send / session
+    /// switch) restores. No proximity-based re-engage.
+    @State private var autoScroll = ConversationAutoScrollController()
+
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public init(model: EngineViewModel,
@@ -37,6 +41,16 @@ public struct ConversationView: View {
                     onDismiss: { searchVisible = false; searchQuery = "" }
                 )
                 .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
+            if showsLoadedTranscriptBanner {
+                loadedTranscriptBanner
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
+            if autoScroll.showsPausedBanner, !isConversationEmpty {
+                pausedScrollBanner
+                    .transition(.move(edge: .top).combined(with: .opacity))
             }
 
             if isConversationEmpty {
@@ -81,17 +95,31 @@ public struct ConversationView: View {
                     // and centers the column when it is wider.
                     .frame(maxWidth: Theme.layout.messageMaxWidth)
                     .frame(maxWidth: .infinity, alignment: .center)
+                    .background {
+                        ScrollActivityObserver(controller: autoScroll)
+                            .accessibilityHidden(true)
+                    }
                 }
                 .background(Theme.surface.canvas)
                 .onChange(of: model.messages.last?.id) { _, latest in
                     guard latest != nil, !searchVisible else { return }
-                    scrollToConversationEnd(proxy: proxy)
+                    // Sending a prompt is deliberate engagement with the live
+                    // turn — restore follow so the new message is visible.
+                    if isLastMessageFromUser {
+                        resumeFollowing(proxy: proxy)
+                        return
+                    }
+                    guard autoScroll.isFollowing else { return }
+                    scrollToConversationEnd(proxy: proxy, animated: true)
                 }
                 // Follow growing prose/thoughts while the ForEach id stays stable.
                 .onChange(of: model.messages.last?.textContent) { _, _ in
                     guard !searchVisible,
-                          model.messages.last?.id != nil else { return }
-                    scrollToConversationEnd(proxy: proxy)
+                          model.messages.last?.id != nil,
+                          autoScroll.isFollowing else { return }
+                    // Unanimated: streaming tokens arrive often; animating each
+                    // jump floods live-scroll notifications and fights the user.
+                    scrollToConversationEnd(proxy: proxy, animated: false)
                 }
                 .onChange(of: searchQuery) { _, q in
                     runSearch(q)
@@ -100,12 +128,25 @@ public struct ConversationView: View {
                 .onChange(of: currentMatchIndex) { _, _ in
                     scrollToCurrentMatch(proxy: proxy)
                 }
+                .onChange(of: autoScroll.isFollowing) { wasFollowing, isFollowing in
+                    // Resume button (and any other deliberate restore) lands at
+                    // the live end once follow flips back on.
+                    guard !wasFollowing, isFollowing, !searchVisible else { return }
+                    scrollToConversationEnd(proxy: proxy, animated: true)
+                }
             }
             }
         }
         .background(Theme.surface.canvas)
         .animation(Theme.motion.resolve(Theme.motion.changing, reduceMotion: reduceMotion),
                    value: isConversationEmpty)
+        .animation(Theme.motion.resolve(Theme.motion.changing, reduceMotion: reduceMotion),
+                   value: autoScroll.isFollowing)
+        // Switching sessions unmounts the scroll view — reset follow on the
+        // always-mounted parent so the new session lands at the bottom.
+        .onChange(of: model.sessionID) { _, _ in
+            autoScroll.resetForNewSession()
+        }
         .onKeyPress(.escape) {
             if searchVisible { searchVisible = false; searchQuery = "" }
             return .handled
@@ -113,6 +154,76 @@ public struct ConversationView: View {
     }
 
     // MARK: - View builder
+
+    private var showsLoadedTranscriptBanner: Bool {
+        guard let sessionID = model.sessionID else { return false }
+        return model.cachedTranscriptLoadedSessionID == sessionID
+    }
+
+    private var loadedTranscriptBanner: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Theme.spacing.s8) {
+            Image(systemName: "doc.text.magnifyingglass")
+                .foregroundStyle(Theme.signal.info)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: Theme.spacing.s4) {
+                Text("Loaded transcript")
+                    .font(Theme.typography.label)
+                    .foregroundStyle(Theme.text.primary)
+                Text("The ACP agent no longer has this live session; showing Codemixer's cached history.")
+                    .font(Theme.typography.caption)
+                    .foregroundStyle(Theme.text.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, Theme.spacing.s12)
+        .padding(.vertical, Theme.spacing.s8)
+        .frame(maxWidth: Theme.layout.messageMaxWidth)
+        .background(Theme.signal.info.opacity(Theme.opacity.faint),
+                    in: RoundedRectangle(cornerRadius: Theme.corner.medium, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.corner.medium, style: .continuous)
+                .stroke(Theme.signal.info.opacity(Theme.opacity.muted),
+                        lineWidth: Theme.stroke.standard)
+        )
+        .padding(.horizontal, Theme.spacing.s16)
+        .padding(.top, Theme.spacing.s12)
+        .padding(.bottom, Theme.spacing.s4)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Loaded transcript. Showing Codemixer cached history because the ACP agent no longer has this live session.")
+    }
+
+    private var pausedScrollBanner: some View {
+        HStack(spacing: Theme.spacing.s8) {
+            Image(systemName: "hand.raised")
+                .foregroundStyle(Theme.signal.info)
+                .accessibilityHidden(true)
+            Text("Auto-scroll paused")
+                .font(Theme.typography.label)
+                .foregroundStyle(Theme.text.primary)
+            Spacer(minLength: 0)
+            Button("Resume scrolling") {
+                autoScroll.resume()
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .accessibilityLabel("Resume scrolling")
+            .accessibilityHint("Jump to the latest message and follow new replies")
+        }
+        .padding(.horizontal, Theme.spacing.s12)
+        .padding(.vertical, Theme.spacing.s8)
+        .frame(maxWidth: Theme.layout.messageMaxWidth)
+        .background(Theme.signal.info.opacity(Theme.opacity.faint),
+                    in: RoundedRectangle(cornerRadius: Theme.corner.medium, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.corner.medium, style: .continuous)
+                .stroke(Theme.signal.info.opacity(Theme.opacity.muted),
+                        lineWidth: Theme.stroke.standard)
+        )
+        .padding(.horizontal, Theme.spacing.s16)
+        .padding(.top, Theme.spacing.s12)
+        .padding(.bottom, Theme.spacing.s4)
+        .accessibilityElement(children: .contain)
+    }
 
     @ViewBuilder
     private func view(for message: EngineViewModel.Message,
@@ -240,16 +351,32 @@ public struct ConversationView: View {
         guard !matchIndices.isEmpty else { return }
         let msgIdx = matchIndices[min(currentMatchIndex, matchIndices.count - 1)]
         let id = model.messages[msgIdx].id
+        autoScroll.beginProgrammaticScroll()
         withAnimation(Theme.motion.gentle) { proxy.scrollTo(id, anchor: .center) }
     }
 
-    private func scrollToConversationEnd(proxy: ScrollViewProxy) {
-        let motion = Theme.motion.resolve(Theme.motion.gentle, reduceMotion: reduceMotion)
-        if let motion {
-            withAnimation(motion) { proxy.scrollTo(ConversationScrollTarget.bottom, anchor: .bottom) }
+    // MARK: - Scroll-follow
+
+    private func scrollToConversationEnd(proxy: ScrollViewProxy, animated: Bool) {
+        autoScroll.beginProgrammaticScroll()
+        if animated,
+           let motion = Theme.motion.resolve(Theme.motion.gentle, reduceMotion: reduceMotion) {
+            withAnimation(motion) {
+                proxy.scrollTo(ConversationScrollTarget.bottom, anchor: .bottom)
+            }
         } else {
             proxy.scrollTo(ConversationScrollTarget.bottom, anchor: .bottom)
         }
+    }
+
+    private func resumeFollowing(proxy: ScrollViewProxy) {
+        autoScroll.resume()
+        scrollToConversationEnd(proxy: proxy, animated: true)
+    }
+
+    private var isLastMessageFromUser: Bool {
+        if case .user = model.messages.last { return true }
+        return false
     }
 }
 
@@ -270,4 +397,3 @@ private enum ConversationScrollTarget: Hashable {
         .preferredColorScheme(.dark)
 }
 #endif
-

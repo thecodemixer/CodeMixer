@@ -2,6 +2,7 @@ import Foundation
 import AgentCore
 import AgentProtocol
 import Codex
+import AgentTestSupport
 
 /// Opt-in harness for driving the production `CodexAdapter` + `AgentEngine`
 /// path against a logged-in `codex` binary (`codex app-server --stdio`).
@@ -90,7 +91,7 @@ struct LiveCodexHarness {
     /// Confirms the adapter stays on the App Server stdio transport path.
     static func launchArgvIsAppServerStdio() -> Bool {
         let adapter = CodexAdapter()
-        let context = LaunchContext(workspace: URL(fileURLWithPath: "/tmp/codemixer-live-codex"))
+        let context = LaunchContext(workspace: TestPaths.underTemporary("codemixer-live-codex"))
         let argv = adapter.buildLaunchArgv(context: context)
         return argv == ["codex", "app-server", "--stdio"]
     }
@@ -165,7 +166,7 @@ struct LiveCodexHarness {
 
     private static func locateCodexBinary(environment: any AgentEnvironment,
                                         fileSystem: any FileSystem) -> URL? {
-        let shell = URL(fileURLWithPath: environment.processEnvironment()["SHELL"] ?? "/bin/zsh")
+        let shell = URL(fileURLWithPath: environment.processEnvironment()["SHELL"] ?? SystemPaths.zsh.path)
         let resolved = ResolvedEnvironment(variables: environment.processEnvironment(), shell: shell)
         return try? CodexBinaryLocator(environment: environment, fileSystem: fileSystem).locate(env: resolved)
     }

@@ -237,7 +237,8 @@ swift build --product fake-acp
 ```
 
 Scenarios are selected with `CODEMIXER_TWIN_SCENARIO` (`text`, `permission`,
-`fsRead`, `auth`, `authFail`, `resume`).
+`fsRead`, `auth`, `authFail`, `resume`, `dashboard`, `backgroundPermission`,
+`degradedNoDashboard`, `degradedArchived`).
 
 ```bash
 # Always-on unit coverage
@@ -322,6 +323,14 @@ swift test --no-parallel --filter CustomACPCLI
 # Live Custom ACP (any ACP stdio binary)
 CODEMIXER_LIVE_CUSTOM_ACP=1 CODEMIXER_LIVE_ACP_BIN=/path/to/agent \
   swift test --no-parallel --filter LiveCustomACPIntegrationTests
+
+# Live migration-acp through Codemixer Custom ACP (dashboard + file sessions +
+# attention + planner/implementer/dual-review/fixer). Requires authenticated
+# cursor-agent; takes tens of minutes.
+CODEMIXER_LIVE_CUSTOM_ACP=1 \
+  CODEMIXER_LIVE_ACP_BIN=$PWD/migration-tool/dist/migration-acp \
+  CODEMIXER_LIVE_MIGRATION_PIPELINE=1 \
+  swift test --no-parallel --filter liveMigrationReflection
 ```
 
 `fake-custom-acp` is a project-tool flavored twin (`migrate` / `document` / `agent`
@@ -331,3 +340,4 @@ modes; reply `Hello from fake-custom-acp.`). It is distinct from `fake-acp`
 | --- | --- | --- |
 | `CODEMIXER_LIVE_CUSTOM_ACP=1` | Yes (live) | Opt in |
 | `CODEMIXER_LIVE_ACP_BIN` / `CODEMIXER_CUSTOM_ACP_BIN` | Yes (live) | ACP executable path |
+| `CODEMIXER_LIVE_MIGRATION_PIPELINE=1` | For migration reflection | Opt in to the multi-file Codemixer reflection suite |

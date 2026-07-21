@@ -50,7 +50,11 @@ public actor ACPProjectSessionStore: ACPSessionIndexing {
             title: title.flatMap { $0.isEmpty ? nil : $0 } ?? existing?.title ?? id,
             lastActivity: clock.now(),
             messageCount: existing?.messageCount ?? 0,
-            turns: existing?.turns ?? []
+            turns: existing?.turns ?? [],
+            archived: existing?.archived,
+            needsAttention: existing?.needsAttention,
+            isOverview: existing?.isOverview,
+            overviewURL: existing?.overviewURL
         )
         await persist()
     }
@@ -124,7 +128,11 @@ public actor ACPProjectSessionStore: ACPSessionIndexing {
         await ensureRoot(workspace)
         let path = workspace.standardizedFileURL.path
         return entries.values
-            .filter { $0.workspacePath == path && $0.customAgentID == customAgentID }
+            .filter {
+                $0.workspacePath == path
+                    && $0.customAgentID == customAgentID
+                    && $0.archived != true
+            }
             .map {
                 SessionSummary(
                     id: $0.id,
@@ -132,10 +140,78 @@ public actor ACPProjectSessionStore: ACPSessionIndexing {
                     workspace: workspace,
                     title: $0.title,
                     lastActivity: $0.lastActivity,
-                    messageCount: $0.messageCount
+                    messageCount: $0.messageCount,
+                    needsAttention: $0.needsAttention == true,
+                    isOverview: $0.isOverview == true,
+                    overviewURL: $0.overviewURL.flatMap(URL.init(string:))
                 )
             }
             .sorted { $0.lastActivity > $1.lastActivity }
+    }
+
+    public func setArchived(sessionID: String, customAgentID: String, archived: Bool) async {
+        await ensureRootIfPossible()
+        let key = ACPSessionStoreCodec.key(customAgentID: customAgentID, sessionID: sessionID)
+        guard var entry = entries[key] else { return }
+        entry.archived = archived
+        if archived {
+            entry.needsAttention = false
+        }
+        entries[key] = entry
+        await persist()
+    }
+
+    public func setNeedsAttention(sessionID: String, customAgentID: String, needsAttention: Bool) async {
+        await ensureRootIfPossible()
+        let key = ACPSessionStoreCodec.key(customAgentID: customAgentID, sessionID: sessionID)
+        guard var entry = entries[key] else { return }
+        entry.needsAttention = needsAttention
+        entries[key] = entry
+        await persist()
+    }
+
+    public func setIsOverview(sessionID: String,
+                              customAgentID: String,
+                              isOverview: Bool,
+                              overviewURL: URL?) async {
+        await ensureRootIfPossible()
+        let key = ACPSessionStoreCodec.key(customAgentID: customAgentID, sessionID: sessionID)
+        guard var entry = entries[key] else { return }
+        if isOverview {
+            // One overview per project — demote/archive stale control chats so the
+            // sidebar does not show two "Migration Dashboard" rows after relaunch.
+            for (otherKey, var other) in entries where otherKey != key {
+                guard other.customAgentID == customAgentID,
+                      other.workspacePath == entry.workspacePath else { continue }
+                var changed = false
+                if other.isOverview == true {
+                    other.isOverview = false
+                    other.overviewURL = nil
+                    changed = true
+                }
+                if other.title == entry.title {
+                    other.archived = true
+                    changed = true
+                }
+                if changed {
+                    entries[otherKey] = other
+                }
+            }
+        }
+        entry.isOverview = isOverview
+        if let overviewURL {
+            entry.overviewURL = overviewURL.absoluteString
+        }
+        entries[key] = entry
+        await persist()
+    }
+
+    private func ensureRootIfPossible() async {
+        if let root = projectRoot {
+            await ensureRoot(root)
+        } else {
+            await loadIfNeeded()
+        }
     }
 
     private func appendTurn(sessionID: String,
@@ -145,7 +221,17 @@ public actor ACPProjectSessionStore: ACPSessionIndexing {
         guard let root = projectRoot else { return }
         await ensureRoot(root)
         let key = ACPSessionStoreCodec.key(customAgentID: customAgentID, sessionID: sessionID)
-        guard var entry = entries[key] else { return }
+        // Foreign stream cache / reverse session races can append before
+        // `recordSession` lands — mint a minimal entry so turns are not dropped.
+        var entry = entries[key] ?? ACPSessionStoreCodec.Entry(
+            id: sessionID,
+            customAgentID: customAgentID,
+            workspacePath: root.path,
+            title: titleFromUserText.map { String($0.prefix(80)) } ?? sessionID,
+            lastActivity: clock.now(),
+            messageCount: 0,
+            turns: []
+        )
         entry.turns.append(turn)
         let beforeTrimCount = entry.turns.count
         entry.turns = ACPSessionStoreCodec.trimmedTurns(entry.turns)

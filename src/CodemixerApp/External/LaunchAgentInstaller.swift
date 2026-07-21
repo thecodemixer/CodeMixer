@@ -65,7 +65,7 @@ actor LaunchAgentInstaller {
            fileSystem.fileExists(at: appSibling) {
             return appSibling.path
         }
-        return "/usr/local/bin/codemixerd"
+        return SystemPaths.binary(in: SystemPaths.usrLocalBin, named: "codemixerd").path
     }
 
     private var plistText: String {

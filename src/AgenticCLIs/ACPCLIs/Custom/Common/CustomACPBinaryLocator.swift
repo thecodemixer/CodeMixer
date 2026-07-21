@@ -45,8 +45,8 @@ public struct CustomACPBinaryLocator: Sendable {
             let home = environment.homeDirectory
             candidates.append(contentsOf: [
                 home.appendingPathComponent(".local/bin/\(basename)"),
-                URL(fileURLWithPath: "/opt/homebrew/bin/\(basename)"),
-                URL(fileURLWithPath: "/usr/local/bin/\(basename)"),
+                SystemPaths.binary(in: SystemPaths.homebrewBin, named: basename),
+                SystemPaths.binary(in: SystemPaths.usrLocalBin, named: basename),
             ])
         }
 

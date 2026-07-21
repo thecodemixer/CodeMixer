@@ -122,7 +122,7 @@ struct FakeACPIntegrationTests {
     @Test("adapter permission response writes ACP selected outcome bytes")
     func adapterPermissionRoundTrip() async throws {
         let adapter = acpAdapter()
-        let workspace = URL(fileURLWithPath: "/tmp/acp-perm")
+        let workspace = TestPaths.underTemporary("acp-perm")
         let (outputBytes, outputContinuation) = AsyncStream<Data>.makeStream()
         let inputs = AgentInputs(
             outputBytes: outputBytes,

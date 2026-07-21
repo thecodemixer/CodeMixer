@@ -52,7 +52,7 @@ struct ProjectTypeForm: View {
     private var customFields: some View {
         VStack(alignment: .leading, spacing: Theme.spacing.s8) {
             labeledField("Display name", text: $customDisplayName, placeholder: "My Agent")
-            labeledField("Executable path", text: $customExecutable, placeholder: "/usr/local/bin/agent")
+            labeledField("Executable path", text: $customExecutable, placeholder: "\(SystemPaths.usrLocalBin.path)/agent")
             labeledField("Arguments", text: $customArguments, placeholder: "--flag value")
             Picker("Transport", selection: $customTransport) {
                 Text("Interactive terminal").tag(AgentTransportKind.interactiveTerminal)

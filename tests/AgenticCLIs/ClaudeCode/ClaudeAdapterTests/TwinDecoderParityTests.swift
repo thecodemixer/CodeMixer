@@ -3,6 +3,7 @@ import Testing
 @testable import ClaudeCode
 import AgentCore
 import AgentProtocol
+import AgentTestSupport
 
 /// Parity guarantee: every JSON payload the twin emits through
 /// `ClaudeCodeTwinHookEmitter` must survive a `ClaudeHookDecoder` round-trip
@@ -21,7 +22,7 @@ struct TwinDecoderParityTests {
     func sessionStartParity() {
         let data = ClaudeCodeTwinHookEmitter.sessionStart(
             sessionID: "sess-1",
-            project: URL(fileURLWithPath: "/tmp/test"),
+            project: TestPaths.underTemporary("test"),
             model: "claude-parity-model"
         )
         let request = HookRequest(id: UUID(), eventName: "SessionStart", jsonPayload: data)

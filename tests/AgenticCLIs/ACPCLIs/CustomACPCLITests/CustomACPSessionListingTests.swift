@@ -22,7 +22,7 @@ struct CustomACPSessionListingTests {
             id: "sidebar-agent",
             displayName: "Sidebar Agent",
             transport: .agentClientProtocol,
-            executablePath: "/usr/bin/true",
+            executablePath: SystemPaths.trueBinary.path,
             arguments: []
         )
         try ProjectLocalStateStore.save(

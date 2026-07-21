@@ -16,6 +16,7 @@ public final class CustomACPAdapter: AgentAdapter {
         .permissionPrompts,
         .resumableSessions,
         .sessionHandshakeGate,
+        .overviewDashboard,
     ]
     public var transportDescriptor: AgentTransportDescriptor { .agentClientProtocol }
 

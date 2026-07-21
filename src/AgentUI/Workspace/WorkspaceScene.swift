@@ -105,8 +105,33 @@ public struct WorkspaceScene: View {
     private var conversationColumn: some View {
         VStack(spacing: 0) {
             ZStack(alignment: .topTrailing) {
-                ConversationView(model: model, tts: tts, searchVisible: $searchVisible)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // Overview-capable projects: project overview shows the hosted
+                // dashboard only (no Chat/Dashboard tabs). File sessions stay chat-only.
+                if model.showsOverviewDashboard {
+                    if model.isRestartingCustomACPCLI {
+                        ContentUnavailableView(
+                            "Restarting ACP CLI",
+                            systemImage: "arrow.triangle.2.circlepath",
+                            description: Text("Closing the agent process and waiting for it to come back online.")
+                        )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .accessibilityLabel("Restarting ACP CLI")
+                    } else if let url = model.dashboardURL {
+                        AgentDashboardView(url: url, reloadGeneration: model.dashboardLoadGeneration)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        ContentUnavailableView(
+                            "Dashboard unavailable",
+                            systemImage: "rectangle.dashed",
+                            description: Text("Waiting for the agent to advertise its overview URL. Try Restart ACP CLI if this persists.")
+                        )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .accessibilityLabel("Dashboard unavailable")
+                    }
+                } else {
+                    ConversationView(model: model, tts: tts, searchVisible: $searchVisible)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
 
                 StatusPill(status: model.status,
                            substate: model.activity,
@@ -115,7 +140,23 @@ public struct WorkspaceScene: View {
                     .padding(.trailing, Theme.spacing.s16)
             }
 
-            PromptComposerView(model: model, voice: voice)
+            // Overview page owns its own start/control chrome; keep composer for chat sessions.
+            // Wave-gate / control-session reviews can still land while the dashboard
+            // is visible — surface that prompt without opening the full composer.
+            if model.showsOverviewDashboard {
+                if let prompt = model.activePendingPermission {
+                    PermissionPromptView(prompt: prompt) { decision in
+                        model.respondToPermission(id: prompt.id, decision: decision)
+                    }
+                    .padding(.horizontal, Theme.spacing.s16)
+                    .padding(.vertical, Theme.spacing.s12)
+                    .background(Theme.surface.panel)
+                    .overlay(alignment: .top) { Divider() }
+                    .accessibilityLabel("Permission required for overview")
+                }
+            } else {
+                PromptComposerView(model: model, voice: voice)
+            }
         }
         .frame(minWidth: Theme.layout.workspaceSidebarMinWidth)
         .overlay(alignment: .top) {
@@ -127,6 +168,7 @@ public struct WorkspaceScene: View {
             }
         }
         .animation(Theme.motion.quick, value: model.stalledToastVisible)
+        .animation(Theme.motion.quick, value: model.showsOverviewDashboard)
     }
 
     @ViewBuilder

@@ -41,6 +41,12 @@ public final class ACPClientState: @unchecked Sendable {
         let optionIDs: [String: String] // kind → optionId
     }
 
+    struct ParkedPermission: Sendable {
+        let prompt: PermissionPrompt
+        let requestID: JSONValue
+        let optionIDs: [String: String]
+    }
+
     private let lock = NSLock()
     private var nextID = 1
     private var requests: [JSONValue: RequestPurpose] = [:]
@@ -77,6 +83,9 @@ public final class ACPClientState: @unchecked Sendable {
     private var replayEventID: UUID?
     /// Live-turn thought accumulator (persisted on prompt finalize).
     private var thoughtText = ""
+    private var parkedPermissionsBySession: [String: [ParkedPermission]] = [:]
+    /// Coalesced background-session stream text (sessionId → role + text).
+    private var foreignBuffers: [String: (role: String, text: String)] = [:]
 
     public init() {}
 
@@ -112,6 +121,7 @@ public final class ACPClientState: @unchecked Sendable {
             currentModelIDStorage = nil
             thoughtText = ""
             clearReplayLocked()
+            parkedPermissionsBySession.removeAll()
         }
     }
 
@@ -295,6 +305,48 @@ public final class ACPClientState: @unchecked Sendable {
         withLock { pendingApprovals.removeValue(forKey: id) }
     }
 
+    /// Returns the prompt ids that were still awaiting a user decision.
+    @discardableResult
+    func clearAllPendingApprovals() -> [UUID] {
+        withLock {
+            let ids = Array(pendingApprovals.keys)
+            pendingApprovals.removeAll()
+            return ids
+        }
+    }
+
+    /// Drain live approvals (prompt id + wire request) so callers can cancel them.
+    @discardableResult
+    func takeAllPendingApprovals() -> [(promptID: UUID, approval: PendingApproval)] {
+        withLock {
+            let pairs = pendingApprovals.map { (promptID: $0.key, approval: $0.value) }
+            pendingApprovals.removeAll()
+            return pairs
+        }
+    }
+
+    func parkPermission(sessionID: String, parked: ParkedPermission) {
+        withLock {
+            parkedPermissionsBySession[sessionID, default: []].append(parked)
+        }
+    }
+
+    func takeParkedPermissions(sessionID: String) -> [ParkedPermission] {
+        withLock {
+            let parked = parkedPermissionsBySession.removeValue(forKey: sessionID) ?? []
+            return parked
+        }
+    }
+
+    /// Drop parked background reviews when the owning session is archived
+    /// (migration Restart) so a later `session/load` cannot re-fire stale prompts.
+    @discardableResult
+    func clearParkedPermissions(sessionID: String) -> [ParkedPermission] {
+        withLock {
+            parkedPermissionsBySession.removeValue(forKey: sessionID) ?? []
+        }
+    }
+
     func shouldAutoApprove(signature: String) -> Bool {
         withLock { autoApprovalSignatures.contains(signature) }
     }
@@ -373,6 +425,34 @@ public final class ACPClientState: @unchecked Sendable {
     /// Close an open live thinking block (first assistant chunk or prompt finalize).
     func takeOpenThinkingBlockID() -> UUID? {
         withLock { thinkingBlockIDs.removeValue(forKey: "thought") }
+    }
+
+    /// Accumulate a background-session text chunk. Returns a completed turn when
+    /// the role changes for that session (or when `flushForeignBuffer` is used).
+    func appendForeignChunk(sessionID: String,
+                            role: String,
+                            delta: String) -> (role: String, text: String)? {
+        withLock {
+            guard !delta.isEmpty else { return nil }
+            if let existing = foreignBuffers[sessionID], existing.role != role {
+                foreignBuffers[sessionID] = (role, delta)
+                return existing.text.isEmpty ? nil : existing
+            }
+            if let existing = foreignBuffers[sessionID] {
+                foreignBuffers[sessionID] = (role, existing.text + delta)
+            } else {
+                foreignBuffers[sessionID] = (role, delta)
+            }
+            return nil
+        }
+    }
+
+    func flushForeignBuffer(sessionID: String) -> (role: String, text: String)? {
+        withLock {
+            guard let existing = foreignBuffers.removeValue(forKey: sessionID),
+                  !existing.text.isEmpty else { return nil }
+            return existing
+        }
     }
 
     /// Append a history chunk during `session/load`. Emits finalized turns when

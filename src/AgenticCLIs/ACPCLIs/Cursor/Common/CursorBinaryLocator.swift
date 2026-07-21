@@ -34,8 +34,8 @@ public struct CursorBinaryLocator: Sendable {
         candidates.append(contentsOf: [
             home.appendingPathComponent(".local/bin/cursor-agent"),
             home.appendingPathComponent(".cursor/bin/cursor-agent"),
-            URL(fileURLWithPath: "/opt/homebrew/bin/cursor-agent"),
-            URL(fileURLWithPath: "/usr/local/bin/cursor-agent"),
+            SystemPaths.binary(in: SystemPaths.homebrewBin, named: "cursor-agent"),
+            SystemPaths.binary(in: SystemPaths.usrLocalBin, named: "cursor-agent"),
         ])
 
         var checked: [String] = []

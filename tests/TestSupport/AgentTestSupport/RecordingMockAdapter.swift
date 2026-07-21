@@ -31,7 +31,7 @@ public final class RecordingMockAdapter: AgentAdapter, @unchecked Sendable {
     private let binaryURL: URL
     private let permissionDelivery: PermissionResponseDelivery
 
-    public init(binary: URL = URL(fileURLWithPath: "/bin/cat"),
+    public init(binary: URL = SystemPaths.cat,
                 capabilities: AgentCapabilities = [],
                 permissionDelivery: PermissionResponseDelivery = .writePTY(Data())) {
         self.binaryURL = binary

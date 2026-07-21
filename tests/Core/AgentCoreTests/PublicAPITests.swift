@@ -162,7 +162,7 @@ struct SlashCommandTests {
 struct SessionSummaryTests {
     @Test("All fields propagate from init")
     func allFields() {
-        let ws = URL(fileURLWithPath: "/tmp/my-project")
+        let ws = TestPaths.underTemporary("my-project")
         let summary = SessionSummary(id: "abc123",
                                      agentID: .codex,
                                      workspace: ws,
@@ -270,7 +270,7 @@ struct AuthStatusTests {
 struct LaunchContextTests {
     @Test("hookSocketPath and resumeSessionID default to nil")
     func defaults() {
-        let ctx = LaunchContext(workspace: URL(fileURLWithPath: "/tmp"))
+        let ctx = LaunchContext(workspace: TestPaths.temporaryRoot)
         #expect(ctx.hookSocketPath == nil)
         #expect(ctx.resumeSessionID == nil)
         #expect(ctx.extraEnv.isEmpty)
@@ -278,7 +278,7 @@ struct LaunchContextTests {
 
     @Test("All fields propagate when supplied")
     func allFields() {
-        let ws = URL(fileURLWithPath: "/tmp/p")
+        let ws = TestPaths.underTemporary("p")
         let ctx = LaunchContext(workspace: ws,
                                 hookSocketPath: "/tmp/hook.sock",
                                 resumeSessionID: "sess-1",
@@ -320,7 +320,7 @@ struct FSEventTests {
 
     @Test("FSEvent equality is structural")
     func equality() {
-        let url = URL(fileURLWithPath: "/tmp/file.txt")
+        let url = TestPaths.underTemporary("file.txt", isDirectory: false)
         let a = FSEvent(url: url, kind: .modified, observedAt: testEpoch)
         let b = FSEvent(url: url, kind: .modified, observedAt: testEpoch)
         #expect(a == b)
@@ -394,7 +394,7 @@ struct FileSystemIncrementalReadTests {
     @Test("InMemoryFileSystem reads only bytes appended after the prior offset")
     func rangedReadFromOffset() throws {
         let fs = InMemoryFileSystem()
-        let url = URL(fileURLWithPath: "/tmp/transcript.jsonl")
+        let url = TestPaths.underTemporary("transcript.jsonl", isDirectory: false)
         try fs.writeAtomically(Data("first\n".utf8), to: url)
 
         #expect(try fs.byteCount(at: url) == 6)

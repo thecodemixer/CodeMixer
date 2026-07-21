@@ -11,7 +11,7 @@ struct ACPAdapterStreamTests {
     @Test("event stream decodes agent bytes and writes protocol replies")
     func streamRoundTrip() async throws {
         let adapter = acpAdapter()
-        let workspace = URL(fileURLWithPath: "/tmp/acp-ws")
+        let workspace = TestPaths.underTemporary("acp-ws")
         let (outputBytes, outputContinuation) = AsyncStream<Data>.makeStream()
         let written = WrittenBytesCollector()
         let inputs = AgentInputs(
@@ -78,7 +78,7 @@ struct ACPAdapterStreamTests {
     @Test("event stream surfaces malformed frame as AgentEvent error")
     func streamMalformedFrame() async {
         let adapter = acpAdapter()
-        let workspace = URL(fileURLWithPath: "/tmp/acp-ws")
+        let workspace = TestPaths.underTemporary("acp-ws")
         let (outputBytes, outputContinuation) = AsyncStream<Data>.makeStream()
         let inputs = AgentInputs(
             outputBytes: outputBytes,
@@ -109,7 +109,7 @@ struct ACPAdapterStreamTests {
     @Test("event stream reports write failure when reply write throws")
     func streamWriteFailure() async {
         let adapter = acpAdapter()
-        let workspace = URL(fileURLWithPath: "/tmp/acp-ws")
+        let workspace = TestPaths.underTemporary("acp-ws")
         let (outputBytes, outputContinuation) = AsyncStream<Data>.makeStream()
         let inputs = AgentInputs(
             outputBytes: outputBytes,
@@ -149,7 +149,7 @@ struct ACPAdapterStreamTests {
     @Test("event stream surfaces permission prompts from server requests")
     func streamPermissionPrompt() async {
         let adapter = acpAdapter()
-        let workspace = URL(fileURLWithPath: "/tmp/acp-ws")
+        let workspace = TestPaths.underTemporary("acp-ws")
         let (outputBytes, outputContinuation) = AsyncStream<Data>.makeStream()
         let inputs = AgentInputs(
             outputBytes: outputBytes,

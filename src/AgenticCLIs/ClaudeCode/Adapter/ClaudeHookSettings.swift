@@ -113,7 +113,7 @@ public struct ClaudeHookInstaller: Sendable {
             chunks.append(chunk)
         sys.stdout.buffer.write(b"".join(chunks))
         """
-        let command = "/usr/bin/python3 -c \(quotedShell(script)) \(quotedShell(socketPath))"
+        let command = "\(SystemPaths.python3.path) -c \(quotedShell(script)) \(quotedShell(socketPath))"
         return .object([
             "codemixer.managed": .bool(true),
             "matcher": .string("*"),

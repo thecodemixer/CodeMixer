@@ -12,7 +12,7 @@ struct CodexAdapterTests {
     func launchArgv() {
         let adapter = CodexAdapter()
         let context = LaunchContext(
-            workspace: URL(fileURLWithPath: "/tmp/project"),
+            workspace: TestPaths.underTemporary("project"),
             resumeSessionID: "thread-resume"
         )
 
@@ -27,7 +27,7 @@ struct CodexAdapterTests {
     func bootstrapFreshThread() throws {
         let adapter = CodexAdapter()
         let context = LaunchContext(
-            workspace: URL(fileURLWithPath: "/tmp/project"),
+            workspace: TestPaths.underTemporary("project"),
             permissionMode: .acceptEdits
         )
         var framing = CodexAppServerFraming()
@@ -51,7 +51,7 @@ struct CodexAdapterTests {
     func bootstrapResume() throws {
         let adapter = CodexAdapter()
         let context = LaunchContext(
-            workspace: URL(fileURLWithPath: "/tmp/project"),
+            workspace: TestPaths.underTemporary("project"),
             resumeSessionID: "thr_123"
         )
         var framing = CodexAppServerFraming()
@@ -73,7 +73,7 @@ struct CodexAdapterTests {
             random: FakeRandomSource()
         )
         let context = LaunchContext(
-            workspace: URL(fileURLWithPath: "/tmp/project"),
+            workspace: TestPaths.underTemporary("project"),
             resumeSessionID: "thread-1"
         )
         _ = adapter.sessionBootstrapBytes(context: context)
@@ -118,13 +118,13 @@ struct CodexAdapterTests {
     @Test("Binary override wins over PATH and fallback directories")
     func binaryOverridePrecedence() throws {
         let fileSystem = InMemoryFileSystem()
-        let environment = FakeEnvironment(home: URL(fileURLWithPath: "/Users/test"))
+        let environment = FakeEnvironment(home: TestPaths.fakeHome)
         let override = URL(fileURLWithPath: "/custom/codex")
         try fileSystem.writeAtomically(Data(), to: override)
         try fileSystem.writeAtomically(Data(), to: URL(fileURLWithPath: "/path/codex"))
         let resolved = ResolvedEnvironment(
             variables: ["CODEX_BIN": override.path, "PATH": "/path"],
-            shell: URL(fileURLWithPath: "/bin/zsh")
+            shell: SystemPaths.zsh
         )
         let locator = CodexBinaryLocator(
             environment: environment,
@@ -137,7 +137,7 @@ struct CodexAdapterTests {
     @Test("PATH wins before fallback installation directories")
     func binaryPathPrecedence() throws {
         let fileSystem = InMemoryFileSystem()
-        let home = URL(fileURLWithPath: "/Users/test")
+        let home = TestPaths.fakeHome
         let pathCandidate = URL(fileURLWithPath: "/path/codex")
         let fallback = home.appendingPathComponent(".local/bin/codex")
         try fileSystem.writeAtomically(Data(), to: pathCandidate)
@@ -148,7 +148,7 @@ struct CodexAdapterTests {
         )
         let resolved = ResolvedEnvironment(
             variables: ["PATH": "/path"],
-            shell: URL(fileURLWithPath: "/bin/zsh")
+            shell: SystemPaths.zsh
         )
 
         #expect(try locator.locate(env: resolved) == pathCandidate)
@@ -162,7 +162,7 @@ struct CodexAdapterTests {
             clock: FakeClock(),
             random: FakeRandomSource()
         )
-        let context = LaunchContext(workspace: URL(fileURLWithPath: "/tmp/project"))
+        let context = LaunchContext(workspace: TestPaths.underTemporary("project"))
         _ = adapter.sessionBootstrapBytes(context: context)
         let recorder = DataRecorder()
         var outputContinuation: AsyncStream<Data>.Continuation!
@@ -206,7 +206,7 @@ struct CodexAdapterTests {
             clock: FakeClock(),
             random: FakeRandomSource()
         )
-        let context = LaunchContext(workspace: URL(fileURLWithPath: "/tmp/project"))
+        let context = LaunchContext(workspace: TestPaths.underTemporary("project"))
         _ = adapter.sessionBootstrapBytes(context: context)
         let recorder = DataRecorder()
         var outputContinuation: AsyncStream<Data>.Continuation!
@@ -284,7 +284,7 @@ struct CodexAdapterTests {
             outputBytes: output,
             terminal: nil,
             hookSocket: nil,
-            workspace: URL(fileURLWithPath: "/tmp/project"),
+            workspace: TestPaths.underTemporary("project"),
             sessionID: AsyncStream { $0.finish() }
         ))
         var iterator = stream.makeAsyncIterator()
@@ -329,7 +329,7 @@ struct CodexAdapterTests {
             writeBytes: { await recorder.append($0) },
             terminal: nil,
             hookSocket: nil,
-            workspace: URL(fileURLWithPath: "/tmp/project"),
+            workspace: TestPaths.underTemporary("project"),
             sessionID: AsyncStream { $0.finish() }
         ))
         var iterator = stream.makeAsyncIterator()
@@ -362,8 +362,8 @@ struct CodexAdapterTests {
     @Test("Thread index persists Codex sessions and supersedes them")
     func threadIndexPersistence() async {
         let fileSystem = InMemoryFileSystem()
-        let environment = FakeEnvironment(home: URL(fileURLWithPath: "/Users/test"))
-        let workspace = URL(fileURLWithPath: "/tmp/project")
+        let environment = FakeEnvironment(home: TestPaths.fakeHome)
+        let workspace = TestPaths.underTemporary("project")
         let first = CodexThreadIndex(
             environment: environment,
             fileSystem: fileSystem,
@@ -390,8 +390,8 @@ struct CodexAdapterTests {
     @Test("Project and user markdown commands are enumerated")
     func commandEnumeration() async throws {
         let fileSystem = InMemoryFileSystem()
-        let home = URL(fileURLWithPath: "/Users/test")
-        let workspace = URL(fileURLWithPath: "/tmp/project")
+        let home = TestPaths.fakeHome
+        let workspace = TestPaths.underTemporary("project")
         try fileSystem.createDirectory(
             at: workspace.appendingPathComponent(".codex/commands"),
             withIntermediates: true
@@ -439,7 +439,7 @@ struct CodexAdapterTests {
             outputBytes: output,
             terminal: nil,
             hookSocket: nil,
-            workspace: URL(fileURLWithPath: "/tmp/project"),
+            workspace: TestPaths.underTemporary("project"),
             sessionID: AsyncStream { $0.finish() }
         ))
         var iterator = stream.makeAsyncIterator()
@@ -633,7 +633,7 @@ struct CodexAdapterTests {
             random: FakeRandomSource(),
             initialModels: [option]
         )
-        let context = LaunchContext(workspace: URL(fileURLWithPath: "/tmp/project"))
+        let context = LaunchContext(workspace: TestPaths.underTemporary("project"))
         _ = adapter.sessionBootstrapBytes(context: context)
         let recorder = DataRecorder()
         var outputContinuation: AsyncStream<Data>.Continuation!

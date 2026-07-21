@@ -97,6 +97,7 @@ struct SessionStoreTests {
         let env = FakeEnvironment()
         let url = AppSupportPaths.sessionsURL(in: env.appSupportDirectory)
         try fs.createDirectory(at: url.deletingLastPathComponent(), withIntermediates: true)
+        let repoPath = TestPaths.underTemporary("alice-repo").path
         let payload = """
         {
           "projects": [
@@ -108,7 +109,7 @@ struct SessionStoreTests {
             {
               "displayName": "Repo",
               "lastOpened": "2026-06-24T07:00:00Z",
-              "path": "/Users/alice/repo"
+              "path": "\(repoPath)"
             }
           ]
         }
@@ -119,7 +120,7 @@ struct SessionStoreTests {
         await store.load()
 
         let recents = await store.recents()
-        #expect(recents.map(\.path) == ["/Users/alice/repo"])
+        #expect(recents.map(\.path) == [repoPath])
     }
 
     // MARK: - Helpers

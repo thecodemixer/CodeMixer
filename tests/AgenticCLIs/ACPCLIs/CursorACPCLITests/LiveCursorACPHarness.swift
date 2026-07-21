@@ -113,9 +113,8 @@ struct LiveCursorACPHarness {
                 .appendingPathComponent("cursor-agent").path }
             .first { FileManager.default.isExecutableFile(atPath: $0) }
             ?? ([
-                NSHomeDirectory() + "/.local/bin/cursor-agent",
-                "/opt/homebrew/bin/cursor-agent",
-                "/usr/local/bin/cursor-agent",
+                SystemPaths.binary(in: SystemPaths.homebrewBin, named: "cursor-agent").path,
+                SystemPaths.binary(in: SystemPaths.usrLocalBin, named: "cursor-agent").path,
             ].first { FileManager.default.isExecutableFile(atPath: $0) })
     }
 

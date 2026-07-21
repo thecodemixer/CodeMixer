@@ -3,6 +3,7 @@ import Testing
 @testable import ClaudeCode
 import AgentCore
 import AgentProtocol
+import AgentTestSupport
 
 @Suite("ClaudeAdapter launch argv")
 struct ClaudeAdapterLaunchArgvTests {
@@ -11,7 +12,7 @@ struct ClaudeAdapterLaunchArgvTests {
     func launchArgvStaysInteractive() {
         let adapter = ClaudeAdapter()
         let context = LaunchContext(
-            workspace: URL(fileURLWithPath: "/tmp/codemixer"),
+            workspace: TestPaths.underTemporary("codemixer"),
             resumeSessionID: "session-1",
             permissionMode: .acceptEdits
         )

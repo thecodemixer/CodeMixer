@@ -105,7 +105,7 @@ private enum AutoApprovalRuleID {
                        match: String,
                        decision: PermissionDecision,
                        note: String) -> UUID {
-        uuid(for: "\(enabled)|\(match)|\(decision.rawValue)|\(note)")
+        uuid(for: "\(enabled)|\(match)|\(decision.wireValue)|\(note)")
     }
 
     private static func uuid(for material: String) -> UUID {

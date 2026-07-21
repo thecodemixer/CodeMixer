@@ -25,7 +25,35 @@ public final class EngineViewModel {
     public var workspaceRoot: URL?
     public internal(set) var messages: [Message] = []
     public internal(set) var activeToolCalls: [ToolCallEntry] = []
-    public internal(set) var pendingPermission: PermissionPrompt?
+    /// Pending permission prompts keyed by owning session id.
+    ///
+    /// Background ACP reviews stay parked until that session is foregrounded;
+    /// this map keeps each live prompt tied to the chat that owns it so the
+    /// composer card never leaks onto unrelated sessions. The sidebar orange
+    /// attention dot remains the cross-session signal.
+    public internal(set) var pendingPermissionsBySession: [String: PermissionPrompt] = [:]
+    /// Prompt for the currently selected session only (composer / overview card).
+    public var activePendingPermission: PermissionPrompt? {
+        pendingPermissionsBySession[permissionOwnerKey(for: sessionID)]
+    }
+    /// Back-compat alias of `activePendingPermission` (what the active chat shows).
+    public var pendingPermission: PermissionPrompt? { activePendingPermission }
+    /// Sentinel key when a prompt arrives before any session id is known
+    /// (single-session Claude / Codex paths).
+    static let unscopedPermissionSessionKey = ""
+    public internal(set) var dashboardURL: URL?
+    public internal(set) var dashboardTitle: String?
+    /// Selects the detail pane's dashboard when available. Overview sessions
+    /// default this to true; file sessions default to chat.
+    public internal(set) var showsOverviewDashboard: Bool = false
+    /// True while Restart ACP CLI has closed the process and is waiting for a
+    /// fresh `agentDashboard` from the respawned Custom ACP agent.
+    public internal(set) var isRestartingCustomACPCLI: Bool = false
+    /// Set after cold `openProject` succeeds; `agentDashboard` before this is ignored.
+    var customACPRestartAwaitingDashboard: Bool = false
+    /// Bumped on each Custom ACP restart so the WebView reloads even if the
+    /// advertised dashboard URL string is unchanged.
+    public internal(set) var dashboardLoadGeneration: Int = 0
     public internal(set) var diagnostics: [DiagnosticEntry] = []
     public internal(set) var status: StatusLine = .idle
     public internal(set) var activity: ActivitySubstate = .idle
@@ -35,12 +63,18 @@ public final class EngineViewModel {
     /// See `docs/architecture.md` §4.1 and `Remote/AgentRemoteControl/README.md`.
     public internal(set) var connectedRemoteClients: Int = 0
     public internal(set) var isSwitchingSession: Bool = false
+    /// Active session was restored from Codemixer's project cache because the
+    /// ACP agent reported that it no longer owns the session.
+    public internal(set) var cachedTranscriptLoadedSessionID: String?
     /// Holds the composer closed briefly after opening a saved session so the
     /// first prompt cannot race Claude's resume/startup TUI.
     public internal(set) var isComposerLockedForSessionResume: Bool = false
     /// True while the composer lock was armed by `.sessionHandshakeGate`
     /// (Cursor / ACP). History replay must not clear this — only SessionStart.
     internal var isComposerLockedForSessionHandshake: Bool = false
+    /// Same-project warm `session/load` (process already live) — shorter hard
+    /// unlock and "Loading session…" copy instead of cold-spawn messaging.
+    public internal(set) var isWarmSessionSwitch: Bool = false
     /// Claude Code resume has two clocks: the UI can replay JSONL history
     /// quickly, while the live `claude --resume` PTY may still be painting
     /// history and not yet accepting input. While true, replayed content may
@@ -392,10 +426,20 @@ public extension EngineViewModel {
     struct ProjectCapabilities: Sendable, Hashable {
         var supportsResumableSessions: Bool
         var requiresSessionHandshakeGate: Bool
+        var supportsOverviewDashboard: Bool
+
+        init(supportsResumableSessions: Bool,
+             requiresSessionHandshakeGate: Bool,
+             supportsOverviewDashboard: Bool = false) {
+            self.supportsResumableSessions = supportsResumableSessions
+            self.requiresSessionHandshakeGate = requiresSessionHandshakeGate
+            self.supportsOverviewDashboard = supportsOverviewDashboard
+        }
 
         static let none = ProjectCapabilities(
             supportsResumableSessions: false,
-            requiresSessionHandshakeGate: false
+            requiresSessionHandshakeGate: false,
+            supportsOverviewDashboard: false
         )
     }
 

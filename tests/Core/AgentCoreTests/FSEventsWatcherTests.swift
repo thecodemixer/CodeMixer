@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import CoreServices
+import AgentTestSupport
 @testable import AgentCore
 
 /// Tests for `FSEventsWatcher` that exercise the pure-logic methods without
@@ -12,11 +13,21 @@ import CoreServices
 @Suite("FSEventsWatcher — policy logic")
 struct FSEventsWatcherTests {
 
+    private let sampleWorkspace = TestPaths.underTemporary("project")
+
     private func makeWatcher(
-        workspace: URL = URL(fileURLWithPath: "/tmp/project"),
+        workspace: URL? = nil,
         ignored: [String] = [".git/", "node_modules/", ".build/", "DerivedData/"]
     ) -> FSEventsWatcher {
-        FSEventsWatcher(workspace: workspace, debounce: 0, ignoredPrefixes: ignored)
+        FSEventsWatcher(
+            workspace: workspace ?? sampleWorkspace,
+            debounce: 0,
+            ignoredPrefixes: ignored
+        )
+    }
+
+    private func samplePath(_ relative: String) -> String {
+        sampleWorkspace.appendingPathComponent(relative).path
     }
 
     // MARK: - isIgnored
@@ -24,45 +35,45 @@ struct FSEventsWatcherTests {
     @Test("isIgnored returns false for paths inside workspace that are not filtered")
     func notIgnoredNormalFile() {
         let w = makeWatcher()
-        #expect(!w.isIgnored("/tmp/project/src/main.swift"))
+        #expect(!w.isIgnored(samplePath("src/main.swift")))
     }
 
     @Test("isIgnored returns true for .git/ prefix")
     func ignoresGit() {
         let w = makeWatcher()
-        #expect(w.isIgnored("/tmp/project/.git/COMMIT_EDITMSG"))
+        #expect(w.isIgnored(samplePath(".git/COMMIT_EDITMSG")))
     }
 
     @Test("isIgnored returns true for node_modules/ prefix")
     func ignoresNodeModules() {
         let w = makeWatcher()
-        #expect(w.isIgnored("/tmp/project/node_modules/lodash/package.json"))
+        #expect(w.isIgnored(samplePath("node_modules/lodash/package.json")))
     }
 
     @Test("isIgnored returns true for .build/ prefix")
     func ignoresBuild() {
         let w = makeWatcher()
-        #expect(w.isIgnored("/tmp/project/.build/debug/Codemixer"))
+        #expect(w.isIgnored(samplePath(".build/debug/Codemixer")))
     }
 
     @Test("isIgnored returns true for DerivedData/ prefix")
     func ignoresDerivedData() {
         let w = makeWatcher()
-        #expect(w.isIgnored("/tmp/project/DerivedData/Build/Products"))
+        #expect(w.isIgnored(samplePath("DerivedData/Build/Products")))
     }
 
     @Test("isIgnored is relative: a path whose relative portion does not match is not ignored")
     func relativePathNotIgnored() {
         let w = makeWatcher()
-        #expect(!w.isIgnored("/tmp/project/src/.git.md"))
+        #expect(!w.isIgnored(samplePath("src/.git.md")))
     }
 
     @Test("Custom ignoredPrefixes override defaults")
     func customIgnoredPrefixes() {
         let w = makeWatcher(ignored: ["dist/"])
-        #expect(w.isIgnored("/tmp/project/dist/bundle.js"))
+        #expect(w.isIgnored(samplePath("dist/bundle.js")))
         // .git is NOT in the custom list, so it should not be ignored.
-        #expect(!w.isIgnored("/tmp/project/.git/config"))
+        #expect(!w.isIgnored(samplePath(".git/config")))
     }
 
     // MARK: - decodeKind
@@ -107,21 +118,21 @@ struct FSEventsWatcherTests {
     @Test("handle forwards non-ignored events to the events stream")
     func handleNonIgnored() async throws {
         let w = makeWatcher()
-        let raw = FSEventsStream.RawEvent(path: "/tmp/project/src/foo.swift",
+        let raw = FSEventsStream.RawEvent(path: samplePath("src/foo.swift"),
                                           flags: FSEventStreamEventFlags(kFSEventStreamEventFlagItemModified),
                                           observedAt: Date())
         await w.handle(raw)
 
         // Collect the event with a short-circuit timeout.
         let event = await firstEvent(from: w.events, timeout: .milliseconds(500))
-        #expect(event?.url.path == "/tmp/project/src/foo.swift")
+        #expect(event?.url.path == samplePath("src/foo.swift"))
         #expect(event?.kind == .modified)
     }
 
     @Test("handle drops ignored paths without forwarding to events stream")
     func handleIgnored() async {
         let w = makeWatcher()
-        let raw = FSEventsStream.RawEvent(path: "/tmp/project/.git/index",
+        let raw = FSEventsStream.RawEvent(path: samplePath(".git/index"),
                                           flags: 0,
                                           observedAt: Date())
         await w.handle(raw)

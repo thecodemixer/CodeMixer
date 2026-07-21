@@ -51,4 +51,18 @@ public enum AgentEvent: Sendable {
     /// Codemixer-owned history marker for an agent-affecting client intent.
     /// Live session + export only — not restored from agent JSONL on resume.
     case clientAction(ClientAction)
+
+    /// Agent-advertised embedded dashboard (loopback URL only in the UI).
+    /// `title` is agent-owned display copy, used for the sidebar overview row.
+    case agentDashboard(url: URL, title: String?)
+
+    /// ACP session index changed for a project — sidebar should reload sessions.
+    case sessionIndexChanged(projectPath: URL)
+
+    /// Background session needs user attention (e.g. parked permission).
+    case sessionAttentionChanged(sessionID: String, title: String, needsAttention: Bool)
+
+    /// The agent no longer owns this session, so Codemixer restored cached
+    /// project transcript history instead of live ACP state.
+    case cachedTranscriptLoaded(sessionID: String)
 }

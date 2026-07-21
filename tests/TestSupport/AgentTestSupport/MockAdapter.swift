@@ -38,7 +38,7 @@ public final class MockAdapter: AgentAdapter, @unchecked Sendable {
     }
 
     public init(script: Script = .empty,
-                binary: URL = URL(fileURLWithPath: "/usr/bin/true"),
+                binary: URL = SystemPaths.trueBinary,
                 id: AgentID = .other,
                 displayName: String = "Mock",
                 capabilities: AgentCapabilities = [],

@@ -54,7 +54,7 @@ struct EngineViewModelTests {
         await drain()
         #expect(vm.messages.count == 1)
 
-        let cwd = URL(fileURLWithPath: "/tmp/proj")
+        let cwd = TestPaths.underTemporary("proj")
         await bus.publish(.sessionStarted(sessionID: "sess-1", model: nil, cwd: cwd))
         await drain()
 
@@ -62,6 +62,166 @@ struct EngineViewModelTests {
         #expect(vm.workspace == cwd)
         #expect(vm.tokenRatePerSecond == nil)
         #expect(!vm.stalledToastVisible)
+
+        await bus.shutdown()
+    }
+
+    @Test("cached transcript marker follows the active session and clears on live start")
+    func cachedTranscriptMarkerLifecycle() async {
+        let (vm, bus) = makeModel()
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        let cwd = TestPaths.underTemporary("proj")
+        await bus.publish(.sessionStarted(sessionID: "cached", model: nil, cwd: cwd))
+        await bus.publish(.cachedTranscriptLoaded(sessionID: "cached"))
+        await drain()
+        #expect(vm.cachedTranscriptLoadedSessionID == "cached")
+
+        await bus.publish(.sessionStarted(sessionID: "live", model: nil, cwd: cwd))
+        await drain()
+        #expect(vm.cachedTranscriptLoadedSessionID == nil)
+
+        await bus.shutdown()
+    }
+
+    @Test("agentDashboard retains chat unless the active project uses an overview")
+    func dashboardEventRetainsChatForRegularSession() async {
+        let (vm, bus) = makeModel()
+        vm.workspace = TestPaths.underTemporary("proj")
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        guard let dashboardURL = URL(string: "http://127.0.0.1:8422/dashboard") else {
+            Issue.record("expected a valid dashboard URL")
+            return
+        }
+        await bus.publish(.agentDashboard(url: dashboardURL, title: "Operations"))
+        await drain()
+
+        #expect(vm.dashboardURL == dashboardURL)
+        #expect(vm.dashboardTitle == "Operations")
+        #expect(!vm.showsOverviewDashboard)
+
+        await bus.shutdown()
+    }
+
+    @Test("agentDashboard stores URL without selecting the overview pane")
+    func dashboardEventDoesNotAutoSelectOverview() async {
+        let (vm, bus) = makeModel()
+        let workspace = TestPaths.underTemporary("proj")
+        vm.workspace = workspace
+        vm.projectCapabilities[workspace.path] = .init(
+            supportsResumableSessions: true,
+            requiresSessionHandshakeGate: false,
+            supportsOverviewDashboard: true
+        )
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        guard let dashboardURL = URL(string: "http://127.0.0.1:8422/dashboard") else {
+            Issue.record("expected a valid dashboard URL")
+            return
+        }
+        await bus.publish(.agentDashboard(url: dashboardURL, title: "Operations"))
+        await drain()
+
+        #expect(vm.dashboardURL == dashboardURL)
+        #expect(vm.dashboardTitle == "Operations")
+        #expect(!vm.showsOverviewDashboard)
+
+        await bus.shutdown()
+    }
+
+    @Test("agentDashboard keeps an already-selected overview pane")
+    func dashboardEventKeepsSelectedOverview() async {
+        let (vm, bus) = makeModel()
+        let workspace = TestPaths.underTemporary("proj")
+        vm.workspace = workspace
+        vm.showsOverviewDashboard = true
+        vm.projectCapabilities[workspace.path] = .init(
+            supportsResumableSessions: true,
+            requiresSessionHandshakeGate: false,
+            supportsOverviewDashboard: true
+        )
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        guard let dashboardURL = URL(string: "http://127.0.0.1:8422/dashboard") else {
+            Issue.record("expected a valid dashboard URL")
+            return
+        }
+        await bus.publish(.agentDashboard(url: dashboardURL, title: "Operations"))
+        await drain()
+
+        #expect(vm.dashboardURL == dashboardURL)
+        #expect(vm.showsOverviewDashboard)
+
+        await bus.shutdown()
+    }
+
+    @Test("session attention updates the matching loaded session")
+    func sessionAttentionUpdatesNavigatorState() async {
+        let (vm, bus) = makeModel()
+        let workspace = TestPaths.underTemporary("proj")
+        let session = SessionSummary(
+            id: "background",
+            agentID: .other,
+            workspace: workspace,
+            title: "Background review",
+            lastActivity: Date(timeIntervalSince1970: 0),
+            messageCount: 1
+        )
+        vm.workspace = workspace
+        vm.sessionsByProject[workspace.path] = [session]
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        await bus.publish(.sessionAttentionChanged(sessionID: session.id,
+                                                   title: session.title,
+                                                   needsAttention: true))
+        await drain()
+
+        #expect(vm.sessionsByProject[workspace.path]?.first?.needsAttention == true)
+
+        await bus.shutdown()
+    }
+
+    @Test("clearing session attention drops that session's pending permission card")
+    func clearingAttentionDropsPendingPermission() async {
+        let (vm, bus) = makeModel()
+        let workspace = TestPaths.underTemporary("proj")
+        let session = SessionSummary(
+            id: "file:Orders.cs",
+            agentID: .other,
+            workspace: workspace,
+            title: "Orders.cs",
+            lastActivity: Date(timeIntervalSince1970: 0),
+            messageCount: 1,
+            needsAttention: true
+        )
+        vm.workspace = workspace
+        vm.sessionID = session.id
+        vm.sessionsByProject[workspace.path] = [session]
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        let prompt = PermissionPrompt(toolName: "Review",
+                                      summary: "Human review required",
+                                      argumentsSummary: "{}",
+                                      requestedAt: Date())
+        await bus.publish(.permissionRequest(prompt: prompt))
+        await drain()
+        #expect(vm.activePendingPermission?.id == prompt.id)
+
+        await bus.publish(.sessionAttentionChanged(sessionID: session.id,
+                                                   title: session.title,
+                                                   needsAttention: false))
+        await drain()
+
+        #expect(vm.pendingPermissionsBySession[session.id] == nil)
+        #expect(vm.activePendingPermission == nil)
+        #expect(vm.sessionsByProject[workspace.path]?.first?.needsAttention == false)
 
         await bus.shutdown()
     }
@@ -493,7 +653,7 @@ struct EngineViewModelTests {
         vm.subscribe()
         defer { vm.unsubscribe() }
 
-        let cwd = URL(fileURLWithPath: "/tmp/myproject")
+        let cwd = TestPaths.underTemporary("myproject")
         await bus.publish(.sessionStarted(sessionID: "s1", model: nil, cwd: cwd))
         await bus.publish(.fileTouched(cwd.appendingPathComponent("src/main.swift"),
                                        kind: .fsObserved))
@@ -510,7 +670,7 @@ struct EngineViewModelTests {
         vm.subscribe()
         defer { vm.unsubscribe() }
 
-        let cwd = URL(fileURLWithPath: "/tmp/myproject")
+        let cwd = TestPaths.underTemporary("myproject")
         await bus.publish(.sessionStarted(sessionID: "s1", model: nil, cwd: cwd))
         await bus.publish(.fileTouched(cwd.appendingPathComponent("src/main.swift"),
                                        kind: .fsObserved))
@@ -823,7 +983,88 @@ struct EngineViewModelTests {
         await drain()
 
         #expect(vm.pendingPermission?.id == prompt.id)
+        #expect(vm.activePendingPermission?.id == prompt.id)
+        #expect(vm.pendingPermissionsBySession[EngineViewModel.unscopedPermissionSessionKey]?.id == prompt.id)
         #expect(vm.activity == .waitingPermission)
+
+        await bus.shutdown()
+    }
+
+    @Test("permission prompt is visible only on the owning session")
+    func permissionPromptIsScopedToActiveSession() async {
+        let (vm, bus) = makeModel()
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        let cwd = URL(fileURLWithPath: "/tmp/project")
+        let prompt = PermissionPrompt(toolName: "Review",
+                                      summary: "Human review required",
+                                      argumentsSummary: "{}",
+                                      requestedAt: Date())
+        await bus.publish(.sessionStarted(sessionID: "file:A.cs", model: nil, cwd: cwd))
+        await drain()
+        await bus.publish(.permissionRequest(prompt: prompt))
+        await drain()
+
+        #expect(vm.pendingPermissionsBySession["file:A.cs"]?.id == prompt.id)
+        #expect(vm.activePendingPermission?.id == prompt.id)
+        #expect(vm.activity == .waitingPermission)
+
+        await bus.publish(.sessionStarted(sessionID: "file:B.cs", model: nil, cwd: cwd))
+        await drain()
+        #expect(vm.pendingPermissionsBySession["file:A.cs"]?.id == prompt.id)
+        #expect(vm.activePendingPermission == nil)
+        #expect(vm.activity == .idle)
+
+        await bus.publish(.sessionStarted(sessionID: "file:A.cs", model: nil, cwd: cwd))
+        await drain()
+        #expect(vm.activePendingPermission?.id == prompt.id)
+        #expect(vm.activity == .waitingPermission)
+
+        await bus.shutdown()
+    }
+
+    @Test("concurrent session prompts stay isolated and resolve by id")
+    func concurrentSessionPromptsResolveById() async {
+        let (vm, bus) = makeModel()
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        let cwd = URL(fileURLWithPath: "/tmp/project")
+        let promptA = PermissionPrompt(id: UUID(),
+                                       toolName: "Review",
+                                       summary: "Review A",
+                                       argumentsSummary: "{}",
+                                       requestedAt: Date())
+        let promptB = PermissionPrompt(id: UUID(),
+                                       toolName: "Review",
+                                       summary: "Review B",
+                                       argumentsSummary: "{}",
+                                       requestedAt: Date())
+
+        await bus.publish(.sessionStarted(sessionID: "file:A.cs", model: nil, cwd: cwd))
+        await drain()
+        await bus.publish(.permissionRequest(prompt: promptA))
+        await drain()
+
+        await bus.publish(.sessionStarted(sessionID: "file:B.cs", model: nil, cwd: cwd))
+        await drain()
+        await bus.publish(.permissionRequest(prompt: promptB))
+        await drain()
+
+        #expect(vm.pendingPermissionsBySession.count == 2)
+        #expect(vm.activePendingPermission?.id == promptB.id)
+
+        await bus.publish(.permissionAlreadyResolved(id: promptA.id, byDevice: "other"))
+        await drain()
+        #expect(vm.pendingPermissionsBySession["file:A.cs"] == nil)
+        #expect(vm.activePendingPermission?.id == promptB.id)
+
+        vm.respondToPermission(id: promptB.id, decision: .option(id: "accept_a"))
+        await drain()
+        #expect(vm.pendingPermissionsBySession.isEmpty)
+        #expect(vm.activePendingPermission == nil)
+        #expect(vm.activity == .idle)
 
         await bus.shutdown()
     }
@@ -846,6 +1087,7 @@ struct EngineViewModelTests {
         await drain()
 
         #expect(vm.pendingPermission == nil)
+        #expect(vm.pendingPermissionsBySession.isEmpty)
 
         await bus.shutdown()
     }
@@ -1019,6 +1261,227 @@ struct EngineViewModelTests {
         try? await Task.sleep(for: .milliseconds(50))
 
         #expect(vm.diagnostics.isEmpty)
+
+        await bus.shutdown()
+    }
+
+    @Test("sessionStarted does not wipe session/load history during a navigator switch")
+    func sessionStartedPreservesLoadHistoryDuringSwitch() async {
+        let (vm, bus) = makeModel()
+        let workspace = TestPaths.underTemporary("proj")
+        vm.workspace = workspace
+        vm.sessionsByProject[workspace.path] = [
+            SessionSummary(
+                id: "file:Orders.cs",
+                agentID: .other,
+                workspace: workspace,
+                title: "Orders.cs",
+                lastActivity: .distantPast,
+                messageCount: 2
+            ),
+        ]
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        vm.openSession(projectPath: workspace.path, id: "file:Orders.cs")
+        #expect(vm.isSwitchingSession)
+
+        await bus.publish(.userTurn(id: "u1", text: "prior user"))
+        await bus.publish(.assistantText(
+            id: UUID().uuidString,
+            blockID: "a1",
+            text: "prior assistant",
+            isFinal: true
+        ))
+        await bus.publish(.sessionStarted(
+            sessionID: "file:Orders.cs",
+            model: "composer-2.5",
+            cwd: workspace
+        ))
+        await drain()
+
+        #expect(vm.messages.count >= 2)
+        #expect(vm.messages.contains {
+            if case .user(_, let text) = $0 { return text == "prior user" }
+            return false
+        })
+        #expect(vm.messages.contains {
+            if case .assistant(_, let text) = $0 { return text == "prior assistant" }
+            return false
+        })
+
+        await bus.shutdown()
+    }
+
+    @Test("re-clicking the active file session restores chat pane from overview")
+    func reclickActiveFileSessionRestoresChatPane() async {
+        let (vm, bus) = makeModel()
+        let workspace = TestPaths.underTemporary("proj")
+        vm.workspace = workspace
+        vm.sessionID = "file:Orders.cs"
+        vm.dashboardURL = URL(string: "http://127.0.0.1:9/")
+        vm.showsOverviewDashboard = true
+        vm.projectCapabilities[workspace.path] = .init(
+            supportsResumableSessions: true,
+            requiresSessionHandshakeGate: false,
+            supportsOverviewDashboard: true
+        )
+        vm.sessionsByProject[workspace.path] = [
+            SessionSummary(
+                id: "file:Orders.cs",
+                agentID: .other,
+                workspace: workspace,
+                title: "Orders.cs",
+                lastActivity: .distantPast,
+                messageCount: 1,
+                isOverview: false
+            ),
+        ]
+
+        vm.openSession(projectPath: workspace.path, id: "file:Orders.cs")
+        #expect(!vm.showsOverviewDashboard)
+
+        await bus.shutdown()
+    }
+
+    @Test("returning to overview from a file chat reloads the dashboard WebView")
+    func returnToOverviewFromFileChatReloadsDashboard() async {
+        let (vm, bus) = makeModel()
+        let workspace = TestPaths.underTemporary("proj")
+        let overviewURL = URL(string: "http://127.0.0.1:9422/")!
+        vm.workspace = workspace
+        vm.sessionID = "file:Orders.cs"
+        vm.dashboardURL = overviewURL
+        vm.dashboardLoadGeneration = 3
+        vm.showsOverviewDashboard = true
+        vm.projectCapabilities[workspace.path] = .init(
+            supportsResumableSessions: true,
+            requiresSessionHandshakeGate: false,
+            supportsOverviewDashboard: true
+        )
+        vm.sessionsByProject[workspace.path] = [
+            SessionSummary(
+                id: "control",
+                agentID: .other,
+                workspace: workspace,
+                title: "Migration Dashboard",
+                lastActivity: .distantPast,
+                messageCount: 0,
+                isOverview: true,
+                overviewURL: overviewURL
+            ),
+            SessionSummary(
+                id: "file:Orders.cs",
+                agentID: .other,
+                workspace: workspace,
+                title: "Orders.cs",
+                lastActivity: .distantPast,
+                messageCount: 1,
+                isOverview: false
+            ),
+        ]
+
+        vm.openSession(projectPath: workspace.path, id: "file:Orders.cs")
+        #expect(!vm.showsOverviewDashboard)
+        #expect(vm.dashboardURL == overviewURL)
+
+        let generationBeforeReturn = vm.dashboardLoadGeneration
+        vm.openOverview(projectPath: workspace.path)
+        #expect(vm.showsOverviewDashboard)
+        #expect(vm.sessionID == nil)
+        #expect(vm.dashboardURL == overviewURL)
+        #expect(vm.dashboardLoadGeneration == generationBeforeReturn + 1)
+
+        await bus.shutdown()
+    }
+
+    @Test("openOverview restores a missing dashboard URL from the overview session")
+    func openOverviewRestoresPersistedDashboardURL() async {
+        let (vm, bus) = makeModel()
+        let workspace = TestPaths.underTemporary("proj")
+        let overviewURL = URL(string: "http://127.0.0.1:9422/")!
+        vm.workspace = workspace
+        vm.sessionID = "file:Orders.cs"
+        vm.dashboardURL = nil
+        vm.showsOverviewDashboard = false
+        vm.projectCapabilities[workspace.path] = .init(
+            supportsResumableSessions: true,
+            requiresSessionHandshakeGate: false,
+            supportsOverviewDashboard: true
+        )
+        vm.sessionsByProject[workspace.path] = [
+            SessionSummary(
+                id: "control",
+                agentID: .other,
+                workspace: workspace,
+                title: "Migration Dashboard",
+                lastActivity: .distantPast,
+                messageCount: 0,
+                isOverview: true,
+                overviewURL: overviewURL
+            ),
+        ]
+
+        vm.openOverview(projectPath: workspace.path)
+        #expect(vm.showsOverviewDashboard)
+        #expect(vm.sessionID == nil)
+        #expect(vm.dashboardURL == overviewURL)
+
+        await bus.shutdown()
+    }
+
+    @Test("sessionStarted while on overview does not bind a chat session id")
+    func sessionStartedOnOverviewLeavesSessionUnbound() async {
+        let (vm, bus) = makeModel()
+        let workspace = TestPaths.underTemporary("proj")
+        vm.workspace = workspace
+        vm.sessionID = nil
+        vm.showsOverviewDashboard = true
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        await bus.publish(.sessionStarted(sessionID: "control", model: "gpt", cwd: workspace))
+        await drain()
+
+        #expect(vm.sessionID == nil)
+        #expect(vm.showsOverviewDashboard)
+
+        await bus.shutdown()
+    }
+
+    @Test("openSession on an overview row routes to the dashboard without session load")
+    func openSessionOverviewRowRoutesToDashboard() async {
+        let port = StubCommandPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port, bus: bus)
+        let workspace = TestPaths.underTemporary("proj")
+        let overviewURL = URL(string: "http://127.0.0.1:9422/")!
+        vm.workspace = workspace
+        vm.sessionID = "file:Orders.cs"
+        vm.dashboardURL = overviewURL
+        vm.showsOverviewDashboard = false
+        vm.projectCapabilities[workspace.path] = .init(
+            supportsResumableSessions: true,
+            requiresSessionHandshakeGate: false,
+            supportsOverviewDashboard: true
+        )
+        vm.sessionsByProject[workspace.path] = [
+            SessionSummary(
+                id: "control",
+                agentID: .other,
+                workspace: workspace,
+                title: "Migration Dashboard",
+                lastActivity: .distantPast,
+                messageCount: 0,
+                isOverview: true,
+                overviewURL: overviewURL
+            ),
+        ]
+
+        vm.openSession(projectPath: workspace.path, id: "control")
+        #expect(vm.showsOverviewDashboard)
+        #expect(vm.sessionID == nil)
+        #expect(vm.dashboardURL == overviewURL)
 
         await bus.shutdown()
     }

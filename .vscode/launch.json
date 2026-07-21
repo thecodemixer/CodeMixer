@@ -79,6 +79,26 @@
             "target": "fake-acp",
             "configuration": "release",
             "preLaunchTask": "swift: Build Release fake-acp"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:CodeMixer}",
+            "name": "Debug fake-custom-acp",
+            "target": "fake-custom-acp",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug fake-custom-acp"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:CodeMixer}",
+            "name": "Release fake-custom-acp",
+            "target": "fake-custom-acp",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release fake-custom-acp"
         }
     ]
 }

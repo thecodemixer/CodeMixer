@@ -36,7 +36,7 @@ public struct PromptComposerView: View {
 
     public var body: some View {
         VStack(spacing: Theme.spacing.s12) {
-            if let prompt = model.pendingPermission {
+            if let prompt = model.activePendingPermission {
                 PermissionPromptView(prompt: prompt) { decision in
                     model.respondToPermission(id: prompt.id, decision: decision)
                 }
@@ -202,6 +202,9 @@ public struct PromptComposerView: View {
 
     private var promptPlaceholder: String {
         if model.isComposerLockedForSessionResume {
+            if model.isWarmSessionSwitch {
+                return "Loading session…"
+            }
             return "Starting session…"
         }
         return isEditMode ? "Edit your message…" : "Ask…"

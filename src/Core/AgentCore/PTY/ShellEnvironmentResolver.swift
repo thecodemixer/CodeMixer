@@ -30,7 +30,7 @@ public struct ShellEnvironmentResolver: Sendable {
     /// Times out after `timeout` and returns the inherited process env as a
     /// best-effort fallback (logged at warning level).
     public func resolve(timeout: Duration = .seconds(3)) async -> ResolvedEnvironment {
-        let shellPath = environment.processEnvironment()["SHELL"] ?? "/bin/zsh"
+        let shellPath = environment.processEnvironment()["SHELL"] ?? SystemPaths.zsh.path
         let shell = URL(fileURLWithPath: shellPath)
 
         do {

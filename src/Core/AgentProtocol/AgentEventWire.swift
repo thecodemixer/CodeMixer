@@ -48,6 +48,11 @@ public enum AgentEventWire: Sendable, Codable, Hashable {
     case appearancePrefChanged(key: AppearancePrefKey, value: AppearancePrefValue)
     case snapshotReady(kind: SnapshotKind, payloadBase64: String)
     case clientAction(ClientAction)
+
+    case agentDashboard(url: String, title: String?)
+    case sessionIndexChanged(projectPath: String)
+    case sessionAttentionChanged(sessionID: String, title: String, needsAttention: Bool)
+    case cachedTranscriptLoaded(sessionID: String)
 }
 
 // MARK: - Wire payload types
@@ -83,19 +88,38 @@ public enum WireToolProgress: Sendable, Codable, Hashable {
     case generic(message: String)
 }
 
+public struct WirePermissionOption: Sendable, Codable, Hashable, Identifiable {
+    public let optionId: String
+    public let label: String
+
+    public var id: String { optionId }
+
+    public init(optionId: String, label: String) {
+        self.optionId = optionId
+        self.label = label
+    }
+}
+
 public struct WirePermissionPrompt: Sendable, Codable, Hashable, Identifiable {
     public let id: UUID
     public let toolName: String
     public let summary: String
     public let argumentsSummary: String
     public let requestedAt: Date
+    public let options: [WirePermissionOption]?
 
-    public init(id: UUID, toolName: String, summary: String, argumentsSummary: String, requestedAt: Date) {
+    public init(id: UUID,
+                toolName: String,
+                summary: String,
+                argumentsSummary: String,
+                requestedAt: Date,
+                options: [WirePermissionOption]? = nil) {
         self.id = id
         self.toolName = toolName
         self.summary = summary
         self.argumentsSummary = argumentsSummary
         self.requestedAt = requestedAt
+        self.options = options
     }
 }
 

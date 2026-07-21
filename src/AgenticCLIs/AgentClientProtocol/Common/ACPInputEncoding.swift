@@ -27,6 +27,9 @@ public enum ACPInputEncoding {
                         "writeTextFile": .bool(true),
                     ]),
                     "terminal": .bool(true),
+                    "_meta": .object([
+                        "codemixer.dev/sessionNew": .bool(true),
+                    ]),
                 ]),
                 "clientInfo": .object([
                     "name": .string("codemixer"),
@@ -74,6 +77,12 @@ public enum ACPInputEncoding {
 
     /// Warm `session/load` / `session/resume` on an already-authenticated process.
     public static func sessionLoad(sessionID: String, state: ACPClientState) -> Data {
+        // Capability check before `prepareLoadSession` — mutating then returning
+        // empty left the live client mid-switch when warm resume fell back to cold.
+        guard state.supportsLoadSession() || state.supportsResumeSession() else {
+            return Data()
+        }
+        guard state.currentContext() != nil else { return Data() }
         state.prepareLoadSession(sessionID: sessionID)
         guard let context = state.currentContext() else { return Data() }
         if state.supportsLoadSession() {

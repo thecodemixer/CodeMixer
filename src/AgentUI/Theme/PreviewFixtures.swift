@@ -6,7 +6,8 @@ import AgentProtocol
 /// Shared sample data for SwiftUI `#Preview` blocks.
 enum PreviewFixtures {
 
-    static let workspace = URL(fileURLWithPath: "/Users/you/Code/Sample")
+    static let workspace = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        .appendingPathComponent("CodemixerPreview/Sample", isDirectory: true)
 
     static let recentProjects: [SessionStore.ProjectRecord] = [
         .init(path: workspace.path,

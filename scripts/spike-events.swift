@@ -97,7 +97,7 @@ enum SpikeHookSupport {
         sock.shutdown(socket.SHUT_WR)
         sys.stdout.buffer.write(sock.recv(65536))
         """
-        return "/usr/bin/python3 -c \(quotedShell(script)) \(quotedShell(socketPath))"
+        return "\(ScriptPaths.python3) -c \(quotedShell(script)) \(quotedShell(socketPath))"
     }
 
     static func writePythonHookSettings(file: URL, socketPath: String, hookNames: [String]) throws {
@@ -123,6 +123,18 @@ enum SpikeHookSupport {
 
 enum ScriptPaths {
     static let env = "/usr/bin/env"
+    static let tmp = FileManager.default.temporaryDirectory
+
+    static var python3: String {
+        if let override = ProcessInfo.processInfo.environment["PYTHON3_BIN"], !override.isEmpty {
+            return override
+        }
+        let candidates = [
+            "/usr/bin/python3",
+            "/opt/homebrew/bin/python3",
+        ]
+        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) } ?? candidates[0]
+    }
 }
 
 struct Config {
@@ -357,8 +369,8 @@ for dep in ["socat", "claude"] {
 }
 
 let ts = Int(Date().timeIntervalSince1970)
-let captureFile = URL(fileURLWithPath: "/tmp/codemixer-spike-events-\(ts).jsonl")
-let socketPath = "/tmp/codemixer-spike-hook-\(ts).sock"
+let captureFile = ScriptPaths.tmp.appendingPathComponent("codemixer-spike-events-\(ts).jsonl")
+let socketPath = ScriptPaths.tmp.appendingPathComponent("codemixer-spike-hook-\(ts).sock").path
 let settingsDir = config.workspace.appendingPathComponent(".claude", isDirectory: true)
 let settingsFile = settingsDir.appendingPathComponent("settings.local.json")
 let backupFile = settingsFile.appendingPathExtension("spike-backup")

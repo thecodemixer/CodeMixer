@@ -81,7 +81,7 @@ public enum AgentError: Error, Sendable, Equatable {
         case .engineRestartLimitReached:
             return "The agent crashed too many times in a short window."
         case .permissionTimeout(_, let action):
-            return "Permission request timed out — auto-\(action.rawValue)."
+            return "Permission request timed out — auto-\(action.wireValue)."
         case .internalInvariant(let detail):
             return "Internal error: \(detail)"
         case .unsupportedOperation(let detail):

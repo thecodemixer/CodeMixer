@@ -404,10 +404,15 @@ public enum AgentEvent: Sendable {
     case engineRestarted
     case stopped(reason: StopReason)
     case error(AgentError)
+    case agentDashboard(url: URL, title: String?)
+    case sessionIndexChanged(projectPath: URL)
+    case sessionAttentionChanged(sessionID: String, title: String, needsAttention: Bool)
     // Out-of-band (also on the bus): speakBubbleRequested, fileReverted,
     // prefsChanged, appearancePrefChanged, snapshotReady, clientAction
 }
 ```
+
+Streaming `session/update` chunks that carry a foreign `sessionId` (not the foreground session) are dropped. Background `session/request_permission` prompts are parked per-session and re-emitted as `permissionRequest` after that session’s `session/load`.
 
 ### Categorical roles
 
@@ -416,8 +421,9 @@ public enum AgentEvent: Sendable {
 | **Session lifecycle** | `sessionStarted`, `engineRestarted`, `stopped`, `error` |
 | **Conversation** | `userTurn`, `textDelta`, `assistantText`, `thinkingChunk`, `thinkingComplete`, `clientAction` |
 | **Tool execution** | `toolStart`, `toolProgress`, `toolEnd` |
-| **Permissions** | `permissionRequest`, `permissionAlreadyResolved` |
+| **Permissions** | `permissionRequest`, `permissionAlreadyResolved` (optional `PermissionPrompt.options` for custom ACP buttons); parked until load when for a background session |
 | **Activity & ambient** | `statusPhraseChanged`, `activityStateChanged`, `noEventGap`, `authURL` (legacy wire; adapters use `authenticationRequired` errors for setup), `bell`, `fileTouched`, `usage` |
+| **Custom ACP surfaces** | `agentDashboard(url:title:)` (WebView URL + optional title from `_meta`), `sessionIndexChanged`, `sessionAttentionChanged` |
 | **Out-of-band** | `speakBubbleRequested`, `fileReverted`, `prefsChanged`, `appearancePrefChanged`, `snapshotReady` |
 
 A consumer that knows nothing else can render a complete conversation by folding these events. New event cases require: (a) wire DTO in `AgentEventWire`, (b) `WireCodec` round-trip, (c) `RemoteParityTests` coverage, (d) a UI consumer or an explicit decision that none is wanted.

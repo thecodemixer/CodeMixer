@@ -1,4 +1,5 @@
 import Foundation
+import AgentCore
 
 /// Minimal `Process` wrapper for hook command execution in `fake-claude`.
 struct TwinProcessRunner: Sendable {
@@ -10,7 +11,7 @@ struct TwinProcessRunner: Sendable {
 
     func run(shellCommand: String, stdin: Data, cwd: URL) throws -> Result {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.executableURL = SystemPaths.sh
         process.arguments = ["-c", shellCommand]
         process.currentDirectoryURL = cwd
 

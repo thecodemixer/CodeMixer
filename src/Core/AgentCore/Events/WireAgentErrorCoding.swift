@@ -38,7 +38,7 @@ enum WireAgentErrorCoding {
             context[.id] = id
         case .permissionTimeout(let promptID, let action):
             context[.promptID] = promptID.uuidString
-            context[.action] = action.rawValue
+            context[.action] = action.wireValue
         case .internalInvariant(let detail):
             context[.detail] = detail
         case .unsupportedOperation(let detail):
@@ -97,7 +97,7 @@ enum WireAgentErrorCoding {
             guard let promptID = UUID(uuidString: ctx[.promptID] ?? "") else {
                 return invalidContext(code, field: .promptID)
             }
-            guard let action = PermissionDecision(rawValue: ctx[.action] ?? "") else {
+            guard let action = decodePermissionDecision(ctx[.action] ?? "") else {
                 return invalidContext(code, field: .action)
             }
             return .permissionTimeout(promptID: promptID, action: action)
@@ -111,5 +111,18 @@ enum WireAgentErrorCoding {
     private static func invalidContext(_ code: WireAgentErrorCode,
                                        field: WireAgentErrorContextKey) -> AgentError {
         .internalInvariant(detail: "invalid \(code.rawValue) \(field.rawValue)")
+    }
+
+    private static func decodePermissionDecision(_ raw: String) -> PermissionDecision? {
+        switch raw {
+        case "allow": return .allow
+        case "allowAlways": return .allowAlways
+        case "deny": return .deny
+        default:
+            if raw.hasPrefix("option:") {
+                return .option(id: String(raw.dropFirst("option:".count)))
+            }
+            return nil
+        }
     }
 }

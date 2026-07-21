@@ -7,7 +7,7 @@ import AgentCore
 struct ClaudeBinaryLocatorTests {
 
     private let locator = ClaudeBinaryLocator()
-    private let sh = URL(fileURLWithPath: "/bin/sh")
+    private let sh = SystemPaths.sh
 
     @Test("CLAUDE_BIN override is respected when the path is executable")
     func claudeBinOverride() throws {

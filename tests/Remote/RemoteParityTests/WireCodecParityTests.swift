@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import AgentTestSupport
 @testable import AgentCore
 @testable import AgentProtocol
 
@@ -140,9 +141,44 @@ struct WireCodecParityTests {
         #expect(d == .milliseconds(11_500))
     }
 
+    @Test("PermissionPrompt preserves custom options")
+    func permissionPromptOptions() {
+        let id = UUID()
+        let at = Date(timeIntervalSince1970: 1_700_000_000)
+        let prompt = PermissionPrompt(
+            id: id,
+            toolName: "Migrate",
+            summary: "Apply migration",
+            argumentsSummary: "{}",
+            requestedAt: at,
+            options: [PermissionOption(optionId: "apply", label: "Apply")]
+        )
+        let event = AgentEvent.permissionRequest(prompt: prompt)
+        let restored = WireCodec.decode(WireCodec.encode(event))
+        guard case .permissionRequest(let r) = restored else {
+            Issue.record("not a permissionRequest"); return
+        }
+        #expect(r.options?.count == 1)
+        #expect(r.options?.first?.optionId == "apply")
+        #expect(r.options?.first?.label == "Apply")
+    }
+
+    @Test("PermissionDecision option round-trips")
+    func permissionDecisionOption() throws {
+        try roundTrip(PermissionDecision.option(id: "custom-opt"))
+    }
+
+    private func roundTrip<T: Codable & Equatable>(_ value: T) throws {
+        let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
+        let decoder = JSONDecoder()
+        let data = try encoder.encode(value)
+        let restored = try decoder.decode(T.self, from: data)
+        #expect(restored == value)
+    }
+
     /// One value per `AgentEvent` case, including every arm of nested unions.
     private func allEvents() -> [AgentEvent] {
-        let cwd = URL(fileURLWithPath: "/tmp/workspace")
+        let cwd = TestPaths.underTemporary("workspace")
         let prompt = PermissionPrompt(toolName: "Bash",
                                       summary: "Run: ls",
                                       argumentsSummary: "{}",
@@ -168,7 +204,7 @@ struct WireCodecParityTests {
             .noEventGap(turnID: UUID(), elapsed: .seconds(11)),
             .authURL(URL(string: "https://claude.ai/oauth/abc")!),
             .bell,
-            .fileTouched(URL(fileURLWithPath: "/tmp/a.txt"), kind: .fsObserved),
+            .fileTouched(TestPaths.underTemporary("a.txt", isDirectory: false), kind: .fsObserved),
             .usage(tokens: 10, costUSD: 0.001),
             .engineRestarted,
             .stopped(reason: .naturalExit),
@@ -184,6 +220,13 @@ struct WireCodecParityTests {
                 title: "Permission mode",
                 detail: "Plan"
             )),
+            .agentDashboard(
+                url: URL(string: "http://127.0.0.1:8423/dashboard")!,
+                title: "Migration Dashboard"
+            ),
+            .sessionIndexChanged(projectPath: cwd),
+            .sessionAttentionChanged(sessionID: "bg-1", title: "Background", needsAttention: true),
+            .cachedTranscriptLoaded(sessionID: "cached-1"),
         ]
     }
 }
@@ -221,6 +264,10 @@ extension AgentEvent {
         case .appearancePrefChanged:    "appearancePrefChanged"
         case .snapshotReady:            "snapshotReady"
         case .clientAction:             "clientAction"
+        case .agentDashboard:           "agentDashboard"
+        case .sessionIndexChanged:      "sessionIndexChanged"
+        case .sessionAttentionChanged:  "sessionAttentionChanged"
+        case .cachedTranscriptLoaded:   "cachedTranscriptLoaded"
         }
     }
 
@@ -294,6 +341,15 @@ extension AgentEvent {
             return k1 == k2 && p1 == p2
         case (.clientAction(let a1), .clientAction(let a2)):
             return a1 == a2
+        case (.agentDashboard(let u1, let t1), .agentDashboard(let u2, let t2)):
+            return u1.absoluteString == u2.absoluteString && t1 == t2
+        case (.sessionIndexChanged(let p1), .sessionIndexChanged(let p2)):
+            return p1.path == p2.path
+        case (.sessionAttentionChanged(let s1, let t1, let n1),
+              .sessionAttentionChanged(let s2, let t2, let n2)):
+            return s1 == s2 && t1 == t2 && n1 == n2
+        case (.cachedTranscriptLoaded(let s1), .cachedTranscriptLoaded(let s2)):
+            return s1 == s2
         default:
             return false
         }

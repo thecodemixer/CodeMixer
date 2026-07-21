@@ -133,6 +133,7 @@ private let _adapterRegistry = AdapterRegistry.shared
 private let _pdAllow      = PermissionDecision.allow
 private let _pdAllowAlways = PermissionDecision.allowAlways
 private let _pdDeny       = PermissionDecision.deny
+private let _pdOption     = PermissionDecision.option(id: "opt")
 
 // PermissionMode
 private let _pmDefault     = PermissionMode.default
@@ -1372,5 +1373,42 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // write
 // writeAtomically
 // writeBytes
-// MANIFEST_SYMBOLS_END  (1134 unique public symbols)
+// ACPConversationTurn
+// ACPProjectPaths
+// ACPProjectSessionStore
+// ACPSessionIndexing
+// ACPSessionMode
+// CustomACPAdapter
+// CustomACPAdapterFactory
+// CustomACPBinaryLocator
+// CustomACPModeMapping
+// PermissionOption
+// WirePermissionOption
+// acpDirectoryName
+// acpRootURL
+// advertisesDashboard
+// agentDirectory
+// isOverview
+// isPreAuthenticated
+// needsAttention
+// openOverview
+// optionId
+// overviewDashboard
+// overviewURL
+// resetCacheForTests
+// sessionAvailableModes
+// sessionCurrentModeID
+// sessionsIndexFileName
+// sessionsIndexURL
+// setArchived
+// setIsOverview
+// setNeedsAttention
+// toolCallID
+// toolInputJSON
+// toolOutputSummary
+// toolSuccess
+// transcriptsDirectory
+// transcriptsDirectoryName
+// wireValue
+// MANIFEST_SYMBOLS_END  (1171 unique public symbols)
 

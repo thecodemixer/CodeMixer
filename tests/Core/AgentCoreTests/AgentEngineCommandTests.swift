@@ -156,6 +156,35 @@ struct AgentEngineCommandTests {
         await h.shutdown()
     }
 
+    @Test("openProject warm-resumes handshake agents without respawning the process")
+    func openProjectWarmResumeSkipsRespawn() async throws {
+        let capture = CapturingTransportFactory()
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("codemixer-warm-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let fs = InMemoryFileSystem()
+        let env = FakeEnvironment(home: root)
+        let store = WorkspaceProjectsStore(environment: env, fileSystem: fs)
+        let adapter = WarmHandshakeAdapter()
+        await AdapterRegistry.shared.register(adapter)
+        let ref = try await store.createProject(name: "acp",
+                                                projectType: .cursorCLI,
+                                                in: root)
+
+        let seams = Seams.fake(environment: env, fileSystem: fs)
+        let engine = AgentEngine(seams: seams, transportFactory: capture.makeTransport)
+        await engine.bootstrap()
+        try await engine.start(adapter: adapter,
+                               workspace: URL(fileURLWithPath: ref.path))
+        #expect(capture.descriptors.count == 1)
+
+        try await engine.send(.openProject(path: ref.path, resumeSessionID: "sess-B"))
+        #expect(capture.descriptors.count == 1)
+        #expect(adapter.resumeCalls == ["sess-B"])
+
+        await engine.shutdown(reason: .naturalExit)
+    }
+
     @Test("sendPrompt publishes userTurn before a PTY write failure is thrown")
     func sendPromptPublishesBeforeWriteFailure() async throws {
         let transport = ScriptedTransport(writeSteps: [.fail(.writeFailed(errno: 5))])
@@ -1246,6 +1275,32 @@ struct AgentEngineCommandTests {
         await h.shutdown()
     }
 
+    @Test("permissionAlreadyResolved cancels auto-deny without delivering a second response")
+    func permissionAlreadyResolvedCancelsTimeout() async throws {
+        let clock = FakeClock()
+        let h = try await EngineHarness.make(clock: clock, permissionTimeout: .seconds(60))
+        let prompt = PermissionPrompt(toolName: "Review",
+                                      summary: "Human review",
+                                      argumentsSummary: "{}",
+                                      requestedAt: clock.now())
+        h.adapter.emit(.permissionRequest(prompt: prompt))
+        try await spinUntil(clock: clock, target: 1, timeout: .seconds(2))
+
+        h.adapter.emit(.permissionAlreadyResolved(id: prompt.id, byDevice: "session-archived"))
+        try await spinUntil(clock: clock, target: 2, timeout: .seconds(2))
+
+        clock.advance(by: .seconds(61))
+        try await Task.sleep(for: .milliseconds(80))
+        let events = await h.collectedSoFar()
+        let timeoutDeny = events.contains {
+            if case .permissionAlreadyResolved(_, let by) = $0 { return by == "timeout" }
+            return false
+        }
+        #expect(!timeoutDeny)
+        #expect(!h.adapter.recorded.contains(.permissionResponse(.deny, promptID: prompt.id)))
+        await h.shutdown()
+    }
+
     @Test("respondToPermission before timeout cancels the auto-deny")
     func respondCancelsTimeout() async throws {
         let clock = FakeClock()
@@ -1525,7 +1580,7 @@ final class RoutingTestAdapter: AgentAdapter, @unchecked Sendable {
     }
 
     func locateBinary(env: ResolvedEnvironment) async throws -> URL {
-        URL(fileURLWithPath: "/bin/cat")
+        SystemPaths.cat
     }
 
     func defaultEnvOverrides() -> [String: String] { [:] }
@@ -1555,6 +1610,39 @@ final class RoutingTestAdapter: AgentAdapter, @unchecked Sendable {
         sessions.filter { $0.workspace.path == workspace.path }
     }
 
+    func resumeArgvAddition(sessionID: String) -> [String] { [] }
+}
+
+/// Handshake-gated adapter that can warm-encode `session/load` bytes.
+final class WarmHandshakeAdapter: AgentAdapter, @unchecked Sendable {
+    let id: AgentID = .cursorCLI
+    let displayName = "Warm Handshake"
+    let iconSymbol = "ant"
+    let capabilities: AgentCapabilities = [.sessionHandshakeGate, .resumableSessions]
+    let transportDescriptor: AgentTransportDescriptor = .agentClientProtocol
+    let slashCommandCatalog: [SlashCommand] = []
+    private let lock = NSLock()
+    private(set) var resumeCalls: [String] = []
+
+    func locateBinary(env: ResolvedEnvironment) async throws -> URL { SystemPaths.cat }
+    func defaultEnvOverrides() -> [String: String] { [:] }
+    func buildLaunchArgv(context: LaunchContext) -> [String] { ["cat"] }
+    func authStatus(env: ResolvedEnvironment) async -> AuthStatus { .authenticated(account: nil) }
+    func makeEventStream(inputs: AgentInputs) -> AsyncStream<AgentEvent> {
+        AsyncStream { $0.finish() }
+    }
+    func encodeUserPrompt(_ text: String) -> Data { Data(text.utf8) }
+    func cancelSequence() -> Data { Data() }
+    func encodeResumeSession(sessionID: String) -> Data? {
+        lock.lock(); resumeCalls.append(sessionID); lock.unlock()
+        return Data("session/load:\(sessionID)".utf8)
+    }
+    func encodePermissionResponse(_ decision: PermissionDecision,
+                                  for prompt: PermissionPrompt) -> PermissionResponseDelivery {
+        .writePTY(Data())
+    }
+    func enumerateProjectCommands(workspace: URL) async -> [SlashCommand] { [] }
+    func listResumableSessions(workspace: URL) async -> [SessionSummary] { [] }
     func resumeArgvAddition(sessionID: String) -> [String] { [] }
 }
 

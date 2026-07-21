@@ -9,7 +9,7 @@ struct ACPProjectSessionStoreTests {
 
     @Test("paths live under project .codemixer/acp/<id>/")
     func paths() {
-        let root = URL(fileURLWithPath: "/tmp/proj", isDirectory: true)
+        let root = TestPaths.underTemporary("proj")
         let agent = ACPProjectPaths.agentDirectory(projectRoot: root, customAgentID: "doc-gen")
         #expect(agent.path.hasSuffix("/.codemixer/acp/doc-gen"))
         #expect(ACPProjectPaths.sessionsIndexURL(projectRoot: root, customAgentID: "doc-gen")
@@ -240,5 +240,124 @@ struct ACPProjectSessionStoreTests {
         #expect(lines.count == 200)
         #expect(jsonl.contains("turn-200"))
         #expect(!jsonl.contains("\"text\":\"turn-0\""))
+    }
+
+    @Test("setArchived excludes session from summaries")
+    func archivedFiltering() async throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("acp-arch-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let fs = SystemFileSystem()
+        let store = ACPProjectSessionStore(
+            customAgentID: "mig",
+            environment: FakeEnvironment(processEnv: [:], home: root),
+            fileSystem: fs,
+            clock: FakeClock(now: Date(timeIntervalSince1970: 1_700_000_000))
+        )
+        await store.recordSession(
+            id: "keep",
+            customAgentID: "mig",
+            workspace: root,
+            title: "Keep"
+        )
+        await store.recordSession(
+            id: "hide",
+            customAgentID: "mig",
+            workspace: root,
+            title: "Hide"
+        )
+        await store.setArchived(sessionID: "hide", customAgentID: "mig", archived: true)
+
+        let summaries = await store.summaries(workspace: root, customAgentID: "mig")
+        #expect(summaries.contains { $0.id == "keep" })
+        #expect(!summaries.contains { $0.id == "hide" })
+    }
+
+    @Test("recordSession preserves overview attention and archive flags")
+    func recordSessionPreservesOverviewFlags() async throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("acp-ov-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = ACPProjectSessionStore(
+            customAgentID: "mig",
+            environment: FakeEnvironment(processEnv: [:], home: root),
+            fileSystem: SystemFileSystem(),
+            clock: FakeClock(now: Date(timeIntervalSince1970: 1_700_000_000))
+        )
+        await store.recordSession(
+            id: "control",
+            customAgentID: "mig",
+            workspace: root,
+            title: "Migration Dashboard"
+        )
+        await store.setIsOverview(
+            sessionID: "control",
+            customAgentID: "mig",
+            isOverview: true,
+            overviewURL: URL(string: "http://127.0.0.1:9/")
+        )
+        await store.setNeedsAttention(sessionID: "control", customAgentID: "mig", needsAttention: true)
+
+        // session/list and session-open paths call recordSession again without flags.
+        await store.recordSession(
+            id: "control",
+            customAgentID: "mig",
+            workspace: root,
+            title: "Migration Dashboard"
+        )
+
+        let summaries = await store.summaries(workspace: root, customAgentID: "mig")
+        let control = summaries.first { $0.id == "control" }
+        #expect(control?.isOverview == true)
+        #expect(control?.needsAttention == true)
+        #expect(control?.overviewURL?.absoluteString == "http://127.0.0.1:9/")
+    }
+
+    @Test("setIsOverview archives prior control chats with the same title")
+    func setIsOverviewArchivesStaleControls() async throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("acp-ov-dedupe-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = ACPProjectSessionStore(
+            customAgentID: "mig",
+            environment: FakeEnvironment(processEnv: [:], home: root),
+            fileSystem: SystemFileSystem(),
+            clock: FakeClock(now: Date(timeIntervalSince1970: 1_700_000_000))
+        )
+        await store.recordSession(
+            id: "old-control",
+            customAgentID: "mig",
+            workspace: root,
+            title: "Migration Dashboard"
+        )
+        await store.setIsOverview(
+            sessionID: "old-control",
+            customAgentID: "mig",
+            isOverview: true,
+            overviewURL: URL(string: "http://127.0.0.1:8/")
+        )
+        await store.recordSession(
+            id: "new-control",
+            customAgentID: "mig",
+            workspace: root,
+            title: "Migration Dashboard"
+        )
+        await store.setIsOverview(
+            sessionID: "new-control",
+            customAgentID: "mig",
+            isOverview: true,
+            overviewURL: URL(string: "http://127.0.0.1:9/")
+        )
+
+        let summaries = await store.summaries(workspace: root, customAgentID: "mig")
+        #expect(summaries.count == 1)
+        #expect(summaries.first?.id == "new-control")
+        #expect(summaries.first?.isOverview == true)
     }
 }

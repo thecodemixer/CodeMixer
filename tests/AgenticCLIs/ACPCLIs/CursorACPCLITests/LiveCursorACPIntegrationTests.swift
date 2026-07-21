@@ -3,6 +3,7 @@ import Testing
 import ACPCLIs
 import AgentCore
 import AgentProtocol
+import AgentTestSupport
 
 /// Opt-in live harness for Cursor ACP (`cursor-agent acp`).
 ///
@@ -21,7 +22,7 @@ struct LiveCursorACPIntegrationTests {
         #expect(adapter.id == .cursorCLI)
         #expect(adapter.transportDescriptor == .agentClientProtocol)
         #expect(adapter.buildLaunchArgv(context: LaunchContext(
-            workspace: URL(fileURLWithPath: "/tmp"),
+            workspace: TestPaths.temporaryRoot,
             permissionMode: .default
         )) == ["cursor-agent", "acp"])
     }

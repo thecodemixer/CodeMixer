@@ -1,8 +1,9 @@
 {
   "budgets": {
     "Engine + ClaudeCodeTwin": 5.0,
-    "AgentEngine — command matrix": 11.0,
-    "EngineViewModel — event reduction": 3.0,
+    "AgentEngine — command matrix": 15.0,
+    "EngineViewModel — event reduction": 4.0,
+    "EngineViewModel — optimistic send + navigator": 3.0,
     "ClaudeTranscriptTailer fixtures": 5.0,
     "AgentEngine + ClaudeAdapter + fake-claude": 5.0,
     "AgentEngine + ACPAdapter + fake-acp": 5.0,

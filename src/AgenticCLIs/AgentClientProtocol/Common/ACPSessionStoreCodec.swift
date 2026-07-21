@@ -44,9 +44,14 @@ enum ACPSessionStoreCodec {
         var lastActivity: Date
         var messageCount: Int
         var turns: [ACPConversationTurn]
+        var archived: Bool?
+        var needsAttention: Bool?
+        var isOverview: Bool?
+        var overviewURL: String?
 
         enum CodingKeys: String, CodingKey {
             case id, customAgentID, workspacePath, title, lastActivity, messageCount, turns
+            case archived, needsAttention, isOverview, overviewURL
         }
 
         init(id: String,
@@ -55,7 +60,11 @@ enum ACPSessionStoreCodec {
              title: String,
              lastActivity: Date,
              messageCount: Int,
-             turns: [ACPConversationTurn]) {
+             turns: [ACPConversationTurn],
+             archived: Bool? = nil,
+             needsAttention: Bool? = nil,
+             isOverview: Bool? = nil,
+             overviewURL: String? = nil) {
             self.id = id
             self.customAgentID = customAgentID
             self.workspacePath = workspacePath
@@ -63,6 +72,10 @@ enum ACPSessionStoreCodec {
             self.lastActivity = lastActivity
             self.messageCount = messageCount
             self.turns = turns
+            self.archived = archived
+            self.needsAttention = needsAttention
+            self.isOverview = isOverview
+            self.overviewURL = overviewURL
         }
 
         init(from decoder: any Decoder) throws {
@@ -74,6 +87,10 @@ enum ACPSessionStoreCodec {
             lastActivity = try c.decode(Date.self, forKey: .lastActivity)
             messageCount = try c.decode(Int.self, forKey: .messageCount)
             turns = try c.decodeIfPresent([ACPConversationTurn].self, forKey: .turns) ?? []
+            archived = try c.decodeIfPresent(Bool.self, forKey: .archived)
+            needsAttention = try c.decodeIfPresent(Bool.self, forKey: .needsAttention)
+            isOverview = try c.decodeIfPresent(Bool.self, forKey: .isOverview)
+            overviewURL = try c.decodeIfPresent(String.self, forKey: .overviewURL)
         }
     }
 
