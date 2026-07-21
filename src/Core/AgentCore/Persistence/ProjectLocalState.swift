@@ -8,29 +8,48 @@ import OSLog
 /// shareable with the repo. Schema bumps refuse newer files rather than
 /// corrupt them.
 ///
-/// On disk the field is still keyed `agentMode` (schema v1) for compatibility.
+/// On disk the field is still keyed `agentMode` (schema v1+) for compatibility.
+/// Schema v2 adds optional `folderView` for pinned sidebar paths on folder
+/// projects (`files` / `docs` / `modelhike`).
 public struct ProjectLocalState: Sendable, Codable, Hashable {
-    public static let currentSchemaVersion = 1
+    public static let currentSchemaVersion = 2
 
     public var schemaVersion: Int
     public var displayName: String
     public var projectType: ProjectType
+    /// Pinned sidebar shortcuts for pin-capable folder kinds. Ignored for
+    /// agent projects and `logs` (automatic shortcuts).
+    public var folderView: FolderViewState?
 
     public init(schemaVersion: Int = Self.currentSchemaVersion,
                 displayName: String,
-                projectType: ProjectType) {
+                projectType: ProjectType,
+                folderView: FolderViewState? = nil) {
         self.schemaVersion = schemaVersion
         self.displayName = displayName
         self.projectType = projectType
+        self.folderView = Self.normalizedFolderView(folderView, for: projectType)
     }
 
-    public init(ref: WorkspaceProjectsStore.ProjectRef) {
-        self.init(displayName: ref.displayName, projectType: ref.projectType)
+    public init(ref: WorkspaceProjectsStore.ProjectRef,
+                folderView: FolderViewState? = nil) {
+        self.init(displayName: ref.displayName,
+                  projectType: ref.projectType,
+                  folderView: folderView)
     }
 
     enum CodingKeys: String, CodingKey {
-        case schemaVersion, displayName
+        case schemaVersion, displayName, folderView
         case projectType = "agentMode"
+    }
+
+    public static func normalizedFolderView(_ state: FolderViewState?,
+                                            for projectType: ProjectType) -> FolderViewState? {
+        guard let kind = projectType.folderKind, kind.supportsPinnedSidebarEntries else {
+            return nil
+        }
+        guard let state else { return FolderViewState() }
+        return FolderViewState(pinnedRelativePaths: FolderViewState.normalized(state.pinnedRelativePaths))
     }
 }
 
@@ -55,7 +74,10 @@ public enum ProjectLocalStateStore {
                     """)
                 return nil
             }
-            return try JSONDecoder().decode(ProjectLocalState.self, from: data)
+            var state = try JSONDecoder().decode(ProjectLocalState.self, from: data)
+            state.folderView = ProjectLocalState.normalizedFolderView(state.folderView,
+                                                                      for: state.projectType)
+            return state
         } catch {
             log.warning("project local state load failed: \(String(describing: error), privacy: .public)")
             return nil
@@ -66,19 +88,69 @@ public enum ProjectLocalStateStore {
     public static func save(_ state: ProjectLocalState,
                             to projectRoot: URL,
                             fileSystem: any FileSystem) throws {
+        var normalized = state
+        normalized.schemaVersion = ProjectLocalState.currentSchemaVersion
+        normalized.folderView = ProjectLocalState.normalizedFolderView(normalized.folderView,
+                                                                       for: normalized.projectType)
         let dir = ProjectPaths.directoryURL(in: projectRoot)
         try fileSystem.createDirectory(at: dir, withIntermediates: true)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-        let data = try encoder.encode(state)
+        let data = try encoder.encode(normalized)
         try fileSystem.writeAtomically(data, to: ProjectPaths.projectStateURL(in: projectRoot))
     }
 
+    /// Writes membership metadata while preserving any existing pin list when
+    /// the project remains a pin-capable folder kind.
     public static func save(ref: WorkspaceProjectsStore.ProjectRef,
                             fileSystem: any FileSystem) throws {
-        try save(ProjectLocalState(ref: ref),
-                 to: URL(fileURLWithPath: ref.path),
+        let root = URL(fileURLWithPath: ref.path)
+        let existing = load(from: root, fileSystem: fileSystem)?.folderView
+        let preserved = ProjectLocalState.normalizedFolderView(existing, for: ref.projectType)
+        try save(ProjectLocalState(ref: ref, folderView: preserved),
+                 to: root,
                  fileSystem: fileSystem)
+    }
+
+    /// Merge-safe pin list update. Rejects absolute / empty / outside-root paths.
+    @discardableResult
+    public static func updatePinnedRelativePaths(_ paths: [String],
+                                                 in projectRoot: URL,
+                                                 fileSystem: any FileSystem) throws -> FolderViewState? {
+        guard var state = load(from: projectRoot, fileSystem: fileSystem) else {
+            throw FileSystemError.notFound(path: ProjectPaths.projectStateURL(in: projectRoot).path)
+        }
+        guard let kind = state.projectType.folderKind, kind.supportsPinnedSidebarEntries else {
+            state.folderView = nil
+            try save(state, to: projectRoot, fileSystem: fileSystem)
+            return nil
+        }
+        let contained = paths.compactMap { relative -> String? in
+            canonicalizeRelativePath(relative, in: projectRoot, fileSystem: fileSystem)
+        }
+        state.folderView = FolderViewState(pinnedRelativePaths: FolderViewState.normalized(contained))
+        try save(state, to: projectRoot, fileSystem: fileSystem)
+        return state.folderView
+    }
+
+    /// Returns a project-relative path when `relative` resolves inside `projectRoot`.
+    public static func canonicalizeRelativePath(_ relative: String,
+                                                in projectRoot: URL,
+                                                fileSystem: any FileSystem) -> String? {
+        let trimmed = relative.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !trimmed.hasPrefix("/") else { return nil }
+        let root = projectRoot.standardizedFileURL
+        let candidate = root.appendingPathComponent(trimmed).standardizedFileURL
+        let rootPath = root.path
+        let candidatePath = candidate.path
+        guard candidatePath == rootPath || candidatePath.hasPrefix(rootPath + "/") else {
+            return nil
+        }
+        // Prefer existing files; still allow a pin of a path that briefly vanishes.
+        _ = fileSystem
+        let prefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
+        if candidatePath == rootPath { return nil }
+        return String(candidatePath.dropFirst(prefix.count))
     }
 
     private struct SchemaProbe: Decodable {

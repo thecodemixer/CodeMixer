@@ -88,8 +88,25 @@ public final class InMemoryFileSystem: FileSystem, @unchecked Sendable {
     public func contentsOfDirectory(at url: URL) throws -> [URL] {
         lock.lock(); defer { lock.unlock() }
         let prefix = url.path.hasSuffix("/") ? url.path : url.path + "/"
-        let keys = files.keys.filter { $0.hasPrefix(prefix) && !$0.dropFirst(prefix.count).contains("/") }
-        return keys.map { URL(fileURLWithPath: $0) }
+        var children: Set<String> = []
+        for key in files.keys where key.hasPrefix(prefix) {
+            let rest = key.dropFirst(prefix.count)
+            if let slash = rest.firstIndex(of: "/") {
+                children.insert(prefix + rest[..<slash])
+            } else {
+                children.insert(key)
+            }
+        }
+        for dir in directories where dir.hasPrefix(prefix) {
+            let rest = dir.dropFirst(prefix.count)
+            guard !rest.isEmpty else { continue }
+            if let slash = rest.firstIndex(of: "/") {
+                children.insert(prefix + rest[..<slash])
+            } else {
+                children.insert(dir)
+            }
+        }
+        return children.sorted().map { URL(fileURLWithPath: $0) }
     }
 
     public func modificationDate(at url: URL) throws -> Date {

@@ -189,6 +189,8 @@ struct ProjectTypeTests {
         #expect(ProjectType.codex.shortLabel == "Codex")
         #expect(ProjectType.cursorCLI.shortLabel == "Cursor")
         #expect(SupportedBuiltInAgent.shipping.map(\.id) == [.claudeCode, .codex, .cursorCLI])
+        #expect(ProjectType.claudeCode.showsSidebarTypeCapsule)
+        #expect(!ProjectType.mixed(defaultAgent: nil).showsSidebarTypeCapsule)
     }
 
     @Test("Mixed project type carries optional default agent")
@@ -209,6 +211,26 @@ struct ProjectTypeTests {
         #expect(mode.primaryAgentID == .other)
         #expect(mode.shortLabel == "Local Tool")
         #expect(ref.executablePath == "/usr/local/bin/local-tool")
+        #expect(!mode.showsSidebarTypeCapsule)
+    }
+
+    @Test("Folder project types are non-agent and expose kind metadata")
+    func folderTypes() {
+        for kind in FolderProjectKind.allCases {
+            let type = ProjectType.folder(kind)
+            #expect(type.primaryAgentID == nil)
+            #expect(type.isFolderBacked)
+            #expect(!type.isAgentBacked)
+            #expect(type.folderKind == kind)
+            #expect(type.shortLabel == kind.displayLabel)
+            #expect(!type.showsSidebarTypeCapsule)
+        }
+        #expect(FolderProjectKind.files.supportsPinnedSidebarEntries)
+        #expect(FolderProjectKind.docs.supportsPinnedSidebarEntries)
+        #expect(FolderProjectKind.modelhike.supportsPinnedSidebarEntries)
+        #expect(!FolderProjectKind.logs.supportsPinnedSidebarEntries)
+        #expect(FolderProjectKind.logs.showsAutomaticSidebarShortcuts)
+        #expect(FolderViewState.normalized(["a", "a", "/abs", "", "b", "c", "d", "e", "f"]).count == 5)
     }
 }
 
@@ -230,6 +252,14 @@ struct ProjectAgentRouterTests {
         #expect(ProjectAgentRouter.resolveAdapterID(projectType: mode,
                                                     preferredForNewChat: .codex) == .codex)
         #expect(ProjectAgentRouter.resolveAdapterID(projectType: mode) == .claudeCode)
+    }
+
+    @Test("Folder project types resolve to no adapter")
+    func folderTypesResolveNil() async {
+        #expect(ProjectAgentRouter.resolveAdapterID(projectType: .folder(.files)) == nil)
+        #expect(ProjectAgentRouter.resolveAdapterID(projectType: .folder(.logs)) == nil)
+        let adapter = await ProjectAgentRouter.resolveAdapter(projectType: .folder(.docs))
+        #expect(adapter == nil)
     }
 }
 

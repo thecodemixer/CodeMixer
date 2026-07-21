@@ -77,7 +77,8 @@ public actor WorkspaceProjectsStore {
     /// - v1: optional `agentID` per project (legacy)
     /// - v2: required `projectType` per project
     /// - v3: adds `activeWorkspacePath` (nil = closed / show picker on launch)
-    public static let currentSchemaVersion = 3
+    /// - v4: `ProjectType.folder(...)` non-agent folder browser types
+    public static let currentSchemaVersion = 4
 
     private struct WorkspaceEntry: Codable, Hashable {
         var workspacePath: String
@@ -313,16 +314,25 @@ public actor WorkspaceProjectsStore {
     @discardableResult
     public func addExistingProject(url projectURL: URL,
                                    projectType: ProjectType,
+                                   displayName: String? = nil,
                                    in workspace: URL) async throws -> ProjectRef {
         let key = Self.key(for: workspace)
+        let trimmedName = displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedName: String = {
+            if let trimmedName, !trimmedName.isEmpty { return trimmedName }
+            return ProjectLocalStateStore.load(from: projectURL, fileSystem: fileSystem)?.displayName
+                ?? projectURL.lastPathComponent
+        }()
         if let existing = workspaces[key]?.first(where: { $0.path == projectURL.path }) {
-            try ProjectLocalStateStore.save(ref: existing, fileSystem: fileSystem)
-            return existing
+            let updated = ProjectRef(path: existing.path,
+                                     displayName: resolvedName,
+                                     projectType: projectType)
+            try await register(updated, in: workspace, rootProjectType: projectType)
+            try ProjectLocalStateStore.save(ref: updated, fileSystem: fileSystem)
+            return updated
         }
-        let displayName = ProjectLocalStateStore.load(from: projectURL, fileSystem: fileSystem)?.displayName
-            ?? projectURL.lastPathComponent
         let ref = ProjectRef(path: projectURL.path,
-                             displayName: displayName,
+                             displayName: resolvedName,
                              projectType: projectType)
         try await register(ref, in: workspace, rootProjectType: projectType)
         try ProjectLocalStateStore.save(ref: ref, fileSystem: fileSystem)

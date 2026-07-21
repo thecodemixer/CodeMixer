@@ -12,7 +12,9 @@ import AgentProtocol
 /// Provider-specific state (model catalogs, …) lives in
 /// `workspace-<AgentID.rawValue>.json` — see `WorkspaceAdapterLocalState`.
 public struct WorkspaceLocalState: Sendable, Codable, Hashable {
-    public static let currentSchemaVersion = 3
+    /// Bumped when `ProjectType` gained `.folder(...)` so older builds refuse
+    /// newer catalogs rather than mis-decode them.
+    public static let currentSchemaVersion = 4
 
     public var schemaVersion: Int
     public var projects: [WorkspaceProjectsStore.ProjectRef]

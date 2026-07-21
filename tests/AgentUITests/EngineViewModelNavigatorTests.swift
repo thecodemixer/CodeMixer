@@ -930,6 +930,59 @@ struct EngineViewModelNavigatorTests {
         await bus.shutdown()
     }
 
+    @Test("createProject for a folder type opens the browser without openProject")
+    func createFolderProjectDoesNotOpenAgent() async throws {
+        let port = RecordingPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
+        let fileSystem = InMemoryFileSystem()
+        let environment = FakeEnvironment(home: TestPaths.fakeHome)
+        let store = WorkspaceProjectsStore(environment: environment, fileSystem: fileSystem)
+        vm.workspaceProjects = store
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        let workspace = TestPaths.workspace("ws-folder")
+        try await vm.adoptEmptyWorkspace(workspace)
+        await vm.createProject(name: "logs", projectType: .folder(.logs))
+        try? await Task.sleep(for: .milliseconds(40))
+
+        let project = await store.project(path: workspace.appendingPathComponent("logs").path)
+        #expect(project?.projectType == .folder(.logs))
+        #expect(vm.showsFolderBrowser)
+        #expect(vm.activeFolderProjectKind == .logs)
+        #expect(vm.workspace?.path == project?.path)
+        #expect(!port.commands.contains {
+            if case .openProject = $0 { return true }
+            return false
+        })
+
+        await bus.shutdown()
+    }
+
+    @Test("selectProject for a folder type never sends openProject")
+    func selectFolderProjectSkipsAgent() async throws {
+        let port = RecordingPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
+        let fileSystem = InMemoryFileSystem()
+        let environment = FakeEnvironment(home: TestPaths.fakeHome)
+        let store = WorkspaceProjectsStore(environment: environment, fileSystem: fileSystem)
+        vm.workspaceProjects = store
+
+        let workspace = TestPaths.workspace("ws-folder-select")
+        try await vm.adoptEmptyWorkspace(workspace)
+        let ref = try await store.createProject(name: "docs", projectType: .folder(.docs), in: workspace)
+        await vm.applyProjectList(await store.projects(for: workspace))
+        vm.selectProject(path: ref.path)
+
+        #expect(vm.showsFolderBrowser)
+        #expect(vm.activeFolderProjectKind == .docs)
+        #expect(port.commands.isEmpty)
+
+        await bus.shutdown()
+    }
+
     @Test("sessionStarted for a previous project does not auto-switch the active project")
     func sessionStartedIgnoresStaleProject() async {
         let (vm, bus, _) = makeModel()

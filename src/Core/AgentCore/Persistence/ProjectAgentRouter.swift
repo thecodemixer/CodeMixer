@@ -11,6 +11,8 @@ public enum ProjectAgentRouter {
             return sessionAgentID ?? preferredForNewChat ?? defaultAgent
         case .custom:
             return sessionAgentID ?? .other
+        case .folder:
+            return nil
         case .claudeCode, .codex, .cursorCLI:
             // Pinned types are identity lookups via `SupportedBuiltInAgent` —
             // not a second hand-maintained AgentID map.
@@ -22,6 +24,7 @@ public enum ProjectAgentRouter {
                                       sessionAgentID: AgentID? = nil,
                                       preferredForNewChat: AgentID? = nil,
                                       registry: AdapterRegistry = .shared) async -> (any AgentAdapter)? {
+        if projectType.isFolderBacked { return nil }
         if case .custom(let ref) = projectType {
             if let custom = await CustomAgentAdapterFactories.shared.makeAdapter(for: ref) {
                 return custom

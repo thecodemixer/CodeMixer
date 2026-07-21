@@ -128,6 +128,12 @@ public enum Theme {
         public static let diffSidebarMinWidth: CGFloat = 200
         public static let diffSidebarIdealWidth: CGFloat = 240
         public static let diffSidebarMaxWidth: CGFloat = 320
+        /// Filename-only list when the folder preview pane is open.
+        public static let folderBrowserListMinWidth: CGFloat = 200
+        public static let folderBrowserListIdealWidth: CGFloat = 280
+        public static let folderBrowserListMaxWidth: CGFloat = 340
+        /// Preview pane gets the remaining width; keep it roomy for markdown/logs.
+        public static let folderPreviewMinWidth: CGFloat = 480
         public static let installMinWidth: CGFloat = 480
         public static let installMaxWidth: CGFloat = 560
         public static let settingsMinWidth: CGFloat = 440

@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Markdown Preview</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #ffffff;
+      --fg: #1b1b1f;
+      --muted: #5c5c66;
+      --border: #d8d8de;
+      --code-bg: #f4f4f7;
+      --quote: #6b6b75;
+      --link: #0b57d0;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #1c1c1e;
+        --fg: #f2f2f7;
+        --muted: #a1a1a6;
+        --border: #3a3a3c;
+        --code-bg: #2c2c2e;
+        --quote: #8e8e93;
+        --link: #6ea8fe;
+      }
+    }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font: 15px/1.55 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+    }
+    body { padding: 16px 20px 32px; }
+    #content > :first-child { margin-top: 0; }
+    h1, h2, h3, h4, h5, h6 { line-height: 1.25; margin: 1.2em 0 0.5em; }
+    p, ul, ol, blockquote, pre { margin: 0 0 0.9em; }
+    a { color: var(--link); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.92em;
+      background: var(--code-bg);
+      padding: 0.1em 0.35em;
+      border-radius: 4px;
+    }
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      overflow-x: auto;
+    }
+    pre code { background: transparent; padding: 0; }
+    blockquote {
+      border-left: 3px solid var(--border);
+      padding-left: 12px;
+      color: var(--quote);
+    }
+    img { max-width: 100%; height: auto; }
+    .empty { color: var(--muted); }
+    .code-block { position: relative; }
+    .code-block .copy {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      font: 12px/1 -apple-system, BlinkMacSystemFont, sans-serif;
+      color: var(--muted);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 4px 8px;
+      cursor: pointer;
+    }
+    .code-block .copy:hover { color: var(--fg); }
+  </style>
+</head>
+<body>
+  <article id="content" class="empty">Select a markdown file.</article>
+  <script>
+    window.__setMarkdownHTML = function(html) {
+      const root = document.getElementById('content');
+      if (!html) {
+        root.className = 'empty';
+        root.textContent = 'Select a markdown file.';
+        return;
+      }
+      root.className = '';
+      root.innerHTML = html;
+      root.querySelectorAll('button.copy').forEach((button) => {
+        button.addEventListener('click', () => {
+          const text = button.getAttribute('data-copy') || '';
+          if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.copyCode) {
+            window.webkit.messageHandlers.copyCode.postMessage(text);
+            button.textContent = 'Copied';
+            setTimeout(() => { button.textContent = 'Copy'; }, 1200);
+          }
+        });
+      });
+    };
+    window.__scrollToAnchor = function(id) {
+      const el = document.getElementById(id);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+  </script>
+</body>
+</html>

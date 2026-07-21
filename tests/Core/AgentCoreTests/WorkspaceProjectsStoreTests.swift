@@ -324,7 +324,7 @@ struct WorkspaceProjectsStoreTests {
         )
 
         let loaded = WorkspaceLocalStateStore.load(from: workspace, fileSystem: fs)
-        #expect(loaded?.schemaVersion == 3)
+        #expect(loaded?.schemaVersion == WorkspaceLocalState.currentSchemaVersion)
         #expect(loaded?.projects.count == 1)
 
         let adapterURL = ProjectPaths.workspaceAdapterStateURL(in: workspace, agentID: .claudeCode)
@@ -340,7 +340,7 @@ struct WorkspaceProjectsStoreTests {
         let rewritten = try fs.readData(at: ProjectPaths.workspaceStateURL(in: workspace))
         let json = try JSONSerialization.jsonObject(with: rewritten) as? [String: Any]
         #expect(json?["adapterModelCaches"] == nil)
-        #expect(json?["schemaVersion"] as? Int == 3)
+        #expect(json?["schemaVersion"] as? Int == WorkspaceLocalState.currentSchemaVersion)
     }
 
     @Test("markActiveWorkspace / clearActiveWorkspace round-trip through workspaces.json")
@@ -397,6 +397,71 @@ struct WorkspaceProjectsStoreTests {
         #expect(await store.activeWorkspaceURL() == nil)
         let projects = await store.projects(for: workspace)
         #expect(projects.first?.displayName == "ws")
+    }
+
+    @Test("Folder project types round-trip through local project state")
+    func folderProjectRoundTrip() async throws {
+        let fs = InMemoryFileSystem()
+        let store = makeStore(fs: fs)
+        let ref = try await store.createProject(name: "docs", projectType: .folder(.docs), in: workspace)
+        #expect(ref.projectType == .folder(.docs))
+        let local = ProjectLocalStateStore.load(from: URL(fileURLWithPath: ref.path), fileSystem: fs)
+        #expect(local?.projectType == .folder(.docs))
+
+        let fresh = makeStore(fs: fs)
+        await fresh.load()
+        let projects = await fresh.projects(for: workspace)
+        #expect(projects.contains { $0.path == ref.path && $0.projectType == .folder(.docs) })
+    }
+
+    @Test("Pinned folder paths persist and reject absolute paths")
+    func folderPinsPersistAndRejectAbsolute() async throws {
+        let fs = InMemoryFileSystem()
+        let store = makeStore(fs: fs)
+        let ref = try await store.createProject(name: "files", projectType: .folder(.files), in: workspace)
+        let root = URL(fileURLWithPath: ref.path)
+        try fs.writeAtomically(Data("hello".utf8), to: root.appendingPathComponent("readme.md"))
+        try fs.writeAtomically(Data("x".utf8), to: root.appendingPathComponent("notes.txt"))
+
+        let updated = try ProjectLocalStateStore.updatePinnedRelativePaths(
+            ["readme.md", "/etc/passwd", "notes.txt", "readme.md"],
+            in: root,
+            fileSystem: fs
+        )
+        #expect(updated?.pinnedRelativePaths == ["readme.md", "notes.txt"])
+
+        // Metadata rewrite preserves pins.
+        try ProjectLocalStateStore.save(ref: ref, fileSystem: fs)
+        let reloaded = ProjectLocalStateStore.load(from: root, fileSystem: fs)
+        #expect(reloaded?.folderView?.pinnedRelativePaths == ["readme.md", "notes.txt"])
+
+        // Switching to logs clears pins.
+        let logsRef = WorkspaceProjectsStore.ProjectRef(
+            path: ref.path,
+            displayName: ref.displayName,
+            projectType: .folder(.logs)
+        )
+        try ProjectLocalStateStore.save(ref: logsRef, fileSystem: fs)
+        let cleared = ProjectLocalStateStore.load(from: root, fileSystem: fs)
+        #expect(cleared?.folderView == nil)
+    }
+
+    @Test("Folder scanner skips hidden directories and reports truncation")
+    func folderScannerSkipsAndCaps() throws {
+        let fs = InMemoryFileSystem()
+        let root = TestPaths.workspace("scan-root")
+        try fs.createDirectory(at: root, withIntermediates: true)
+        try fs.writeAtomically(Data("a".utf8), to: root.appendingPathComponent("a.txt"))
+        try fs.createDirectory(at: root.appendingPathComponent(".git"), withIntermediates: true)
+        try fs.writeAtomically(Data("secret".utf8), to: root.appendingPathComponent(".git/config"))
+        try fs.createDirectory(at: root.appendingPathComponent(".codemixer"), withIntermediates: true)
+        try fs.writeAtomically(Data("{}".utf8), to: root.appendingPathComponent(".codemixer/project.json"))
+
+        let result = try FolderProjectScanner.scanDetailed(root: root, fileSystem: fs, maxEntries: 1)
+        #expect(result.entries.count == 1)
+        #expect(result.truncated)
+        #expect(!result.entries.contains { $0.relativePath.contains(".git") })
+        #expect(!result.entries.contains { $0.relativePath.contains(".codemixer") })
     }
 
     // MARK: - Helpers

@@ -323,6 +323,19 @@ struct WorkspaceLifecycleTests {
         })
         await bus.shutdown()
     }
+
+    @Test("ensureModels for folder project types is a no-op")
+    func ensureModelsForFolderIsNoOp() async throws {
+        let (vm, bus, store, fileSystem, _) = makeHarness()
+        let folder = TestPaths.workspace("ws-folder-models")
+        try fileSystem.createDirectory(at: folder, withIntermediates: true)
+        try await WorkspaceLifecycle(model: vm).openEmptyWorkspace(folder)
+        _ = try await store.createProject(name: "docs", projectType: .folder(.docs), in: folder)
+        await vm.reloadProjects()
+        try await WorkspaceLifecycle(model: vm).ensureModels(for: .folder(.docs))
+        #expect(vm.workspaceModelCatalogRows.isEmpty)
+        await bus.shutdown()
+    }
 }
 
 @MainActor

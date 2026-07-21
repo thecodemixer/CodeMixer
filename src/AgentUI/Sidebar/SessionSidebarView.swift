@@ -59,7 +59,7 @@ public struct SessionSidebarView: View {
                 }
                 .help("New chat in current project")
                 .accessibilityLabel("New chat in current project")
-                .disabled(model.workspace == nil)
+                .disabled(model.workspace == nil || model.showsFolderBrowser)
             }
         }
         .alert("Rename Project", isPresented: $showRenamePrompt) {
@@ -96,7 +96,7 @@ public struct SessionSidebarView: View {
             .foregroundStyle(Theme.text.secondary)
             .help("New chat in current project")
             .accessibilityLabel("New chat in current project")
-            .disabled(model.workspace == nil)
+            .disabled(model.workspace == nil || model.showsFolderBrowser)
 
             Divider().overlay(Theme.surface.divider).padding(.horizontal, Theme.spacing.s8)
 
@@ -188,9 +188,12 @@ public struct SessionSidebarView: View {
     @ViewBuilder
     private func projectSection(_ project: WorkspaceProjectsStore.ProjectRef) -> some View {
         let isExpanded = expandedProjects.contains(project.path)
+        let isFolder = model.isFolderProject(project)
         VStack(alignment: .leading, spacing: Theme.spacing.s4) {
             projectRow(project, isExpanded: isExpanded)
-            if isExpanded {
+            if isFolder {
+                folderShortcutRows(for: project)
+            } else if isExpanded {
                 if model.supportsOverviewDashboard(forProjectPath: project.path) {
                     overviewRow(for: project)
                 }
@@ -206,16 +209,16 @@ public struct SessionSidebarView: View {
                             isExpanded: Bool) -> some View {
         let isHovering = hoveredProjectPath == project.path
         let isCurrent = model.workspace?.path == project.path
-        let attention = attentionSessionCount(for: project.path)
+        let attention = model.isFolderProject(project) ? 0 : attentionSessionCount(for: project.path)
+        let isFolder = model.isFolderProject(project)
         return HStack(spacing: Theme.spacing.s8) {
             Text(project.displayName)
                 .font(Theme.typography.caption)
                 .fontWeight(.semibold)
                 .foregroundStyle(isCurrent ? Theme.text.primary : Theme.text.secondary)
                 .lineLimit(1)
-            // Custom ACP projects already identify themselves by name; the type
-            // capsule (agent displayName) is redundant next to the title.
-            if !model.isCustomACPProject(project) {
+            // Capsules are reserved for single-agent built-ins (Claude / Codex / Cursor).
+            if project.projectType.showsSidebarTypeCapsule {
                 Text(project.projectType.shortLabel)
                     .font(Theme.typography.caption)
                     .foregroundStyle(Theme.text.tertiary)
@@ -226,17 +229,19 @@ public struct SessionSidebarView: View {
             if attention > 0 {
                 attentionCountBadge(attention)
             }
-            Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                .font(Theme.typography.iconSmall)
-                .foregroundStyle(Theme.text.tertiary)
-                .opacity(isHovering || isCurrent ? 1 : 0)
-                .accessibilityHidden(true)
+            if !isFolder {
+                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                    .font(Theme.typography.iconSmall)
+                    .foregroundStyle(Theme.text.tertiary)
+                    .opacity(isHovering || isCurrent ? 1 : 0)
+                    .accessibilityHidden(true)
+            }
         }
         .contentShape(Rectangle())
         .padding(.top, Theme.spacing.s8)
         .padding(.bottom, Theme.spacing.s4)
         .padding(.horizontal, Theme.spacing.s8)
-        .background(selectionWash(isCurrent: isCurrent))
+        .background(selectionWash(isCurrent: isCurrent && (isFolder ? model.showsFolderBrowser : true)))
         .onTapGesture { handleProjectTap(project) }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
@@ -244,13 +249,17 @@ public struct SessionSidebarView: View {
                 ? "Project \(project.displayName), \(attention) sessions need attention"
                 : "Project \(project.displayName)"
         )
-        .accessibilityHint(isExpanded ? "Collapse project" : "Expand project")
+        .accessibilityHint(isFolder
+                           ? "Open folder view"
+                           : (isExpanded ? "Collapse project" : "Expand project"))
         .accessibilityAddTraits(isCurrent ? [.isSelected] : [])
         .onHover { hovering in
             hoveredProjectPath = hovering ? project.path : nil
         }
         .contextMenu {
-            Button("New Chat") { model.newChat(in: project.path) }
+            if !isFolder {
+                Button("New Chat") { model.newChat(in: project.path) }
+            }
             Button("Reveal in Finder") { revealInFinder(project.path) }
             if model.isCustomACPProject(project) {
                 Button("Restart ACP CLI") {
@@ -266,6 +275,64 @@ public struct SessionSidebarView: View {
                 Button("Remove from Navigator", role: .destructive) {
                     model.removeProject(path: project.path)
                 }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func folderShortcutRows(for project: WorkspaceProjectsStore.ProjectRef) -> some View {
+        let shortcuts = model.folderSidebarShortcuts(for: project)
+        ForEach(shortcuts) { shortcut in
+            folderShortcutRow(shortcut, project: project)
+        }
+    }
+
+    private func folderShortcutRow(_ shortcut: FolderSidebarShortcut,
+                                   project: WorkspaceProjectsStore.ProjectRef) -> some View {
+        let isCurrent = model.workspace?.path == project.path
+            && model.showsFolderBrowser
+            && model.pendingFolderSelectionRelativePath == shortcut.relativePath
+        return Button {
+            model.openFolderShortcut(projectPath: project.path, relativePath: shortcut.relativePath)
+        } label: {
+            HStack(spacing: Theme.spacing.s8) {
+                Image(systemName: "doc")
+                    .imageScale(.small)
+                    .foregroundStyle(Theme.text.tertiary)
+                    .accessibilityHidden(true)
+                Text(shortcut.displayName)
+                    .font(Theme.typography.body)
+                    .foregroundStyle(Theme.text.secondary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+            .padding(.vertical, Theme.spacing.s4)
+            .padding(.horizontal, Theme.spacing.s8)
+            .background(selectionWash(isCurrent: isCurrent))
+        }
+        .buttonStyle(.plain)
+        .help(shortcut.relativePath)
+        .accessibilityLabel(shortcut.relativePath)
+        .contextMenu {
+            Button("Open") {
+                model.openFolderShortcut(projectPath: project.path, relativePath: shortcut.relativePath)
+            }
+            if project.projectType.folderKind?.supportsPinnedSidebarEntries == true {
+                Button("Unpin from Sidebar") {
+                    model.unpinFolderPath(shortcut.relativePath, in: project.path)
+                }
+                Button("Move Up") {
+                    model.movePinnedFolderPath(shortcut.relativePath, in: project.path, direction: -1)
+                }
+                Button("Move Down") {
+                    model.movePinnedFolderPath(shortcut.relativePath, in: project.path, direction: 1)
+                }
+            }
+            Button("Reveal in Finder") {
+                let url = URL(fileURLWithPath: project.path)
+                    .appendingPathComponent(shortcut.relativePath)
+                revealInFinder(url.path)
             }
         }
     }
@@ -420,8 +487,13 @@ public struct SessionSidebarView: View {
     }
 
     /// Project title click: select as current project and expand. A second click
-    /// on the already-current expanded project collapses it.
+    /// on the already-current expanded project collapses it. Folder projects
+    /// always open the browser and never expand/collapse.
     private func handleProjectTap(_ project: WorkspaceProjectsStore.ProjectRef) {
+        if model.isFolderProject(project) {
+            model.selectProject(path: project.path)
+            return
+        }
         let isCurrent = model.workspace?.path == project.path
         let isExpanded = expandedProjects.contains(project.path)
         let isOverviewCapable = model.supportsOverviewDashboard(forProjectPath: project.path)

@@ -46,6 +46,16 @@ public final class EngineViewModel {
     /// Selects the detail pane's dashboard when available. Overview sessions
     /// default this to true; file sessions default to chat.
     public internal(set) var showsOverviewDashboard: Bool = false
+    /// True while the detail pane shows a non-agent folder browser.
+    public internal(set) var showsFolderBrowser: Bool = false
+    /// Active folder project kind when `showsFolderBrowser` is true.
+    public internal(set) var activeFolderProjectKind: FolderProjectKind?
+    /// Relative path to preselect when opening a folder shortcut from the sidebar.
+    public var pendingFolderSelectionRelativePath: String?
+    /// Pinned relative paths keyed by project path (pin-capable folder kinds).
+    public internal(set) var folderPinnedPathsByProject: [String: [String]] = [:]
+    /// Automatic newest-log shortcuts keyed by project path.
+    public internal(set) var folderAutomaticShortcutsByProject: [String: [FolderSidebarShortcut]] = [:]
     /// True while Restart ACP CLI has closed the process and is waiting for a
     /// fresh `agentDashboard` from the respawned Custom ACP agent.
     public internal(set) var isRestartingCustomACPCLI: Bool = false

@@ -325,6 +325,43 @@ final class Bootstrap {
         isPreparingWorkspace = true
         defer { isPreparingWorkspace = false }
 
+        // Folder projects are non-agent: register membership and open the browser.
+        if projectType.isFolderBacked {
+            do {
+                guard let lifecycle = workspaceLifecycle else { return }
+                try await lifecycle.loadModelCatalogs(at: url, rootProjectType: projectType)
+            } catch {
+                startupError = error.localizedDescription
+                workspace = nil
+                workspaceLifecycle?.abortOpen()
+                return
+            }
+            let projectsStore = viewModel?.workspaceProjects
+            if let store = projectsStore {
+                _ = await store.projects(for: url, rootProjectType: projectType)
+                _ = try? await store.setProjectType(path: url.path, projectType: projectType, in: url)
+            }
+            await viewModel?.reloadProjects(rootProjectType: projectType)
+            if let ref = await viewModel?.workspaceProjects?.project(path: url.path)
+                ?? viewModel?.projects.first(where: {
+                    URL(fileURLWithPath: $0.path).standardizedFileURL.path
+                        == url.standardizedFileURL.path
+                }) {
+                viewModel?.openFolderProject(ref, relativePath: nil)
+            } else if let kind = projectType.folderKind {
+                let ref = WorkspaceProjectsStore.ProjectRef(
+                    path: url.path,
+                    displayName: url.lastPathComponent,
+                    projectType: .folder(kind)
+                )
+                viewModel?.openFolderProject(ref, relativePath: nil)
+            }
+            viewModel?.workspaceRoot = url
+            try? await viewModel?.workspaceProjects?.markActiveWorkspace(url)
+            workspace = url
+            return
+        }
+
         guard let engine = engine else {
             do {
                 guard let lifecycle = workspaceLifecycle else { return }

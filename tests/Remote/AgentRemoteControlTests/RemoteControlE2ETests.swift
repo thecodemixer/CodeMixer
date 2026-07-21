@@ -472,7 +472,9 @@ struct RemoteControlE2ETests {
         #expect(sawSubscribed)
         #expect(latestID != nil)
         #expect(outcome == .resumed)
+        await client.close()
         await server.stop()
+        await engine.shutdown(reason: .naturalExit)
     }
 
     @Test("expired checkpoint subscribe reports checkpointExpired outcome")
@@ -505,7 +507,9 @@ struct RemoteControlE2ETests {
             }
         }
         #expect(outcome == .checkpointExpired)
+        await client.close()
         await server.stop()
+        await engine.shutdown(reason: .naturalExit)
     }
 
     @Test("snapshot frame serves resync payloads after checkpoint expiry")

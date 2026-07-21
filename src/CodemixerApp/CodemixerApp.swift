@@ -144,8 +144,16 @@ struct CodemixerApp: App {
                 if let model = bootstrap.viewModel {
                     NewProjectSheet(
                         onCancel: { bootstrap.showNewProjectSheet = false },
-                        onCreate: { name, mode in
-                            await model.createProject(name: name, projectType: mode)
+                        onCreate: { name, mode, folderURL in
+                            if let folderURL {
+                                await model.addExistingProject(
+                                    url: folderURL,
+                                    projectType: mode,
+                                    displayName: name
+                                )
+                            } else {
+                                await model.createProject(name: name, projectType: mode)
+                            }
                             bootstrap.showNewProjectSheet = false
                         }
                     )

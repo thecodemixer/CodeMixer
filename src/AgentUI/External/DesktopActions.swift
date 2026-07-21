@@ -63,6 +63,17 @@ public enum DesktopActions {
         return panel.runModal() == .OK ? panel.url : nil
     }
 
+    /// Shows the native pointing-hand cursor while the pointer is over an
+    /// actionable control (close buttons, links). Call with `false` on leave.
+    @MainActor
+    public static func setPointingHandCursor(_ hovering: Bool) {
+        if hovering {
+            NSCursor.pointingHand.push()
+        } else {
+            NSCursor.pop()
+        }
+    }
+
     /// Presents a save panel and returns the chosen URL, or nil if cancelled.
     @MainActor
     public static func savePanel(nameField: String,

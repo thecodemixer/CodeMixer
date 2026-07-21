@@ -42,7 +42,15 @@ public struct WorkspaceScene: View {
                         ? Theme.layout.sessionSidebarIconRailWidth
                         : Theme.layout.sessionSidebarMaxWidth)
         } detail: {
-            if model.changedFiles.isEmpty || !diffPanelVisible {
+            if model.showsFolderBrowser,
+               let path = model.workspace?.path,
+               let project = model.projects.first(where: {
+                   URL(fileURLWithPath: $0.path).standardizedFileURL.path
+                       == URL(fileURLWithPath: path).standardizedFileURL.path
+               }),
+               let kind = project.projectType.folderKind {
+                FolderProjectBrowserView(model: model, project: project, kind: kind)
+            } else if model.changedFiles.isEmpty || !diffPanelVisible {
                 conversationColumn
             } else {
                 HSplitView {
@@ -107,6 +115,7 @@ public struct WorkspaceScene: View {
             ZStack(alignment: .topTrailing) {
                 // Overview-capable projects: project overview shows the hosted
                 // dashboard only (no Chat/Dashboard tabs). File sessions stay chat-only.
+                // Folder projects replace this column entirely at the detail level.
                 if model.showsOverviewDashboard {
                     if model.isRestartingCustomACPCLI {
                         ContentUnavailableView(

@@ -218,6 +218,11 @@ extension AgentEngine {
                                                   mode: project.projectType)
         guard let nextAdapter = await ProjectAgentRouter.resolveAdapter(projectType: project.projectType,
                                                                         sessionAgentID: sessionAgentID) else {
+            if project.projectType.isFolderBacked {
+                throw AgentError.unsupportedOperation(
+                    detail: "Folder project \(path) is opened in the folder browser, not as an agent session."
+                )
+            }
             throw AgentError.unsupportedOperation(
                 detail: "Project \(path) needs a concrete registered agent before it can be opened."
             )

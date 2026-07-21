@@ -104,8 +104,13 @@ extension EngineViewModel {
             openOverview(projectPath: projectPath)
             return
         }
+        if let project = projectRef(at: projectPath), project.projectType.isFolderBacked {
+            openFolderProject(project, relativePath: nil)
+            return
+        }
         if isCurrentSession(projectPath: projectPath, sessionID: id) {
             showsOverviewDashboard = false
+            clearFolderBrowserSurface()
             return
         }
         // Capabilities must be known before arming the composer lock — Cursor /
@@ -113,6 +118,7 @@ extension EngineViewModel {
         applyAdapterCapabilities(forProjectPath: projectPath)
         // File / chat sessions always leave the dashboard WebView.
         showsOverviewDashboard = false
+        clearFolderBrowserSurface()
         // The session list carries the concrete agent for mixed projects. Use it
         // to decide whether history replay is enough to unlock the composer.
         // Claude Code is special because replayed history comes from JSONL,
@@ -149,9 +155,14 @@ extension EngineViewModel {
     }
 
     /// Make `projectPath` the current project. For overview-capable agents,
-    /// shows the dashboard by default. Otherwise opens the most recent session when known.
+    /// shows the dashboard by default. Folder projects open the browser.
+    /// Otherwise opens the most recent session when known.
     public func selectProject(path projectPath: String) {
         guard !projectPath.isEmpty else { return }
+        if let project = projectRef(at: projectPath), project.projectType.isFolderBacked {
+            openFolderProject(project, relativePath: nil)
+            return
+        }
         guard projectPath != workspace?.path else {
             // Re-clicking the active overview project re-focuses the dashboard.
             if supportsOverviewDashboard(forProjectPath: projectPath) {
@@ -160,6 +171,7 @@ extension EngineViewModel {
             return
         }
         applyAdapterCapabilities(forProjectPath: projectPath)
+        clearFolderBrowserSurface()
         if supportsOverviewDashboard(forProjectPath: projectPath) {
             openOverview(projectPath: projectPath)
             return
@@ -173,11 +185,197 @@ extension EngineViewModel {
         newChat(in: projectPath)
     }
 
+    /// Open a folder project browser, optionally preselecting a relative path.
+    public func openFolderProject(_ project: WorkspaceProjectsStore.ProjectRef,
+                                  relativePath: String?) {
+        guard let kind = project.projectType.folderKind else { return }
+        endSessionSwitch()
+        let target = URL(fileURLWithPath: project.path).standardizedFileURL
+        workspace = target
+        sessionID = nil
+        clearConversationState()
+        clearAllPendingPermissions()
+        unlockComposerForSessionResume()
+        status = .idle
+        activity = .idle
+        showsOverviewDashboard = false
+        dashboardURL = nil
+        dashboardTitle = nil
+        availableModels = []
+        availableAgentModes = []
+        selectedAgentModeID = ""
+        slashCommands = []
+        supportsResumableSessions = false
+        showsFolderBrowser = true
+        activeFolderProjectKind = kind
+        pendingFolderSelectionRelativePath = relativePath
+        refreshFolderSidebarShortcuts(for: project)
+    }
+
+    /// Open a sidebar shortcut under a folder project.
+    public func openFolderShortcut(projectPath: String, relativePath: String) {
+        guard let project = projectRef(at: projectPath),
+              project.projectType.isFolderBacked else { return }
+        openFolderProject(project, relativePath: relativePath)
+    }
+
+    public func isFolderProject(_ project: WorkspaceProjectsStore.ProjectRef) -> Bool {
+        project.projectType.isFolderBacked
+    }
+
+    public func folderSidebarShortcuts(for project: WorkspaceProjectsStore.ProjectRef) -> [FolderSidebarShortcut] {
+        guard let kind = project.projectType.folderKind else { return [] }
+        if kind.showsAutomaticSidebarShortcuts {
+            return folderAutomaticShortcutsByProject[project.path] ?? []
+        }
+        if kind.supportsPinnedSidebarEntries {
+            let paths = folderPinnedPathsByProject[project.path]
+                ?? ProjectLocalStateStore.load(
+                    from: URL(fileURLWithPath: project.path),
+                    fileSystem: SystemFileSystem()
+                )?.folderView?.pinnedRelativePaths
+                ?? []
+            return paths.map { FolderSidebarShortcut(relativePath: $0) }
+        }
+        return []
+    }
+
+    public func refreshFolderSidebarShortcuts(for project: WorkspaceProjectsStore.ProjectRef) {
+        guard let kind = project.projectType.folderKind else { return }
+        let root = URL(fileURLWithPath: project.path)
+        if kind.supportsPinnedSidebarEntries {
+            let pins = ProjectLocalStateStore.load(from: root, fileSystem: SystemFileSystem())?
+                .folderView?.pinnedRelativePaths ?? []
+            folderPinnedPathsByProject[project.path] = pins
+        } else {
+            folderPinnedPathsByProject.removeValue(forKey: project.path)
+        }
+        if kind.showsAutomaticSidebarShortcuts {
+            Task { @MainActor [weak self] in
+                await self?.reloadAutomaticLogShortcuts(for: project)
+            }
+        } else {
+            folderAutomaticShortcutsByProject.removeValue(forKey: project.path)
+        }
+    }
+
+    public func pinFolderPath(_ relativePath: String, in projectPath: String) {
+        guard let project = projectRef(at: projectPath),
+              let kind = project.projectType.folderKind,
+              kind.supportsPinnedSidebarEntries else { return }
+        let root = URL(fileURLWithPath: project.path)
+        var pins = folderPinnedPathsByProject[project.path]
+            ?? ProjectLocalStateStore.load(from: root, fileSystem: SystemFileSystem())?
+                .folderView?.pinnedRelativePaths
+            ?? []
+        guard pins.count < FolderViewState.maxPinnedPaths || pins.contains(relativePath) else {
+            diagnostics.append(diagnostic(
+                level: .warning,
+                message: "At most \(FolderViewState.maxPinnedPaths) files can be pinned in the sidebar."
+            ))
+            return
+        }
+        if let existing = pins.firstIndex(of: relativePath) {
+            pins.remove(at: existing)
+        }
+        pins.insert(relativePath, at: 0)
+        pins = FolderViewState.normalized(pins)
+        do {
+            _ = try ProjectLocalStateStore.updatePinnedRelativePaths(
+                pins,
+                in: root,
+                fileSystem: SystemFileSystem()
+            )
+            folderPinnedPathsByProject[project.path] = pins
+        } catch {
+            recordProjectError(error)
+        }
+    }
+
+    public func unpinFolderPath(_ relativePath: String, in projectPath: String) {
+        guard let project = projectRef(at: projectPath) else { return }
+        let root = URL(fileURLWithPath: project.path)
+        var pins = folderPinnedPathsByProject[project.path]
+            ?? ProjectLocalStateStore.load(from: root, fileSystem: SystemFileSystem())?
+                .folderView?.pinnedRelativePaths
+            ?? []
+        pins.removeAll { $0 == relativePath }
+        do {
+            _ = try ProjectLocalStateStore.updatePinnedRelativePaths(
+                pins,
+                in: root,
+                fileSystem: SystemFileSystem()
+            )
+            folderPinnedPathsByProject[project.path] = pins
+        } catch {
+            recordProjectError(error)
+        }
+    }
+
+    public func movePinnedFolderPath(_ relativePath: String,
+                                     in projectPath: String,
+                                     direction: Int) {
+        guard let project = projectRef(at: projectPath) else { return }
+        let root = URL(fileURLWithPath: project.path)
+        var pins = folderPinnedPathsByProject[project.path]
+            ?? ProjectLocalStateStore.load(from: root, fileSystem: SystemFileSystem())?
+                .folderView?.pinnedRelativePaths
+            ?? []
+        guard let idx = pins.firstIndex(of: relativePath) else { return }
+        let target = idx + direction
+        guard pins.indices.contains(target) else { return }
+        pins.swapAt(idx, target)
+        do {
+            _ = try ProjectLocalStateStore.updatePinnedRelativePaths(
+                pins,
+                in: root,
+                fileSystem: SystemFileSystem()
+            )
+            folderPinnedPathsByProject[project.path] = pins
+        } catch {
+            recordProjectError(error)
+        }
+    }
+
+    func clearFolderBrowserSurface() {
+        showsFolderBrowser = false
+        activeFolderProjectKind = nil
+        pendingFolderSelectionRelativePath = nil
+    }
+
+    private func projectRef(at path: String) -> WorkspaceProjectsStore.ProjectRef? {
+        let standardized = URL(fileURLWithPath: path).standardizedFileURL.path
+        return projects.first {
+            URL(fileURLWithPath: $0.path).standardizedFileURL.path == standardized
+        }
+    }
+
+    private func reloadAutomaticLogShortcuts(for project: WorkspaceProjectsStore.ProjectRef) async {
+        let root = URL(fileURLWithPath: project.path)
+        let fs = SystemFileSystem()
+        let entries = (try? FolderProjectScanner.scan(
+            root: root,
+            fileSystem: fs,
+            maxEntries: FolderBrowserLimits.maxScanEntries
+        )) ?? []
+        let logs = entries
+            .filter { !$0.isDirectory }
+            .sorted { $0.modifiedAt > $1.modifiedAt }
+            .prefix(FolderBrowserLimits.automaticLogShortcuts)
+            .map { FolderSidebarShortcut(relativePath: $0.relativePath) }
+        folderAutomaticShortcutsByProject[project.path] = Array(logs)
+    }
+
     /// Open the project-owned overview/dashboard entry. This is intentionally
     /// separate from project-title expand/collapse in the sidebar.
     public func openOverview(projectPath: String) {
         guard !projectPath.isEmpty else { return }
+        if let project = projectRef(at: projectPath), project.projectType.isFolderBacked {
+            openFolderProject(project, relativePath: nil)
+            return
+        }
         applyAdapterCapabilities(forProjectPath: projectPath)
+        clearFolderBrowserSurface()
         let sameProject = workspace.map {
             URL(fileURLWithPath: $0.path).standardizedFileURL.path
         } == URL(fileURLWithPath: projectPath).standardizedFileURL.path
@@ -206,6 +404,7 @@ extension EngineViewModel {
         unlockComposerForSessionResume()
         status = .idle
         activity = .idle
+        clearFolderBrowserSurface()
         showsOverviewDashboard = true
         restoreDashboardURLIfNeeded(projectPath: projectPath)
         // WKWebView is torn down while a file chat is selected; bump so the
@@ -216,6 +415,9 @@ extension EngineViewModel {
     /// Start a fresh chat in the current project (toolbar / palette New Chat).
     public func newChatInCurrentProject() {
         guard let path = workspace?.path, !path.isEmpty else { return }
+        if let project = projectRef(at: path), project.projectType.isFolderBacked {
+            return
+        }
         newChat(in: path)
     }
 
@@ -305,6 +507,10 @@ extension EngineViewModel {
     /// respawning the binary (~20s initialize/auth handshake).
     public func newChat(in projectPath: String) {
         guard !projectPath.isEmpty else { return }
+        if let project = projectRef(at: projectPath), project.projectType.isFolderBacked {
+            openFolderProject(project, relativePath: nil)
+            return
+        }
         endSessionSwitch()
         let target = URL(fileURLWithPath: projectPath).standardizedFileURL
         let alreadyOnProject = workspace.map {
@@ -316,6 +522,7 @@ extension EngineViewModel {
         clearAllPendingPermissions()
         status = .idle
         activity = .idle
+        clearFolderBrowserSurface()
         applyAdapterCapabilities(forProjectPath: target.path)
         // New Chat is always the conversation surface — never the overview WebView.
         showsOverviewDashboard = false
@@ -359,11 +566,17 @@ extension EngineViewModel {
         guard let workspaceRoot, let store = workspaceProjects else { return }
         do {
             let ref = try await store.createProject(name: name, projectType: projectType, in: workspaceRoot)
-            try await WorkspaceLifecycle(model: self).ensureModels(for: projectType)
+            if !projectType.isFolderBacked {
+                try await WorkspaceLifecycle(model: self).ensureModels(for: projectType)
+            }
             let refs = await store.projects(for: workspaceRoot, rootProjectType: projectType)
             await applyProjectList(refs)
-            applyAdapterCapabilities(for: projectType, projectURL: URL(fileURLWithPath: ref.path))
-            newChat(in: ref.path)
+            if projectType.isFolderBacked {
+                openFolderProject(ref, relativePath: nil)
+            } else {
+                applyAdapterCapabilities(for: projectType, projectURL: URL(fileURLWithPath: ref.path))
+                newChat(in: ref.path)
+            }
         } catch {
             recordProjectError(error)
         }
@@ -371,15 +584,28 @@ extension EngineViewModel {
 
     /// Register an existing folder as a project of the workspace.
     /// Blocks until the project is registered and its model catalog is ready.
-    public func addExistingProject(url: URL, projectType: ProjectType) async {
+    public func addExistingProject(url: URL,
+                                   projectType: ProjectType,
+                                   displayName: String? = nil) async {
         guard let workspaceRoot, let store = workspaceProjects else { return }
         do {
-            let ref = try await store.addExistingProject(url: url, projectType: projectType, in: workspaceRoot)
-            try await WorkspaceLifecycle(model: self).ensureModels(for: projectType)
+            let ref = try await store.addExistingProject(
+                url: url,
+                projectType: projectType,
+                displayName: displayName,
+                in: workspaceRoot
+            )
+            if !projectType.isFolderBacked {
+                try await WorkspaceLifecycle(model: self).ensureModels(for: projectType)
+            }
             let refs = await store.projects(for: workspaceRoot, rootProjectType: projectType)
             await applyProjectList(refs)
-            applyAdapterCapabilities(for: projectType, projectURL: URL(fileURLWithPath: ref.path))
-            newChat(in: ref.path)
+            if projectType.isFolderBacked {
+                openFolderProject(ref, relativePath: nil)
+            } else {
+                applyAdapterCapabilities(for: projectType, projectURL: URL(fileURLWithPath: ref.path))
+                newChat(in: ref.path)
+            }
         } catch {
             recordProjectError(error)
         }
@@ -742,7 +968,7 @@ extension EngineViewModel {
             return []
         case .mixed:
             return SupportedBuiltInAgent.shippingIDs()
-        case .custom:
+        case .custom, .folder:
             return []
         }
     }
@@ -997,6 +1223,7 @@ extension EngineViewModel {
         dashboardURL = nil
         dashboardTitle = nil
         showsOverviewDashboard = false
+        clearFolderBrowserSurface()
         refreshProjects()
         if let workspace {
             loadSessions(for: workspace.path)
@@ -1070,6 +1297,9 @@ extension EngineViewModel {
         sessionsByProject = [:]
         projectCapabilities.removeAll()
         loadingProjectPaths = []
+        folderPinnedPathsByProject = [:]
+        folderAutomaticShortcutsByProject = [:]
+        clearFolderBrowserSurface()
         removedProjectUndo = nil
         removedProjectUndoTask?.cancel()
         removedProjectUndoTask = nil
@@ -1099,6 +1329,9 @@ extension EngineViewModel {
         sessionsByProject = [:]
         projectCapabilities.removeAll()
         loadingProjectPaths = []
+        folderPinnedPathsByProject = [:]
+        folderAutomaticShortcutsByProject = [:]
+        clearFolderBrowserSurface()
         removedProjectUndo = nil
         removedProjectUndoTask?.cancel()
         removedProjectUndoTask = nil
@@ -1120,6 +1353,9 @@ extension EngineViewModel {
     func applyProjectList(_ refs: [WorkspaceProjectsStore.ProjectRef]) async {
         projects = refs
         projectCapabilities = await Self.projectCapabilityIndex(for: refs)
+        for ref in refs where ref.projectType.isFolderBacked {
+            refreshFolderSidebarShortcuts(for: ref)
+        }
     }
 
     private static func projectCapabilityIndex(
@@ -1137,6 +1373,7 @@ extension EngineViewModel {
     }
 
     private static func projectTypeSupportsResumableSessions(_ projectType: ProjectType) async -> Bool {
+        if projectType.isFolderBacked { return false }
         if case .mixed = projectType {
             let adapters = await AdapterRegistry.shared.all()
             return adapters.contains { $0.capabilities.contains(.resumableSessions) }
@@ -1148,6 +1385,7 @@ extension EngineViewModel {
     }
 
     private static func adapterRequiresSessionHandshakeGate(_ projectType: ProjectType) async -> Bool {
+        if projectType.isFolderBacked { return false }
         // Mixed with a default: ask that agent. Mixed without a default: gate if
         // any registered adapter declares the capability (safer than false-open).
         // Custom ACP refs resolve through `CustomAgentAdapterFactories` → `ACPAdapter`.
@@ -1166,6 +1404,7 @@ extension EngineViewModel {
     }
 
     private static func adapterSupportsOverviewDashboard(_ projectType: ProjectType) async -> Bool {
+        if projectType.isFolderBacked { return false }
         if case .mixed(let defaultAgent) = projectType {
             if let defaultAgent,
                let adapter = await AdapterRegistry.shared.adapter(for: defaultAgent) {
