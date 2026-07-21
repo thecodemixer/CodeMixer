@@ -207,6 +207,9 @@ actor Mailbox {
     func dequeue() async -> Data? {
         if !buffer.isEmpty { return buffer.removeFirst() }
         if closed { return nil }
+        // Single-consumer: a second waiter would abandon the first
+        // `CheckedContinuation` and trap (SIGSEGV/SIGBUS under Swift Testing).
+        precondition(waiter == nil, "InMemoryConnection Mailbox is single-consumer")
         return await withCheckedContinuation { c in
             waiter = c
         }

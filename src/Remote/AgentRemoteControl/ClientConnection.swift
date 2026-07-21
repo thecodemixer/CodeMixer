@@ -36,6 +36,11 @@ final class ClientConnection: @unchecked Sendable {
     private var cancelled = false
     private var authed: Bool
     private let decoder: JSONDecoder
+    /// Serializes JSON encoding across the receiver and sender tasks.
+    /// Foundation's `.iso8601` date strategy has shared mutable formatter
+    /// state on some builds; concurrent event + command-result encodes have
+    /// SIGSEGV'd under remote-control tests.
+    private let frameEncoder = FrameSendEncoder()
     private var subscription: MulticastEventBus.Subscription?
     private var senderTask: Task<Void, Never>?
     private var receiverTask: Task<Void, Never>?
@@ -94,9 +99,8 @@ final class ClientConnection: @unchecked Sendable {
         authed = await pairing.validateToken(token) != nil
     }
 
-    private func runSender() async {
-        guard let sub = subscription else { return }
-        for await entry in sub.stream {
+    private func runSender(stream: AsyncStream<MulticastEventBus.HistoryEntry>) async {
+        for await entry in stream {
             guard !Task.isCancelled else { return }
             let wire = WireCodec.encode(entry.event)
             await send(.event(id: entry.id, event: wire))
@@ -151,13 +155,10 @@ final class ClientConnection: @unchecked Sendable {
 
     private func send(_ frame: ServerFrame) async {
         // `send` is called from both the receiver task (command results) and
-        // the sender task (subscribed event frames). `JSONEncoder` has mutable
-        // internal state and is not thread-safe, so sharing one encoder across
-        // those tasks can crash when a command publishes an event and returns a
-        // result concurrently.
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        guard let payload = try? encoder.encode(frame) else { return }
+        // the sender task (subscribed event frames). Route encoding through
+        // `frameEncoder` so those tasks cannot race inside Foundation's JSON
+        // writer / shared `.iso8601` date formatting.
+        guard let payload = await frameEncoder.encode(frame) else { return }
         try? await connection.send(payload)
     }
 
@@ -201,12 +202,15 @@ final class ClientConnection: @unchecked Sendable {
             let (newSub, outcome) = await bus.subscribeWithOutcome(after: lastSeenEventID)
             let latestID = await bus.lastPublishedID
             subscription = newSub
+            // Capture the stream by value so the sender task never races the
+            // receiver task on the `subscription` property.
+            let stream = newSub.stream
 
             // Send the ack before starting the sender. The client uses
             // `latestEventID` as its checkpoint for the *next* reconnect.
             await send(.subscribed(latestEventID: latestID, outcome: wireOutcome(outcome)))
 
-            senderTask = Task { [weak self] in await self?.runSender() }
+            senderTask = Task { [weak self] in await self?.runSender(stream: stream) }
             log.notice("client \(self.id, privacy: .public) subscribed after=\(String(describing: lastSeenEventID), privacy: .public) outcome=\(String(describing: outcome), privacy: .public)")
 
         case .snapshot(let kind):
@@ -270,5 +274,17 @@ final class ClientConnection: @unchecked Sendable {
         case .resumed: return .resumed
         case .checkpointExpired: return .checkpointExpired
         }
+    }
+}
+
+/// Actor-isolated JSON encoding for outbound `ServerFrame`s.
+///
+/// Keeps Foundation's non-thread-safe encoder / `.iso8601` formatting off the
+/// concurrent receiver+sender path in `ClientConnection`.
+private actor FrameSendEncoder {
+    func encode(_ frame: ServerFrame) -> Data? {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return try? encoder.encode(frame)
     }
 }
