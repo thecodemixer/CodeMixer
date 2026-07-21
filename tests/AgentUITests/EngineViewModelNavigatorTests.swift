@@ -244,6 +244,52 @@ struct EngineViewModelNavigatorTests {
         await bus.shutdown()
     }
 
+    @Test("selectProject for an overview-capable project opens Overview")
+    func selectProjectOpensOverviewForDashboardCapableAgent() async {
+        let port = RecordingPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
+        let other = TestPaths.workspace("ws/other")
+        let migration = TestPaths.workspace("ws/migration")
+        let dashboardURL = URL(string: "http://127.0.0.1:9422/")!
+        vm.workspace = other
+        vm.sessionID = "other-chat"
+        vm.showsOverviewDashboard = false
+        vm.projectCapabilities[migration.path] = .init(
+            supportsResumableSessions: true,
+            requiresSessionHandshakeGate: true,
+            supportsOverviewDashboard: true
+        )
+        vm.sessionsByProject[migration.path] = [
+            SessionSummary(
+                id: "control",
+                agentID: .other,
+                workspace: migration,
+                title: "Migration Dashboard",
+                lastActivity: .distantPast,
+                messageCount: 0,
+                isOverview: true,
+                overviewURL: dashboardURL
+            ),
+        ]
+
+        vm.selectProject(path: migration.path)
+        await drain()
+
+        #expect(vm.workspace?.path == migration.path)
+        #expect(vm.showsOverviewDashboard)
+        #expect(vm.sessionID == nil)
+        #expect(vm.dashboardURL == dashboardURL)
+        #expect(port.commands.contains {
+            if case .openProject(let path, let resume) = $0 {
+                return path == migration.path && resume == nil
+            }
+            return false
+        })
+
+        await bus.shutdown()
+    }
+
     @Test("renameProject follows the renamed active project path")
     func renameProjectFollowsRenamedActivePath() async throws {
         let port = RecordingPort()

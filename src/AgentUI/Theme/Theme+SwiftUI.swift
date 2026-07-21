@@ -21,6 +21,12 @@ extension Theme {
         public static let tertiary     = Color(nsColor: .tertiaryLabelColor)
     }
 
+    public enum accent {
+        /// Full-strength app accent, reserved for thin "you are here" indicators
+        /// (e.g. the current-project leading rail). Fills are `surface.bubbleUser`.
+        public static let solid        = Color.accentColor
+    }
+
     public enum signal {
         public static let warning      = Color.orange
         public static let danger       = Color.red

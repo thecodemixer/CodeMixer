@@ -522,9 +522,10 @@ public struct SessionSidebarView: View {
         }
     }
 
-    /// Project title click: select as current project and expand. A second click
-    /// on the already-current expanded project collapses it. Folder projects
-    /// always open the browser and never expand/collapse.
+    /// Project title click: select as current project and expand. Overview-capable
+    /// projects (Custom ACP) also select the overview entry. A second click on the
+    /// already-current expanded project collapses it. Folder projects always open
+    /// the browser and never expand/collapse.
     private func handleProjectTap(_ project: WorkspaceProjectsStore.ProjectRef) {
         if model.isFolderProject(project) {
             model.selectProject(path: project.path)
@@ -533,19 +534,39 @@ public struct SessionSidebarView: View {
         let isCurrent = model.workspace?.path == project.path
         let isExpanded = expandedProjects.contains(project.path)
         let isOverviewCapable = model.supportsOverviewDashboard(forProjectPath: project.path)
+        let isShowingOverview = isCurrent && model.showsOverviewDashboard
         let animation = Theme.motion.resolve(Theme.motion.changing, reduceMotion: reduceMotion)
+
+        // Overview-capable: title click makes the project current and selects
+        // Overview. Collapse only when Overview is already selected and expanded.
+        if isOverviewCapable {
+            withAnimation(animation) {
+                if isShowingOverview && isExpanded {
+                    expandedProjects.remove(project.path)
+                } else {
+                    expandedProjects.insert(project.path)
+                    if model.supportsResumableSessions(for: project) || isOverviewCapable {
+                        model.loadSessions(for: project.path)
+                    }
+                }
+            }
+            if !(isShowingOverview && isExpanded) {
+                model.selectProject(path: project.path)
+            }
+            return
+        }
+
         withAnimation(animation) {
             if isExpanded {
                 expandedProjects.remove(project.path)
             } else {
                 expandedProjects.insert(project.path)
-                if model.supportsResumableSessions(for: project)
-                    || model.supportsOverviewDashboard(forProjectPath: project.path) {
+                if model.supportsResumableSessions(for: project) {
                     model.loadSessions(for: project.path)
                 }
             }
         }
-        if !isOverviewCapable, !isCurrent {
+        if !isCurrent {
             model.selectProject(path: project.path)
         }
     }
