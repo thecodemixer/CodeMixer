@@ -230,4 +230,50 @@ struct FolderProjectBrowserModelTests {
         #expect(model.isEmptyListing)
         #expect(model.fileCount == 0)
     }
+
+    @Test("Pin sort puts pinned paths first")
+    func pinSortOrdersPinnedFirst() throws {
+        let fs = InMemoryFileSystem()
+        let root = TestPaths.workspace("pin-sort-root")
+        try fs.createDirectory(at: root, withIntermediates: true)
+        try fs.writeAtomically(Data("a".utf8), to: root.appendingPathComponent("a.txt"))
+        try fs.writeAtomically(Data("b".utf8), to: root.appendingPathComponent("b.txt"))
+        try fs.writeAtomically(Data("c".utf8), to: root.appendingPathComponent("c.txt"))
+
+        let model = FolderProjectBrowserModel(root: root, kind: .docs, fileSystem: fs)
+        model.entries = try FolderProjectScanner.scan(root: root, fileSystem: fs)
+        model.pinnedRelativePaths = ["b.txt"]
+        model.toggleSort(.pinned)
+        #expect(model.sortColumn == .pinned)
+        #expect(model.sortAscending)
+        #expect(model.visibleEntries.map(\.relativePath) == ["b.txt", "a.txt", "c.txt"])
+    }
+
+    @Test("Preview-only start loads one file without a full folder scan")
+    func previewOnlySkipsFullScan() async throws {
+        let fs = InMemoryFileSystem()
+        let root = TestPaths.workspace("preview-only-root")
+        try fs.createDirectory(at: root, withIntermediates: true)
+        try fs.writeAtomically(Data("# Hello\n".utf8), to: root.appendingPathComponent("readme.md"))
+        for index in 0..<40 {
+            try fs.writeAtomically(
+                Data("x".utf8),
+                to: root.appendingPathComponent("extra-\(index).md")
+            )
+        }
+
+        let model = FolderProjectBrowserModel(
+            root: root,
+            kind: .docs,
+            fileSystem: fs,
+            initialRelativePath: "readme.md"
+        )
+        model.start(previewOnly: true)
+        try? await Task.sleep(for: .milliseconds(60))
+        #expect(model.isPreviewOnlyListing)
+        #expect(model.entries.count == 1)
+        #expect(model.entries.first?.relativePath == "readme.md")
+        #expect(model.previewMode == .markdown)
+        model.stop()
+    }
 }

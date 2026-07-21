@@ -186,8 +186,11 @@ extension EngineViewModel {
     }
 
     /// Open a folder project browser, optionally preselecting a relative path.
+    /// - Parameter focusPreview: When true (sidebar pin/shortcut), hide the file
+    ///   list and show only the preview for `relativePath`.
     public func openFolderProject(_ project: WorkspaceProjectsStore.ProjectRef,
-                                  relativePath: String?) {
+                                  relativePath: String?,
+                                  focusPreview: Bool = false) {
         guard let kind = project.projectType.folderKind else { return }
         endSessionSwitch()
         let target = URL(fileURLWithPath: project.path).standardizedFileURL
@@ -208,8 +211,14 @@ extension EngineViewModel {
         supportsResumableSessions = false
         showsFolderBrowser = true
         activeFolderProjectKind = kind
-        pendingFolderSelectionRelativePath = relativePath
         activeFolderSelectionRelativePath = relativePath
+        // Preview-only opens are owned by FilePreviewPanelHost — do not seed the
+        // folder list's pending selection (avoids a one-frame list+empty-preview flash).
+        let previewOnly = focusPreview
+            && relativePath != nil
+            && kind.showsPreviewOnSelection
+        showsPreviewOnly = previewOnly
+        pendingFolderSelectionRelativePath = previewOnly ? nil : relativePath
         refreshFolderSidebarShortcuts(for: project)
     }
 
@@ -217,13 +226,22 @@ extension EngineViewModel {
     public func setActiveFolderSelection(_ relativePath: String?) {
         guard showsFolderBrowser else { return }
         activeFolderSelectionRelativePath = relativePath
+        if relativePath == nil {
+            showsPreviewOnly = false
+        }
+    }
+
+    /// Leaves preview-only mode and restores the folder file list.
+    public func exitFolderPreviewOnly() {
+        guard showsFolderBrowser else { return }
+        showsPreviewOnly = false
     }
 
     /// Open a sidebar shortcut under a folder project.
     public func openFolderShortcut(projectPath: String, relativePath: String) {
         guard let project = projectRef(at: projectPath),
               project.projectType.isFolderBacked else { return }
-        openFolderProject(project, relativePath: relativePath)
+        openFolderProject(project, relativePath: relativePath, focusPreview: true)
     }
 
     public func isFolderProject(_ project: WorkspaceProjectsStore.ProjectRef) -> Bool {
@@ -349,6 +367,7 @@ extension EngineViewModel {
         activeFolderProjectKind = nil
         pendingFolderSelectionRelativePath = nil
         activeFolderSelectionRelativePath = nil
+        showsPreviewOnly = false
     }
 
     private func projectRef(at path: String) -> WorkspaceProjectsStore.ProjectRef? {

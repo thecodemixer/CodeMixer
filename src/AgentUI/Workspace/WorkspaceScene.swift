@@ -49,7 +49,18 @@ public struct WorkspaceScene: View {
                        == URL(fileURLWithPath: path).standardizedFileURL.path
                }),
                let kind = project.projectType.folderKind {
-                FolderProjectBrowserView(model: model, project: project, kind: kind)
+                if model.showsPreviewOnly,
+                   kind.showsPreviewOnSelection,
+                   let relativePath = model.activeFolderSelectionRelativePath {
+                    FilePreviewPanelHost(
+                        model: model,
+                        project: project,
+                        kind: kind,
+                        relativePath: relativePath
+                    )
+                } else {
+                    FolderProjectBrowserView(model: model, project: project, kind: kind)
+                }
             } else if model.changedFiles.isEmpty || !diffPanelVisible {
                 conversationColumn
             } else {

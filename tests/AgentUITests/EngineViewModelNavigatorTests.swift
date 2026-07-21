@@ -1029,6 +1029,58 @@ struct EngineViewModelNavigatorTests {
         await bus.shutdown()
     }
 
+    @Test("openFolderShortcut enters preview-only mode for the pinned path")
+    func openFolderShortcutFocusesPreview() async throws {
+        let port = RecordingPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
+        let fileSystem = InMemoryFileSystem()
+        let environment = FakeEnvironment(home: TestPaths.fakeHome)
+        let store = WorkspaceProjectsStore(environment: environment, fileSystem: fileSystem)
+        vm.workspaceProjects = store
+
+        let workspace = TestPaths.workspace("ws-folder-pin")
+        try await vm.adoptEmptyWorkspace(workspace)
+        let ref = try await store.createProject(name: "docs", projectType: .folder(.docs), in: workspace)
+        await vm.applyProjectList(await store.projects(for: workspace))
+
+        vm.openFolderShortcut(projectPath: ref.path, relativePath: "readme.md")
+        #expect(vm.showsFolderBrowser)
+        #expect(vm.showsPreviewOnly)
+        #expect(vm.activeFolderSelectionRelativePath == "readme.md")
+        #expect(vm.pendingFolderSelectionRelativePath == nil)
+
+        vm.exitFolderPreviewOnly()
+        #expect(!vm.showsPreviewOnly)
+        #expect(vm.activeFolderSelectionRelativePath == "readme.md")
+
+        await bus.shutdown()
+    }
+
+    @Test("openFolderShortcut for files does not enter preview-only mode")
+    func openFolderShortcutFilesKeepsList() async throws {
+        let port = RecordingPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
+        let fileSystem = InMemoryFileSystem()
+        let environment = FakeEnvironment(home: TestPaths.fakeHome)
+        let store = WorkspaceProjectsStore(environment: environment, fileSystem: fileSystem)
+        vm.workspaceProjects = store
+
+        let workspace = TestPaths.workspace("ws-folder-files-pin")
+        try await vm.adoptEmptyWorkspace(workspace)
+        let ref = try await store.createProject(name: "files", projectType: .folder(.files), in: workspace)
+        await vm.applyProjectList(await store.projects(for: workspace))
+
+        vm.openFolderShortcut(projectPath: ref.path, relativePath: "notes.txt")
+        #expect(vm.showsFolderBrowser)
+        #expect(!vm.showsPreviewOnly)
+        #expect(vm.activeFolderSelectionRelativePath == "notes.txt")
+        #expect(vm.pendingFolderSelectionRelativePath == "notes.txt")
+
+        await bus.shutdown()
+    }
+
     @Test("sessionStarted for a previous project does not auto-switch the active project")
     func sessionStartedIgnoresStaleProject() async {
         let (vm, bus, _) = makeModel()

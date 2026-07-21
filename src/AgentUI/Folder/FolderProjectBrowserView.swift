@@ -11,8 +11,10 @@ struct FolderProjectBrowserView: View {
 
     @State private var browser: FolderProjectBrowserModel?
     @State private var qlBridge: QuickLookBridge?
+    @State private var fileTableSortOrder = [
+        KeyPathComparator(\FolderBrowserRow.name)
+    ]
     @FocusState private var searchFocused: Bool
-    @FocusState private var logFindFocused: Bool
 
     var body: some View {
         Group {
@@ -29,6 +31,7 @@ struct FolderProjectBrowserView: View {
         .onChange(of: project.path) { _, _ in recreateBrowser() }
         .onChange(of: kind) { _, _ in recreateBrowser() }
         .onChange(of: model.pendingFolderSelectionRelativePath) { _, path in
+            guard !model.showsPreviewOnly else { return }
             if let path, let browser {
                 browser.consumePendingSelection(path)
                 model.pendingFolderSelectionRelativePath = nil
@@ -95,7 +98,11 @@ struct FolderProjectBrowserView: View {
                         fileTable(browser, compact: showsPreview)
                         if showsPreview {
                             Divider()
-                            previewPane(browser)
+                            FilePreviewPanel(
+                                browser: browser,
+                                kind: kind,
+                                onClose: { browser.closePreview() }
+                            )
                         }
                     }
                 }
@@ -127,11 +134,19 @@ struct FolderProjectBrowserView: View {
         }
         .onAppear {
             searchFocused = false
+            syncPinnedPaths(into: browser)
             model.setActiveFolderSelection(browser.selectedRelativePath)
         }
         .onChange(of: browser.selectedRelativePath) { _, path in
             model.setActiveFolderSelection(path)
         }
+        .onChange(of: model.folderPinnedPathsByProject[project.path] ?? []) { _, _ in
+            syncPinnedPaths(into: browser)
+        }
+    }
+
+    private func syncPinnedPaths(into browser: FolderProjectBrowserModel) {
+        browser.pinnedRelativePaths = Set(model.folderPinnedPathsByProject[project.path] ?? [])
     }
 
     private func header(_ browser: FolderProjectBrowserModel) -> some View {
@@ -289,14 +304,17 @@ struct FolderProjectBrowserView: View {
 
     @ViewBuilder
     private func fileTable(_ browser: FolderProjectBrowserModel, compact: Bool) -> some View {
+        // Beside preview, keep a name-only list — Pin column is full-list only.
         if compact {
-            compactFileTable(browser)
+            compactPlainFileTable(browser)
+        } else if kind.supportsPinnedSidebarEntries {
+            fullPinnedFileTable(browser)
         } else {
-            fullFileTable(browser)
+            fullPlainFileTable(browser)
         }
     }
 
-    private func compactFileTable(_ browser: FolderProjectBrowserModel) -> some View {
+    private func compactPlainFileTable(_ browser: FolderProjectBrowserModel) -> some View {
         Table(of: FolderFileEntry.self, selection: Binding(
             get: { browser.selectedPaths },
             set: { browser.selectMany($0) }
@@ -304,8 +322,8 @@ struct FolderProjectBrowserView: View {
             TableColumn("Name") { (entry: FolderFileEntry) in
                 fileNameCell(entry)
             }
-            .width(min: Theme.layout.folderBrowserListMinWidth,
-                   ideal: Theme.layout.folderBrowserListIdealWidth)
+            .width(min: Theme.layout.folderBrowserListMinWidth - 48,
+                   ideal: Theme.layout.folderBrowserListIdealWidth - 48)
         } rows: {
             ForEach(browser.visibleEntries) { entry in
                 TableRow(entry)
@@ -328,7 +346,7 @@ struct FolderProjectBrowserView: View {
         .layoutPriority(0)
     }
 
-    private func fullFileTable(_ browser: FolderProjectBrowserModel) -> some View {
+    private func fullPlainFileTable(_ browser: FolderProjectBrowserModel) -> some View {
         Table(of: FolderFileEntry.self, selection: Binding(
             get: { browser.selectedPaths },
             set: { browser.selectMany($0) }
@@ -375,16 +393,126 @@ struct FolderProjectBrowserView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    private func fullPinnedFileTable(_ browser: FolderProjectBrowserModel) -> some View {
+        Table(
+            tableRows(browser),
+            selection: Binding(
+                get: { browser.selectedPaths },
+                set: { browser.selectMany($0) }
+            ),
+            sortOrder: $fileTableSortOrder
+        ) {
+            TableColumn("Name", value: \.name) { (row: FolderBrowserRow) in
+                fileNameCell(row.entry)
+            }
+            .width(min: 180, ideal: 280)
+
+            TableColumn("Pin", value: \.pinSortKey) { (row: FolderBrowserRow) in
+                pinCell(for: row.entry)
+            }
+            .width(min: 44, ideal: 52, max: 64)
+
+            TableColumn("Kind", value: \.kindLabel) { (row: FolderBrowserRow) in
+                Text(row.kindLabel)
+                    .font(Theme.typography.caption)
+                    .foregroundStyle(Theme.text.secondary)
+            }
+            .width(min: 64, ideal: 80)
+
+            TableColumn("Size", value: \.byteCount) { (row: FolderBrowserRow) in
+                Text(byteCountString(row.byteCount))
+                    .font(Theme.typography.caption)
+                    .foregroundStyle(Theme.text.secondary)
+                    .monospacedDigit()
+            }
+            .width(min: 64, ideal: 80)
+
+            TableColumn("Modified", value: \.modifiedAt) { (row: FolderBrowserRow) in
+                Text(row.modifiedAt.formatted(date: .abbreviated, time: .shortened))
+                    .font(Theme.typography.caption)
+                    .foregroundStyle(Theme.text.secondary)
+            }
+            .width(min: 120, ideal: 150)
+        }
+        .tableStyle(.inset(alternatesRowBackgrounds: true))
+        .contextMenu(forSelectionType: String.self) { selection in
+            rowContextMenu(paths: selection, browser: browser)
+        } primaryAction: { selection in
+            if let path = selection.first {
+                DesktopActions.openURL(browser.absoluteURL(for: path))
+            }
+        }
+        .onChange(of: fileTableSortOrder) { _, order in
+            syncSortOrder(order, into: browser)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func tableRows(_ browser: FolderProjectBrowserModel) -> [FolderBrowserRow] {
+        browser.filteredEntries.map { entry in
+            FolderBrowserRow(
+                entry: entry,
+                isPinned: browser.pinnedRelativePaths.contains(entry.relativePath)
+            )
+        }
+    }
+
+    private func syncSortOrder(_ order: [KeyPathComparator<FolderBrowserRow>],
+                               into browser: FolderProjectBrowserModel) {
+        guard let first = order.first else { return }
+        browser.sortAscending = first.order == .forward
+        if first.keyPath == \FolderBrowserRow.pinSortKey {
+            browser.sortColumn = .pinned
+        } else if first.keyPath == \FolderBrowserRow.name {
+            browser.sortColumn = .name
+        } else if first.keyPath == \FolderBrowserRow.kindLabel {
+            browser.sortColumn = .kind
+        } else if first.keyPath == \FolderBrowserRow.byteCount {
+            browser.sortColumn = .size
+        } else if first.keyPath == \FolderBrowserRow.modifiedAt {
+            browser.sortColumn = .modified
+        }
+    }
+
     private func fileNameCell(_ entry: FolderFileEntry) -> some View {
-        FolderFileNameCell(
-            entry: entry,
-            supportsPin: kind.supportsPinnedSidebarEntries,
-            pinned: (model.folderPinnedPathsByProject[project.path] ?? []).contains(entry.relativePath),
-            pinLimitReached: (model.folderPinnedPathsByProject[project.path] ?? []).count
-                >= FolderViewState.maxPinnedPaths,
-            onPin: { model.pinFolderPath(entry.relativePath, in: project.path) },
-            onUnpin: { model.unpinFolderPath(entry.relativePath, in: project.path) }
+        HStack(spacing: Theme.spacing.s8) {
+            Image(systemName: entry.isDirectory ? "folder" : "doc")
+                .foregroundStyle(Theme.text.tertiary)
+                .accessibilityHidden(true)
+            Text(entry.relativePath)
+                .font(Theme.typography.monoSmall)
+                .fontDesign(.monospaced)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 0)
+        }
+        .accessibilityLabel(entry.relativePath)
+    }
+
+    private func pinCell(for entry: FolderFileEntry) -> some View {
+        let pinned = (model.folderPinnedPathsByProject[project.path] ?? []).contains(entry.relativePath)
+        let pinLimitReached = (model.folderPinnedPathsByProject[project.path] ?? []).count
+            >= FolderViewState.maxPinnedPaths
+        return Button {
+            if pinned {
+                model.unpinFolderPath(entry.relativePath, in: project.path)
+            } else {
+                model.pinFolderPath(entry.relativePath, in: project.path)
+            }
+        } label: {
+            Image(systemName: pinned ? "pin.fill" : "pin")
+                .imageScale(.small)
+                .foregroundStyle(pinned ? Theme.text.primary : Theme.text.tertiary)
+        }
+        .buttonStyle(.plain)
+        .help(pinned ? "Unpin from Sidebar" : "Pin to Sidebar")
+        .accessibilityLabel(
+            pinned
+                ? "Unpin \(entry.relativePath) from sidebar"
+                : "Pin \(entry.relativePath) to sidebar"
         )
+        .disabled(!pinned && pinLimitReached)
+        .onHover { DesktopActions.setPointingHandCursor($0) }
     }
 
     @ViewBuilder
@@ -432,269 +560,6 @@ struct FolderProjectBrowserView: View {
                     }
                     .disabled(pins.count >= FolderViewState.maxPinnedPaths)
                     .accessibilityLabel("Pin \(path) to sidebar")
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func previewPane(_ browser: FolderProjectBrowserModel) -> some View {
-        VStack(spacing: 0) {
-            previewHeader(browser)
-            if kind == .logs {
-                logFindBar(browser)
-            }
-            Divider()
-            HStack(spacing: 0) {
-                if kind.usesMarkdownPreview,
-                   browser.previewMode == .markdown,
-                   !browser.tocItems.isEmpty {
-                    tocSidebar(browser)
-                    Divider()
-                }
-                previewBody(browser)
-            }
-        }
-        .frame(minWidth: Theme.layout.folderPreviewMinWidth)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .layoutPriority(1)
-        .background(Theme.surface.canvas)
-    }
-
-    private func previewHeader(_ browser: FolderProjectBrowserModel) -> some View {
-        HStack(spacing: Theme.spacing.s8) {
-            Text(browser.previewTitle.isEmpty ? "Preview" : browser.previewTitle)
-                .font(Theme.typography.label)
-                .lineLimit(1)
-            Spacer(minLength: 0)
-            if kind == .logs {
-                Toggle("Follow", isOn: Binding(
-                    get: { browser.followLogs },
-                    set: { browser.setFollowLogs($0) }
-                ))
-                .toggleStyle(.switch)
-                .controlSize(.mini)
-                .accessibilityLabel("Follow log")
-                Toggle("Wrap", isOn: Binding(
-                    get: { browser.lineWrap },
-                    set: { browser.lineWrap = $0 }
-                ))
-                .toggleStyle(.switch)
-                .controlSize(.mini)
-                .accessibilityLabel("Wrap lines")
-            }
-            if kind.usesMarkdownPreview,
-               browser.previewMode == .markdown || browser.previewMode == .source {
-                Picker(selection: Binding(
-                    get: { browser.docsShowSource },
-                    set: { browser.setDocsShowSource($0) }
-                )) {
-                    Text("Preview")
-                        .font(Theme.typography.caption)
-                        .tag(false)
-                    Text("Source")
-                        .font(Theme.typography.caption)
-                        .tag(true)
-                } label: {
-                    EmptyView()
-                }
-                .labelsHidden()
-                .pickerStyle(.segmented)
-                .controlSize(.mini)
-                .frame(maxWidth: 120)
-                .accessibilityLabel("Docs preview mode")
-            }
-            if browser.previewCapped {
-                Text("Showing last \(byteCountString(FolderBrowserLimits.logPreviewTailBytes))")
-                    .font(Theme.typography.caption)
-                    .foregroundStyle(Theme.text.tertiary)
-            }
-            if let entry = browser.selectedEntry, kind == .logs {
-                Text(byteCountString(entry.byteCount))
-                    .font(Theme.typography.caption)
-                    .foregroundStyle(Theme.text.tertiary)
-                Text(entry.modifiedAt.formatted(date: .abbreviated, time: .shortened))
-                    .font(Theme.typography.caption)
-                    .foregroundStyle(Theme.text.tertiary)
-                    .accessibilityLabel("Last updated \(entry.modifiedAt.formatted())")
-            }
-            Button {
-                browser.closePreview()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(Theme.typography.caption)
-                    .foregroundStyle(Theme.text.secondary)
-            }
-            .buttonStyle(.plain)
-            .help("Close preview")
-            .accessibilityLabel("Close preview")
-            .onHover { DesktopActions.setPointingHandCursor($0) }
-        }
-        .padding(.horizontal, Theme.spacing.s16)
-        .padding(.vertical, Theme.spacing.s8)
-        .background(Theme.surface.panel)
-    }
-
-    private func logFindBar(_ browser: FolderProjectBrowserModel) -> some View {
-        HStack(spacing: Theme.spacing.s8) {
-            Image(systemName: "text.magnifyingglass")
-                .foregroundStyle(Theme.text.tertiary)
-                .imageScale(.small)
-            TextField("Find in log", text: Binding(
-                get: { browser.logFindText },
-                set: { browser.logFindText = $0 }
-            ))
-            .textFieldStyle(.plain)
-            .font(Theme.typography.caption)
-            .focused($logFindFocused)
-            .accessibilityLabel("Find in log")
-            if !browser.logFindText.isEmpty {
-                Button {
-                    browser.logFindText = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(Theme.text.tertiary)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Clear log find")
-            }
-        }
-        .padding(.horizontal, Theme.spacing.s16)
-        .padding(.vertical, Theme.spacing.s8)
-        .background(Theme.surface.panel)
-    }
-
-    private func tocSidebar(_ browser: FolderProjectBrowserModel) -> some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: Theme.spacing.s4) {
-                Text("Contents")
-                    .font(Theme.typography.caption)
-                    .foregroundStyle(Theme.text.tertiary)
-                    .padding(.bottom, Theme.spacing.s4)
-                ForEach(Array(browser.tocItems.enumerated()), id: \.element.anchor) { _, item in
-                    Button {
-                        browser.scrollToTOC(item.anchor)
-                    } label: {
-                        Text(item.title)
-                            .font(Theme.typography.caption)
-                            .foregroundStyle(Theme.text.secondary)
-                            .lineLimit(2)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.leading, Theme.spacing.s8 * CGFloat(max(item.level - 1, 0)))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Jump to \(item.title)")
-                }
-            }
-            .padding(Theme.spacing.s12)
-        }
-        .frame(width: Theme.layout.diffSidebarIdealWidth)
-        .background(Theme.surface.panel)
-        .accessibilityLabel("Table of contents")
-    }
-
-    @ViewBuilder
-    private func previewBody(_ browser: FolderProjectBrowserModel) -> some View {
-        switch browser.previewMode {
-        case .none:
-            ContentUnavailableView(
-                "Select a file",
-                systemImage: "doc.text",
-                description: Text(kind == .files
-                                   ? "Use Open, Reveal, Quick Look, or Space for a quick peek."
-                                   : "Pick a file to preview it here.")
-            )
-        case .empty:
-            ContentUnavailableView(
-                "No files yet",
-                systemImage: "folder",
-                description: Text("This folder has no files to show.")
-            )
-        case .permissionDenied:
-            VStack(spacing: Theme.spacing.s16) {
-                ContentUnavailableView(
-                    "Permission denied",
-                    systemImage: "lock",
-                    description: Text(browser.previewText.isEmpty
-                                       ? "Codemixer cannot read this file or folder."
-                                       : browser.previewText)
-                )
-                Button("Reveal in Finder") {
-                    DesktopActions.revealInFinder(browser.root)
-                }
-                .accessibilityLabel("Reveal project in Finder")
-                Button("Retry") { browser.refresh() }
-                    .accessibilityLabel("Retry folder scan")
-            }
-        case .binary:
-            VStack(spacing: Theme.spacing.s16) {
-                ContentUnavailableView(
-                    "Binary file",
-                    systemImage: "doc.zipper",
-                    description: Text("Open in the default app or use Quick Look.")
-                )
-                if let path = browser.selectedRelativePath {
-                    HStack(spacing: Theme.spacing.s12) {
-                        Button("Open") { DesktopActions.openURL(browser.absoluteURL(for: path)) }
-                            .accessibilityLabel("Open selected file")
-                        Button("Quick Look") { quickLook(url: browser.absoluteURL(for: path)) }
-                            .accessibilityLabel("Quick Look selected file")
-                    }
-                }
-            }
-        case .error:
-            VStack(spacing: Theme.spacing.s16) {
-                ContentUnavailableView(
-                    "Preview unavailable",
-                    systemImage: "exclamationmark.triangle",
-                    description: Text(browser.previewText)
-                )
-                if let path = browser.selectedRelativePath {
-                    Button("Open in Default App") {
-                        DesktopActions.openURL(browser.absoluteURL(for: path))
-                    }
-                    .accessibilityLabel("Open unreadable file in default app")
-                }
-            }
-        case .text:
-            ZStack {
-                ScrollView {
-                    Text(highlightedLogText(browser.previewText, find: browser.logFindText))
-                        .font(Theme.typography.monoSmall)
-                        .fontDesign(.monospaced)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: browser.lineWrap ? .infinity : nil, alignment: .leading)
-                        .padding(Theme.spacing.s16)
-                }
-                FolderLogScrollObserver {
-                    browser.pauseFollowFromUserScroll()
-                }
-                .frame(width: 0, height: 0)
-            }
-        case .source:
-            ScrollView {
-                Text(browser.previewText)
-                    .font(Theme.typography.monoSmall)
-                    .fontDesign(.monospaced)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(Theme.spacing.s16)
-            }
-        case .markdown:
-            LocalMarkdownPreviewView(
-                markdown: browser.previewText,
-                projectRoot: browser.root,
-                documentDirectory: browser.selectedRelativePath.map {
-                    browser.absoluteURL(for: $0).deletingLastPathComponent()
-                } ?? browser.root,
-                scrollToAnchor: browser.pendingTOCAnchor
-            )
-            .onChange(of: browser.pendingTOCAnchor) { _, anchor in
-                if anchor != nil {
-                    // Consume after the representable has a chance to scroll.
-                    DispatchQueue.main.async {
-                        browser.pendingTOCAnchor = nil
-                    }
                 }
             }
         }
@@ -758,87 +623,18 @@ struct FolderProjectBrowserView: View {
     private func byteCountString(_ count: Int) -> String {
         ByteCountFormatter.string(fromByteCount: Int64(count), countStyle: .file)
     }
-
-    private func highlightedLogText(_ text: String, find: String) -> AttributedString {
-        var attributed = AttributedString(text)
-        let lower = text.lowercased()
-        for token in ["error", "warning", "info", "debug"] {
-            var searchStart = lower.startIndex
-            while let range = lower.range(of: token, range: searchStart..<lower.endIndex) {
-                if let attrRange = Range(range, in: attributed) {
-                    switch token {
-                    case "error":
-                        attributed[attrRange].foregroundColor = Theme.signal.danger
-                    case "warning":
-                        attributed[attrRange].foregroundColor = Theme.signal.warning
-                    case "info":
-                        attributed[attrRange].foregroundColor = Theme.signal.info
-                    default:
-                        attributed[attrRange].foregroundColor = Theme.text.secondary
-                    }
-                }
-                searchStart = range.upperBound
-            }
-        }
-        if !find.isEmpty {
-            var searchStart = lower.startIndex
-            let needle = find.lowercased()
-            while let range = lower.range(of: needle, range: searchStart..<lower.endIndex) {
-                if let attrRange = Range(range, in: attributed) {
-                    attributed[attrRange].backgroundColor = .yellow.opacity(0.35)
-                }
-                searchStart = range.upperBound
-            }
-        }
-        return attributed
-    }
 }
 
-/// Name cell with an inline pin control. Keeps the pin inside the row hit-target
-/// so hovering the pin does not dismiss it (Table + overlay IntentReveal drops hover).
-private struct FolderFileNameCell: View {
+/// Table row wrapper so Pin can use a native sortable `value:` key path.
+private struct FolderBrowserRow: Identifiable {
+    var id: String { entry.relativePath }
     let entry: FolderFileEntry
-    let supportsPin: Bool
-    let pinned: Bool
-    let pinLimitReached: Bool
-    let onPin: () -> Void
-    let onUnpin: () -> Void
+    let isPinned: Bool
 
-    @State private var hovering = false
-
-    var body: some View {
-        HStack(spacing: Theme.spacing.s8) {
-            Image(systemName: entry.isDirectory ? "folder" : "doc")
-                .foregroundStyle(Theme.text.tertiary)
-                .accessibilityHidden(true)
-            Text(entry.relativePath)
-                .font(Theme.typography.monoSmall)
-                .fontDesign(.monospaced)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            Spacer(minLength: 0)
-            if supportsPin {
-                Button {
-                    if pinned { onUnpin() } else { onPin() }
-                } label: {
-                    Image(systemName: pinned ? "pin.slash" : "pin")
-                        .imageScale(.small)
-                }
-                .buttonStyle(.plain)
-                .help(pinned ? "Unpin from Sidebar" : "Pin to Sidebar")
-                .accessibilityLabel(
-                    pinned
-                        ? "Unpin \(entry.relativePath) from sidebar"
-                        : "Pin \(entry.relativePath) to sidebar"
-                )
-                .disabled(!pinned && pinLimitReached)
-                .opacity(hovering || pinned ? 1 : 0)
-                .allowsHitTesting(hovering || pinned)
-                .onHover { DesktopActions.setPointingHandCursor($0) }
-            }
-        }
-        .contentShape(Rectangle())
-        .onHover { hovering = $0 }
-        .accessibilityLabel(entry.relativePath)
-    }
+    var name: String { entry.relativePath }
+    var kindLabel: String { entry.kindLabel }
+    var byteCount: Int { entry.byteCount }
+    var modifiedAt: Date { entry.modifiedAt }
+    /// Pinned sorts before unpinned under ascending order.
+    var pinSortKey: Int { isPinned ? 0 : 1 }
 }

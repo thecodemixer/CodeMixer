@@ -9,6 +9,7 @@ import AgentCore
 final class FolderProjectBrowserModel {
     enum SortColumn: String, CaseIterable, Identifiable {
         case name
+        case pinned
         case kind
         case size
         case modified
@@ -18,6 +19,7 @@ final class FolderProjectBrowserModel {
         var label: String {
             switch self {
             case .name: return "Name"
+            case .pinned: return "Pin"
             case .kind: return "Kind"
             case .size: return "Size"
             case .modified: return "Modified"
@@ -47,6 +49,8 @@ final class FolderProjectBrowserModel {
     var showFilters = false
     var selectedRelativePath: String?
     var selectedPaths: Set<String> = []
+    /// Paths currently pinned in the sidebar (pin-capable folder kinds).
+    var pinnedRelativePaths: Set<String> = []
     var sortColumn: SortColumn = .name
     var sortAscending = true
     var isLoading = false
@@ -63,6 +67,8 @@ final class FolderProjectBrowserModel {
     var tocItems: [(level: Int, title: String, anchor: String)] = []
     var pendingTOCAnchor: String?
     var lastRefreshedAt: Date?
+    /// When true, skip directory enumeration and only keep the selected file warm.
+    private(set) var isPreviewOnlyListing = false
 
     private var scanTask: Task<Void, Never>?
     private var previewTask: Task<Void, Never>?
@@ -97,9 +103,10 @@ final class FolderProjectBrowserModel {
         entries.filter { !$0.isDirectory }.count
     }
 
-    var visibleEntries: [FolderFileEntry] {
+    /// Filtered listing without sort — Table applies `sortOrder` for header clicks.
+    var filteredEntries: [FolderFileEntry] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let filtered = entries.filter { entry in
+        return entries.filter { entry in
             guard !entry.isDirectory else { return false }
             if let extensionFilter, entry.fileExtension != extensionFilter {
                 return false
@@ -109,12 +116,24 @@ final class FolderProjectBrowserModel {
                 || entry.relativePath.localizedCaseInsensitiveContains(query)
                 || entry.fileExtension.localizedCaseInsensitiveContains(query)
         }
-        return filtered.sorted { lhs, rhs in
-            let ascending = sortAscending
+    }
+
+    var visibleEntries: [FolderFileEntry] {
+        let ascending = sortAscending
+        return filteredEntries.sorted { lhs, rhs in
             let comparison: ComparisonResult
             switch sortColumn {
             case .name:
                 comparison = lhs.relativePath.localizedStandardCompare(rhs.relativePath)
+            case .pinned:
+                let lhsPinned = pinnedRelativePaths.contains(lhs.relativePath)
+                let rhsPinned = pinnedRelativePaths.contains(rhs.relativePath)
+                if lhsPinned == rhsPinned {
+                    comparison = lhs.relativePath.localizedStandardCompare(rhs.relativePath)
+                } else {
+                    // Pinned before unpinned under ascending (default Pin sort).
+                    comparison = lhsPinned ? .orderedAscending : .orderedDescending
+                }
             case .kind:
                 comparison = lhs.kindLabel.localizedStandardCompare(rhs.kindLabel)
             case .size:
@@ -143,9 +162,16 @@ final class FolderProjectBrowserModel {
         !isLoading && lastError == nil && fileCount == 0
     }
 
-    func start() {
-        refresh()
-        startWatching()
+    func start(previewOnly: Bool = false) {
+        if previewOnly, let path = selectedRelativePath, kind.showsPreviewOnSelection {
+            isPreviewOnlyListing = true
+            refreshPreviewOnly(relativePath: path)
+            startWatching()
+        } else {
+            isPreviewOnlyListing = false
+            refresh()
+            startWatching()
+        }
     }
 
     func stop() {
@@ -158,6 +184,10 @@ final class FolderProjectBrowserModel {
     }
 
     func refresh() {
+        if isPreviewOnlyListing, let path = selectedRelativePath {
+            refreshPreviewOnly(relativePath: path)
+            return
+        }
         let preservedSearch = searchText
         let preservedSort = sortColumn
         let preservedAscending = sortAscending
@@ -220,6 +250,85 @@ final class FolderProjectBrowserModel {
                 }
             }
         }
+    }
+
+    /// Loads a single file's metadata + preview without enumerating the folder.
+    private func refreshPreviewOnly(relativePath: String) {
+        scanTask?.cancel()
+        isLoading = true
+        lastError = nil
+        let root = root
+        let fileSystem = fileSystem
+        scanTask = Task { [weak self] in
+            do {
+                let entry = try Self.makeEntry(
+                    relativePath: relativePath,
+                    root: root,
+                    fileSystem: fileSystem
+                )
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    guard let self else { return }
+                    self.entries = [entry]
+                    self.truncated = false
+                    self.isLoading = false
+                    self.lastRefreshedAt = Date()
+                    self.selectedRelativePath = relativePath
+                    self.selectedPaths = [relativePath]
+                    if entry.isDirectory {
+                        self.clearPreview()
+                        self.previewMode = .error
+                        self.previewText = "Pinned path is a folder."
+                        self.previewTitle = entry.name
+                    } else {
+                        self.loadPreview(for: relativePath)
+                    }
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    guard let self else { return }
+                    self.isLoading = false
+                    let message = error.localizedDescription
+                    self.lastError = message
+                    self.entries = []
+                    self.previewTitle = URL(fileURLWithPath: relativePath).lastPathComponent
+                    if message.localizedCaseInsensitiveContains("permission")
+                        || message.localizedCaseInsensitiveContains("denied") {
+                        self.previewMode = .permissionDenied
+                    } else {
+                        self.previewMode = .error
+                    }
+                    self.previewText = message
+                }
+            }
+        }
+    }
+
+    private static func makeEntry(relativePath: String,
+                                  root: URL,
+                                  fileSystem: any FileSystem) throws -> FolderFileEntry {
+        let url = root.appendingPathComponent(relativePath).standardizedFileURL
+        let rootPath = root.standardizedFileURL.path
+        let prefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
+        let urlPath = url.path
+        guard urlPath == rootPath || urlPath.hasPrefix(prefix) else {
+            throw CocoaError(.fileReadNoSuchFile)
+        }
+        guard fileSystem.fileExists(at: url) else {
+            throw CocoaError(.fileReadNoSuchFile)
+        }
+        let isDir = fileSystem.isDirectory(at: url)
+        let modified = (try? fileSystem.modificationDate(at: url)) ?? Date(timeIntervalSince1970: 0)
+        let size = isDir ? 0 : ((try? fileSystem.byteCount(at: url)) ?? 0)
+        return FolderFileEntry(
+            relativePath: relativePath,
+            name: url.lastPathComponent,
+            fileExtension: isDir ? "" : url.pathExtension.lowercased(),
+            byteCount: size,
+            modifiedAt: modified,
+            isDirectory: isDir
+        )
     }
 
     func select(_ relativePath: String?) {
@@ -285,6 +394,10 @@ final class FolderProjectBrowserModel {
         } else {
             sortColumn = column
             sortAscending = column != .modified && column != .size
+            // Pin column defaults to pinned-first (ascending with pinned < unpinned).
+            if column == .pinned {
+                sortAscending = true
+            }
         }
     }
 
@@ -328,8 +441,16 @@ final class FolderProjectBrowserModel {
         previewGeneration += 1
         let generation = previewGeneration
         logRotationNotice = nil
-        guard let entry = entries.first(where: { $0.relativePath == relativePath }),
-              !entry.isDirectory else {
+        guard let entry = entries.first(where: { $0.relativePath == relativePath }) else {
+            // Listing has not produced this row yet (scan still in flight). Keep the
+            // selection and show the panel loading state until refresh finishes.
+            previewMode = .none
+            previewText = ""
+            previewTitle = URL(fileURLWithPath: relativePath).lastPathComponent
+            tocItems = []
+            return
+        }
+        guard !entry.isDirectory else {
             clearPreview()
             return
         }
