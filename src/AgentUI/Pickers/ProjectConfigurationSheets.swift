@@ -248,16 +248,6 @@ public struct NewWorkspaceSheet: View {
                 subtitle: "Creates a folder at the chosen location and opens it. Add projects (with a project type) via File → New Project…"
             )
 
-            VStack(alignment: .leading, spacing: Theme.spacing.s4) {
-                Text("Workspace name")
-                    .font(Theme.typography.caption)
-                    .foregroundStyle(Theme.text.secondary)
-                TextField("my-app", text: $name)
-                    .textFieldStyle(.roundedBorder)
-                    .font(Theme.typography.body)
-                    .accessibilityLabel("Workspace name")
-            }
-
             VStack(alignment: .leading, spacing: Theme.spacing.s8) {
                 Text("Location")
                     .font(Theme.typography.caption)
@@ -287,6 +277,16 @@ public struct NewWorkspaceSheet: View {
                         .truncationMode(.middle)
                         .accessibilityLabel("Workspace will be created at \(previewPath)")
                 }
+            }
+
+            VStack(alignment: .leading, spacing: Theme.spacing.s4) {
+                Text("Workspace name")
+                    .font(Theme.typography.caption)
+                    .foregroundStyle(Theme.text.secondary)
+                TextField("my-app", text: $name)
+                    .textFieldStyle(.roundedBorder)
+                    .font(Theme.typography.body)
+                    .accessibilityLabel("Workspace name")
             }
 
             sheetFooter(primaryTitle: "Create", primaryEnabled: canCreate, onCancel: onCancel) {

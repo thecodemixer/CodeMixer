@@ -1,37 +1,18 @@
 import SwiftUI
 import AgentCore
-import AgentProtocol
 
 /// Workspace picker shown when no workspace is open, or via File → Open Workspace.
 ///
-/// Recents only — agent mode is resolved from `<project>/.codemixer/project.json`
-/// (or the workspace index). Folders without a stored mode are handed back to
-/// the caller so they can present a configuration sheet.
+/// The user picks a folder from disk; the engine resolves the workspace or
+/// project type after selection and presents configuration only when needed.
 public struct WorkspacePickerView: View {
-    private let memoryFiles = ProjectMemoryFile()
-
-    public let recent: [SessionStore.ProjectRecord]
     public let onOpen: (URL, _ resumeSessionID: String?) -> Void
     public let onCancel: () -> Void
 
-    @State private var selection: SessionStore.ProjectRecord?
-    @State private var searchText: String = ""
-
-    public init(recent: [SessionStore.ProjectRecord],
-                onCancel: @escaping () -> Void = {},
+    public init(onCancel: @escaping () -> Void = {},
                 onOpen: @escaping (URL, _ resumeSessionID: String?) -> Void) {
-        self.recent = recent
         self.onCancel = onCancel
         self.onOpen = onOpen
-    }
-
-    private var filtered: [SessionStore.ProjectRecord] {
-        guard !searchText.isEmpty else { return recent }
-        return recent.filter {
-            $0.displayName.localizedCaseInsensitiveContains(searchText) ||
-            $0.path.localizedCaseInsensitiveContains(searchText) ||
-            ($0.lastSessionID ?? "").localizedCaseInsensitiveContains(searchText)
-        }
     }
 
     public var body: some View {
@@ -43,110 +24,23 @@ public struct WorkspacePickerView: View {
                     .foregroundStyle(Theme.text.tertiary)
                 Text("Open a workspace")
                     .font(Theme.typography.title)
-                Text("Pick a recent folder, or choose one from disk.")
+                Text("Choose a folder from disk.")
                     .font(Theme.typography.caption)
                     .foregroundStyle(Theme.text.secondary)
             }
             .padding(.top, Theme.spacing.s32)
 
-            if recent.isEmpty {
-                Text("No recent projects yet.")
-                    .foregroundStyle(Theme.text.secondary)
-            } else {
-                HStack {
-                    Image(systemName: "magnifyingglass")
-                        .accessibilityLabel("Search")
-                        .foregroundStyle(Theme.text.tertiary)
-                    TextField("Filter projects…", text: $searchText)
-                        .textFieldStyle(.plain)
-                        .font(Theme.typography.body)
-                    if !searchText.isEmpty {
-                        Button { searchText = "" } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundStyle(Theme.text.tertiary)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Clear filter")
-                    }
-                }
-                .padding(Theme.spacing.s8)
-                .background(Theme.surface.bubble,
-                            in: RoundedRectangle(cornerRadius: Theme.corner.small))
-                .padding(.horizontal)
-
-                List(selection: $selection) {
-                    Section(filtered.isEmpty ? "No results" : "Recent") {
-                        ForEach(filtered, id: \.path) { project in
-                            HStack {
-                                Image(systemName: "folder")
-                                    .accessibilityLabel("Project folder")
-                                    .foregroundStyle(Theme.text.secondary)
-                                VStack(alignment: .leading) {
-                                    HStack(spacing: Theme.spacing.s8) {
-                                        Text(project.displayName).font(Theme.typography.body)
-                                        if let filename = memoryFiles.presentFilename(
-                                            in: URL(fileURLWithPath: project.path)
-                                        ) {
-                                            Text(filename)
-                                                .font(Theme.typography.caption)
-                                                .foregroundStyle(Theme.signal.info)
-                                                .padding(.horizontal, Theme.spacing.s4)
-                                                .background(Theme.signal.info.opacity(Theme.opacity.subtle), in: .capsule)
-                                                .help("Project has \(filename) in its root")
-                                                .accessibilityLabel("Has \(filename)")
-                                        }
-                                    }
-                                    Text(project.path)
-                                        .font(Theme.typography.caption)
-                                        .foregroundStyle(Theme.text.tertiary)
-                                        .lineLimit(1).truncationMode(.middle)
-                                }
-                                Spacer()
-                                if project.lastSessionID != nil {
-                                    Tag(label: "Resume", system: "arrow.uturn.left.circle")
-                                }
-                            }
-                            .tag(project)
-                            .accessibilityLabel("\(project.displayName), \(project.path)")
-                            .contextMenu {
-                                Button("Open") {
-                                    open(URL(fileURLWithPath: project.path), resumeSessionID: nil)
-                                }
-                                if let last = project.lastSessionID {
-                                    Button("Resume last session") {
-                                        open(URL(fileURLWithPath: project.path), resumeSessionID: last)
-                                    }
-                                }
-                                Divider()
-                                Button("Reveal in Finder") {
-                                    DesktopActions.revealInFinder(URL(fileURLWithPath: project.path))
-                                }
-                            }
-                        }
-                    }
-                }
-                .listStyle(.inset)
-                .frame(maxHeight: Theme.layout.projectPickerMaxHeight)
-            }
+            Button("Choose Folder…") { chooseFolder() }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .keyboardShortcut(.return)
+                .accessibilityLabel("Choose workspace folder")
 
             HStack(spacing: Theme.spacing.s12) {
+                Spacer()
                 Button("Cancel", action: onCancel)
                     .keyboardShortcut(.cancelAction)
                     .accessibilityLabel("Cancel open workspace")
-                Button("Choose Folder…") { chooseFolder() }
-                    .buttonStyle(.bordered)
-                if let sel = selection {
-                    Button("Open") {
-                        open(URL(fileURLWithPath: sel.path), resumeSessionID: nil)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .keyboardShortcut(.return)
-                    if let last = sel.lastSessionID {
-                        Button("Resume Last Session") {
-                            open(URL(fileURLWithPath: sel.path), resumeSessionID: last)
-                        }
-                    }
-                }
             }
             .padding(.bottom, Theme.spacing.s24)
         }
@@ -154,8 +48,6 @@ public struct WorkspacePickerView: View {
         .fixedSize(horizontal: true, vertical: true)
         .background(Theme.surface.canvas)
     }
-
-    // MARK: - Private
 
     private func chooseFolder() {
         if let url = DesktopActions.chooseDirectoryPanel() {
@@ -166,19 +58,18 @@ public struct WorkspacePickerView: View {
     private func open(_ url: URL, resumeSessionID: String?) {
         onOpen(url, resumeSessionID)
     }
-
 }
 
 #if DEBUG
 #Preview("Workspace picker – Light") {
-    WorkspacePickerView(recent: PreviewFixtures.recentProjects) { _, _ in }
-        .frame(width: 480, height: 420)
+    WorkspacePickerView { _, _ in }
+        .frame(width: 360, height: 220)
         .preferredColorScheme(.light)
 }
 
 #Preview("Workspace picker – Dark") {
-    WorkspacePickerView(recent: PreviewFixtures.recentProjects) { _, _ in }
-        .frame(width: 480, height: 420)
+    WorkspacePickerView { _, _ in }
+        .frame(width: 360, height: 220)
         .preferredColorScheme(.dark)
 }
 #endif

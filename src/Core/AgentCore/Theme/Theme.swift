@@ -140,9 +140,9 @@ public enum Theme {
         public static let settingsMinHeight: CGFloat = 360
         public static let debugTerminalMinWidth: CGFloat = 560
         public static let debugTerminalMinHeight: CGFloat = 360
-        /// Fixed width for the Open Workspace recents picker.
+        /// Fixed width for the Open Workspace folder-chooser dialog.
         public static let projectPickerWidth: CGFloat = 320
-        /// Recents list viewport cap inside the project picker.
+        /// Upper bound for optional Open Workspace secondary content.
         public static let projectPickerMaxHeight: CGFloat = 240
         /// Fixed width for the Open Project folder-chooser dialog.
         public static let openProjectWidth: CGFloat = 280

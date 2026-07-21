@@ -115,7 +115,6 @@ struct CodemixerApp: App {
 
         Window("Open Workspace", id: UtilityWindowID.projectPicker) {
             WorkspacePickerView(
-                recent: bootstrap.recents,
                 onCancel: { bootstrap.showProjectPicker = false }
             ) { url, resume in
                 Task { await bootstrap.openWorkspace(url, resumeSessionID: resume) }

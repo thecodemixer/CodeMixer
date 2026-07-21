@@ -3,10 +3,8 @@ import AgentCore
 
 /// Dialog shown via File → Open Project.
 ///
-/// Unlike the workspace recents picker, this is a focused "add a folder" prompt.
-/// Recents are not shown because the project is being added to an existing
-/// workspace rather than loaded as one. The user picks a folder; the engine
-/// then resolves the project type (auto-detect → configure sheet if unknown).
+/// The user picks a folder; the engine then resolves the project type
+/// (auto-detect → configure sheet if unknown).
 public struct OpenProjectView: View {
     public let onCancel: () -> Void
     public let onOpen: (URL) -> Void

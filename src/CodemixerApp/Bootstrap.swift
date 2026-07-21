@@ -23,7 +23,6 @@ final class Bootstrap {
     var showDebugTerminal: Bool = false
     var showEventLog: Bool = false
     var showSilentDiagnostics: Bool = false
-    var recents: [SessionStore.ProjectRecord] = []
     var startupError: String?
     /// False until `start()` finishes engine bootstrap and optional workspace restore.
     var isStartupComplete = false
@@ -91,7 +90,6 @@ final class Bootstrap {
         let model = EngineViewModel(engine: engine, bus: engine.bus)
         viewModel = model
         eventBus = engine.bus
-        recents = await engine.sessions.recents()
         model.availableModels = []
         model.availableAgentModes = []
         model.selectedAgentModeID = ""
@@ -122,15 +120,14 @@ final class Bootstrap {
         // intrusive for a local-only chat launch.
     }
 
-    /// File → Open Workspace: shows the recents picker so the user can switch
-    /// to an existing workspace or choose a new folder.
+    /// File → Open Workspace: lets the user choose a workspace folder from disk.
     func presentProjectPicker() {
         pendingConfigureURL = nil
         pendingConfigureResumeSessionID = nil
         showProjectPicker = true
     }
 
-    /// File → Open Project: shows the same project picker dialog.
+    /// File → Open Project: lets the user add an existing project folder.
     func presentOpenProject() {
         pendingConfigureURL = nil
         pendingConfigureResumeSessionID = nil
@@ -205,7 +202,6 @@ final class Bootstrap {
         try? await viewModel?.workspaceProjects?.clearActiveWorkspace()
         if let engine {
             await engine.shutdown(reason: .userCancel)
-            recents = await engine.sessions.recents()
         }
         workspace = nil
         isPreparingWorkspace = false
@@ -433,7 +429,6 @@ final class Bootstrap {
             workspaceLifecycle?.abortOpen()
             try? await projectsStore?.clearActiveWorkspace()
         }
-        recents = await engine.sessions.recents()
         if workspace != nil {
             await configureSlashCommands(for: url, mode: projectType)
         }

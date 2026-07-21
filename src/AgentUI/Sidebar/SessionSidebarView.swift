@@ -62,13 +62,12 @@ public struct SessionSidebarView: View {
                 .disabled(model.workspace == nil || model.showsFolderBrowser)
             }
         }
-        .alert("Rename Project", isPresented: $showRenamePrompt) {
-            TextField("Display name", text: $renameText)
-                .accessibilityLabel("Project display name")
-            Button("Rename") { commitRename() }
-            Button("Cancel", role: .cancel) { renameTargetPath = nil; renameText = "" }
-        } message: {
-            Text("Renames the project folder on disk.")
+        .sheet(isPresented: $showRenamePrompt) {
+            RenameProjectSheet(
+                name: $renameText,
+                onCancel: cancelRename,
+                onRename: commitRename
+            )
         }
         .animation(Theme.motion.resolve(Theme.motion.changing, reduceMotion: reduceMotion),
                    value: focusMode)
@@ -236,6 +235,7 @@ public struct SessionSidebarView: View {
         .padding(.top, Theme.spacing.s8)
         .padding(.bottom, Theme.spacing.s4)
         .padding(.horizontal, Theme.spacing.s8)
+        .overlay(alignment: .leading) { currentProjectRail(isCurrent: isCurrent) }
         .onTapGesture { handleProjectTap(project) }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
@@ -275,6 +275,20 @@ public struct SessionSidebarView: View {
 
     private func shouldShowProjectTypeLabel(for project: WorkspaceProjectsStore.ProjectRef) -> Bool {
         project.projectType.showsSidebarTypeCapsule
+    }
+
+    /// A slim "you are here" rail in the leading gutter of the current project,
+    /// echoing the conversation turn spine. Calmer than a full-row wash, and it
+    /// stays distinct from the child chat selection (which uses `selectionWash`).
+    @ViewBuilder
+    private func currentProjectRail(isCurrent: Bool) -> some View {
+        if isCurrent {
+            Capsule(style: .continuous)
+                .fill(Theme.accent.solid)
+                .frame(width: Theme.stroke.focus, height: Theme.spacing.s16)
+                .offset(x: -Theme.spacing.s4)
+                .accessibilityHidden(true)
+        }
     }
 
     private func projectTypeLabel(_ projectType: ProjectType, isCurrent: Bool) -> some View {
@@ -568,14 +582,72 @@ public struct SessionSidebarView: View {
     private func commitRename() {
         guard let path = renameTargetPath else { return }
         let name = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        showRenamePrompt = false
         renameTargetPath = nil
         renameText = ""
-        guard !name.isEmpty else { return }
         model.renameProject(path: path, newName: name)
+    }
+
+    private func cancelRename() {
+        showRenamePrompt = false
+        renameTargetPath = nil
+        renameText = ""
     }
 
     private func revealInFinder(_ path: String) {
         DesktopActions.revealInFinder(URL(fileURLWithPath: path))
+    }
+}
+
+private struct RenameProjectSheet: View {
+    @Binding var name: String
+
+    let onCancel: () -> Void
+    let onRename: () -> Void
+
+    private var trimmedName: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.spacing.s24) {
+            VStack(alignment: .leading, spacing: Theme.spacing.s8) {
+                Text("Rename Project")
+                    .font(Theme.typography.title)
+                Text("Renames the project folder on disk.")
+                    .font(Theme.typography.caption)
+                    .foregroundStyle(Theme.text.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            VStack(alignment: .leading, spacing: Theme.spacing.s4) {
+                Text("Display name")
+                    .font(Theme.typography.caption)
+                    .foregroundStyle(Theme.text.secondary)
+                TextField("Display name", text: $name)
+                    .textFieldStyle(.roundedBorder)
+                    .font(Theme.typography.body)
+                    .accessibilityLabel("Project display name")
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel", action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                    .accessibilityLabel("Cancel rename project")
+                Button("Rename", action: onRename)
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(trimmedName.isEmpty)
+                    .accessibilityLabel("Rename project")
+            }
+        }
+        .padding(Theme.spacing.s24)
+        .frame(minWidth: Theme.layout.agentPickerMinWidth,
+               maxWidth: Theme.layout.agentPickerMaxWidth)
+        .fixedSize(horizontal: false, vertical: true)
+        .background(Theme.surface.canvas)
     }
 }
 
