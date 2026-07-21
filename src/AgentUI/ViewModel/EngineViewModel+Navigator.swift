@@ -404,6 +404,7 @@ extension EngineViewModel {
 
     /// Overview is a dashboard surface, not a resumable session.
     private func selectDashboardOverview(projectPath: String) {
+        let wasShowingOverview = showsOverviewDashboard
         workspace = URL(fileURLWithPath: projectPath).standardizedFileURL
         sessionID = nil
         clearConversationState()
@@ -417,7 +418,10 @@ extension EngineViewModel {
         restoreDashboardURLIfNeeded(projectPath: projectPath)
         // WKWebView is torn down while a file chat is selected; bump so the
         // representable reloads instead of painting a dead process page.
-        dashboardLoadGeneration += 1
+        // Skip when overview is already visible — remounting only flashes white.
+        if !wasShowingOverview {
+            dashboardLoadGeneration += 1
+        }
     }
 
     /// Start a fresh chat in the current project (toolbar / palette New Chat).

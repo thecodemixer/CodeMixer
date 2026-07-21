@@ -15,6 +15,11 @@ struct WebViewRepresentable: NSViewRepresentable {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
         let view = WKWebView(frame: .zero, configuration: configuration)
+        // Default under-page fill is opaque white, which flashes before the
+        // dashboard SPA paints. Transparent chrome lets Theme.surface.canvas
+        // (behind the representable) show through during load.
+        view.setValue(false, forKey: "drawsBackground")
+        view.underPageBackgroundColor = .clear
         view.navigationDelegate = context.coordinator
         // Without a UI delegate, `window.confirm` / `alert` return false / no-op —
         // dashboard Restart uses confirm and would silently do nothing.

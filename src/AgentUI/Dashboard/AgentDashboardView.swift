@@ -9,6 +9,9 @@ struct AgentDashboardView: View {
     var body: some View {
         if LoopbackDashboardURLPolicy.allowsNavigation(to: url) {
             WebViewRepresentable(url: url, reloadGeneration: reloadGeneration)
+                // Stable chrome under the transparent WKWebView so overview
+                // open does not flash white while the SPA boots.
+                .background(Theme.surface.canvas)
                 .accessibilityLabel("Agent dashboard")
                 .id(reloadGeneration)
         } else {
