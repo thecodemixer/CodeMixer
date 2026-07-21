@@ -11,9 +11,7 @@ struct FolderProjectBrowserView: View {
 
     @State private var browser: FolderProjectBrowserModel?
     @State private var qlBridge: QuickLookBridge?
-    @State private var fileTableSortOrder = [
-        KeyPathComparator(\FolderBrowserRow.name)
-    ]
+    @State private var fileTableSortOrder = [FolderTableSort(field: .name)]
     @FocusState private var searchFocused: Bool
 
     var body: some View {
@@ -347,40 +345,40 @@ struct FolderProjectBrowserView: View {
     }
 
     private func fullPlainFileTable(_ browser: FolderProjectBrowserModel) -> some View {
-        Table(of: FolderFileEntry.self, selection: Binding(
-            get: { browser.selectedPaths },
-            set: { browser.selectMany($0) }
-        )) {
-            TableColumn("Name") { (entry: FolderFileEntry) in
-                fileNameCell(entry)
+        Table(
+            sortedTableRows(browser),
+            selection: Binding(
+                get: { browser.selectedPaths },
+                set: { browser.selectMany($0) }
+            ),
+            sortOrder: $fileTableSortOrder
+        ) {
+            TableColumn("Name", sortUsing: FolderTableSort(field: .name)) { (row: FolderBrowserRow) in
+                fileNameCell(row.entry)
             }
             .width(min: 180, ideal: 280)
 
-            TableColumn("Kind") { (entry: FolderFileEntry) in
-                Text(entry.kindLabel)
+            TableColumn("Kind", sortUsing: FolderTableSort(field: .kind)) { (row: FolderBrowserRow) in
+                Text(row.kindLabel)
                     .font(Theme.typography.caption)
                     .foregroundStyle(Theme.text.secondary)
             }
             .width(min: 64, ideal: 80)
 
-            TableColumn("Size") { (entry: FolderFileEntry) in
-                Text(byteCountString(entry.byteCount))
+            TableColumn("Size", sortUsing: FolderTableSort(field: .size)) { (row: FolderBrowserRow) in
+                Text(byteCountString(row.byteCount))
                     .font(Theme.typography.caption)
                     .foregroundStyle(Theme.text.secondary)
                     .monospacedDigit()
             }
             .width(min: 64, ideal: 80)
 
-            TableColumn("Modified") { (entry: FolderFileEntry) in
-                Text(entry.modifiedAt.formatted(date: .abbreviated, time: .shortened))
+            TableColumn("Modified", sortUsing: FolderTableSort(field: .modified)) { (row: FolderBrowserRow) in
+                Text(row.modifiedAt.formatted(date: .abbreviated, time: .shortened))
                     .font(Theme.typography.caption)
                     .foregroundStyle(Theme.text.secondary)
             }
             .width(min: 120, ideal: 150)
-        } rows: {
-            ForEach(browser.visibleEntries) { entry in
-                TableRow(entry)
-            }
         }
         .tableStyle(.inset(alternatesRowBackgrounds: true))
         .contextMenu(forSelectionType: String.self) { selection in
@@ -390,36 +388,39 @@ struct FolderProjectBrowserView: View {
                 DesktopActions.openURL(browser.absoluteURL(for: path))
             }
         }
+        .onChange(of: fileTableSortOrder) { _, order in
+            syncSortOrder(order, into: browser)
+        }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func fullPinnedFileTable(_ browser: FolderProjectBrowserModel) -> some View {
         Table(
-            tableRows(browser),
+            sortedTableRows(browser),
             selection: Binding(
                 get: { browser.selectedPaths },
                 set: { browser.selectMany($0) }
             ),
             sortOrder: $fileTableSortOrder
         ) {
-            TableColumn("Name", value: \.name) { (row: FolderBrowserRow) in
+            TableColumn("Name", sortUsing: FolderTableSort(field: .name)) { (row: FolderBrowserRow) in
                 fileNameCell(row.entry)
             }
             .width(min: 180, ideal: 280)
 
-            TableColumn("Pin", value: \.pinSortKey) { (row: FolderBrowserRow) in
+            TableColumn("Pin", sortUsing: FolderTableSort(field: .pin)) { (row: FolderBrowserRow) in
                 pinCell(for: row.entry)
             }
             .width(min: 44, ideal: 52, max: 64)
 
-            TableColumn("Kind", value: \.kindLabel) { (row: FolderBrowserRow) in
+            TableColumn("Kind", sortUsing: FolderTableSort(field: .kind)) { (row: FolderBrowserRow) in
                 Text(row.kindLabel)
                     .font(Theme.typography.caption)
                     .foregroundStyle(Theme.text.secondary)
             }
             .width(min: 64, ideal: 80)
 
-            TableColumn("Size", value: \.byteCount) { (row: FolderBrowserRow) in
+            TableColumn("Size", sortUsing: FolderTableSort(field: .size)) { (row: FolderBrowserRow) in
                 Text(byteCountString(row.byteCount))
                     .font(Theme.typography.caption)
                     .foregroundStyle(Theme.text.secondary)
@@ -427,7 +428,7 @@ struct FolderProjectBrowserView: View {
             }
             .width(min: 64, ideal: 80)
 
-            TableColumn("Modified", value: \.modifiedAt) { (row: FolderBrowserRow) in
+            TableColumn("Modified", sortUsing: FolderTableSort(field: .modified)) { (row: FolderBrowserRow) in
                 Text(row.modifiedAt.formatted(date: .abbreviated, time: .shortened))
                     .font(Theme.typography.caption)
                     .foregroundStyle(Theme.text.secondary)
@@ -457,20 +458,22 @@ struct FolderProjectBrowserView: View {
         }
     }
 
-    private func syncSortOrder(_ order: [KeyPathComparator<FolderBrowserRow>],
+    /// Table does not reliably re-order custom-cell rows from `sortOrder` alone —
+    /// sort explicitly so header clicks always regroup the listing.
+    private func sortedTableRows(_ browser: FolderProjectBrowserModel) -> [FolderBrowserRow] {
+        tableRows(browser).sorted(using: fileTableSortOrder)
+    }
+
+    private func syncSortOrder(_ order: [FolderTableSort],
                                into browser: FolderProjectBrowserModel) {
         guard let first = order.first else { return }
         browser.sortAscending = first.order == .forward
-        if first.keyPath == \FolderBrowserRow.pinSortKey {
-            browser.sortColumn = .pinned
-        } else if first.keyPath == \FolderBrowserRow.name {
-            browser.sortColumn = .name
-        } else if first.keyPath == \FolderBrowserRow.kindLabel {
-            browser.sortColumn = .kind
-        } else if first.keyPath == \FolderBrowserRow.byteCount {
-            browser.sortColumn = .size
-        } else if first.keyPath == \FolderBrowserRow.modifiedAt {
-            browser.sortColumn = .modified
+        switch first.field {
+        case .name: browser.sortColumn = .name
+        case .pin: browser.sortColumn = .pinned
+        case .kind: browser.sortColumn = .kind
+        case .size: browser.sortColumn = .size
+        case .modified: browser.sortColumn = .modified
         }
     }
 
@@ -625,16 +628,74 @@ struct FolderProjectBrowserView: View {
     }
 }
 
-/// Table row wrapper so Pin can use a native sortable `value:` key path.
+/// Table row wrapper with stored sort keys (computed key paths break Table sorting).
 private struct FolderBrowserRow: Identifiable {
     var id: String { entry.relativePath }
     let entry: FolderFileEntry
-    let isPinned: Bool
-
-    var name: String { entry.relativePath }
-    var kindLabel: String { entry.kindLabel }
-    var byteCount: Int { entry.byteCount }
-    var modifiedAt: Date { entry.modifiedAt }
+    let name: String
+    let kindLabel: String
+    let byteCount: Int
+    let modifiedAt: Date
     /// Pinned sorts before unpinned under ascending order.
-    var pinSortKey: Int { isPinned ? 0 : 1 }
+    let pinSortKey: Int
+
+    init(entry: FolderFileEntry, isPinned: Bool) {
+        self.entry = entry
+        self.name = entry.relativePath
+        self.kindLabel = entry.kindLabel
+        self.byteCount = entry.byteCount
+        self.modifiedAt = entry.modifiedAt
+        self.pinSortKey = isPinned ? 0 : 1
+    }
+}
+
+/// Explicit comparator so column-header clicks update a typed field (not opaque key paths).
+private struct FolderTableSort: SortComparator, Hashable {
+    enum Field: Hashable {
+        case name
+        case pin
+        case kind
+        case size
+        case modified
+    }
+
+    var field: Field
+    var order: SortOrder = .forward
+
+    func compare(_ lhs: FolderBrowserRow, _ rhs: FolderBrowserRow) -> ComparisonResult {
+        let result: ComparisonResult
+        switch field {
+        case .name:
+            result = lhs.name.localizedStandardCompare(rhs.name)
+        case .pin:
+            if lhs.pinSortKey == rhs.pinSortKey {
+                result = lhs.name.localizedStandardCompare(rhs.name)
+            } else {
+                result = lhs.pinSortKey < rhs.pinSortKey ? .orderedAscending : .orderedDescending
+            }
+        case .kind:
+            result = lhs.kindLabel.localizedStandardCompare(rhs.kindLabel)
+        case .size:
+            if lhs.byteCount == rhs.byteCount {
+                result = lhs.name.localizedStandardCompare(rhs.name)
+            } else {
+                result = lhs.byteCount < rhs.byteCount ? .orderedAscending : .orderedDescending
+            }
+        case .modified:
+            if lhs.modifiedAt == rhs.modifiedAt {
+                result = lhs.name.localizedStandardCompare(rhs.name)
+            } else {
+                result = lhs.modifiedAt < rhs.modifiedAt ? .orderedAscending : .orderedDescending
+            }
+        }
+        return order == .forward ? result : Self.reversed(result)
+    }
+
+    private static func reversed(_ result: ComparisonResult) -> ComparisonResult {
+        switch result {
+        case .orderedAscending: return .orderedDescending
+        case .orderedDescending: return .orderedAscending
+        case .orderedSame: return .orderedSame
+        }
+    }
 }
