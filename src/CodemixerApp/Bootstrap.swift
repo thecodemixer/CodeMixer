@@ -48,10 +48,8 @@ final class Bootstrap {
     /// True while opening a workspace and waiting for model catalogs to load.
     /// The main workspace UI stays hidden until this clears.
     var isPreparingWorkspace = false
-    /// Folder chosen via Open Project that has no stored project type yet.
-    var pendingConfigureURL: URL?
-    var pendingConfigureResumeSessionID: String?
-    var pendingConfigurePreferFreshAgentProcess: Bool = false
+    /// Configure Project sheet while type is still unknown (Add Existing or Open Workspace).
+    var pendingConfigure: PendingConfigure?
 
     let voice = VoiceInputService()
     let tts = TTSService()
@@ -87,4 +85,21 @@ final class Bootstrap {
         guard let engine else { return nil }
         return { await engine.terminalSnapshotText() }
     }
+}
+
+/// Waiting on Configure Project before Add Existing registration or Open Workspace adopt.
+enum PendingConfigure: Hashable {
+    /// Register `draft.existingFolderURL` into the open workspace after type is chosen.
+    case addExisting(ProjectDraft)
+    /// Adopt the folder as the workspace root after type is chosen.
+    case openWorkspace(ProjectDraft, resumeSessionID: String?)
+
+    var draft: ProjectDraft {
+        switch self {
+        case .addExisting(let draft), .openWorkspace(let draft, _):
+            return draft
+        }
+    }
+
+    var folderURL: URL? { draft.existingFolderURL }
 }

@@ -125,7 +125,7 @@ struct CodemixerApp: App {
         }
         .windowResizability(.contentSize)
 
-        Window("Open Project", id: UtilityWindowID.openProject) {
+        Window("Add Existing Project", id: UtilityWindowID.openProject) {
             OpenProjectView(
                 onCancel: { bootstrap.showOpenProject = false }
             ) { info in
@@ -133,7 +133,7 @@ struct CodemixerApp: App {
                 Task { await bootstrap.openProject(info) }
             }
             .codemixerAppearance(bootstrap.viewModel?.appearancePrefs ?? AppearancePrefs())
-            .movablePanelTitle("Open Project")
+            .movablePanelTitle("Add Existing Project")
             .onDisappear { bootstrap.showOpenProject = false }
         }
         .windowResizability(.contentSize)
@@ -177,7 +177,7 @@ struct CodemixerApp: App {
 
         Window("Configure Project", id: UtilityWindowID.configureProject) {
             Group {
-                if let url = bootstrap.pendingConfigureURL {
+                if let url = bootstrap.pendingConfigure?.folderURL {
                     ConfigureProjectSheet(
                         projectURL: url,
                         onCancel: { bootstrap.cancelPendingProjectConfiguration() },

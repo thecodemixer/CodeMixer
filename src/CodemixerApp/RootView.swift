@@ -61,8 +61,8 @@ struct RootView: View {
         .onChange(of: bootstrap.showNewWorkspaceSheet) { _, show in
             syncUtilityWindow(UtilityWindowID.newWorkspace, show: show)
         }
-        .onChange(of: bootstrap.pendingConfigureURL) { _, url in
-            syncUtilityWindow(UtilityWindowID.configureProject, show: url != nil)
+        .onChange(of: bootstrap.pendingConfigure) { _, pending in
+            syncUtilityWindow(UtilityWindowID.configureProject, show: pending != nil)
         }
         .onChange(of: bootstrap.showDebugTerminal) { _, show in
             syncUtilityWindow(UtilityWindowID.debugTerminal, show: show)

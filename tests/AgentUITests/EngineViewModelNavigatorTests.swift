@@ -1044,12 +1044,56 @@ struct EngineViewModelNavigatorTests {
         let project = await store.project(path: external.path)
         #expect(project?.preferFreshAgentProcess == true)
         #expect(project?.displayName == external.lastPathComponent)
+        #expect(vm.workspaceRoot?.path == workspace.path)
+        #expect(vm.projects.contains { $0.path == external.path })
         #expect(port.commands.contains {
             if case .openProject(let path, let resume) = $0 {
                 return path == external.path && resume == nil
             }
             return false
         })
+
+        await bus.shutdown()
+    }
+
+    @Test("addExistingProject keeps workspaceRoot and lists the external folder")
+    func addExistingProjectKeepsWorkspaceRoot() async throws {
+        let port = RecordingPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
+        let fileSystem = InMemoryFileSystem()
+        let environment = FakeEnvironment(home: TestPaths.fakeHome)
+        let store = WorkspaceProjectsStore(environment: environment, fileSystem: fileSystem)
+        vm.workspaceProjects = store
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        let workspace = TestPaths.workspace("ws-add-existing")
+        try await vm.adoptEmptyWorkspace(workspace)
+        await AdapterRegistry.shared.register(MockAdapter(
+            id: .codex,
+            displayName: "Codex",
+            models: [AgentModelOption(id: "gpt", label: "GPT")]
+        ))
+
+        let external = TestPaths.underTemporary("add-existing-repo")
+        try fileSystem.createDirectory(at: external, withIntermediates: true)
+        await vm.addExistingProject(
+            url: external,
+            projectType: .codex,
+            displayName: "External Repo"
+        )
+        try? await Task.sleep(for: .milliseconds(40))
+
+        #expect(vm.workspaceRoot?.path == workspace.path)
+        #expect(vm.projects.contains {
+            $0.path == external.path && $0.displayName == "External Repo"
+        })
+        let stored = await store.project(path: external.path)
+        #expect(stored?.projectType == .codex)
+        #expect(stored?.displayName == "External Repo")
+        let listed = await store.projects(for: workspace)
+        #expect(listed.contains { $0.path == external.path })
 
         await bus.shutdown()
     }

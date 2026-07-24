@@ -9,15 +9,13 @@ extension Bootstrap {
 
     /// File → Open Workspace: lets the user choose a workspace folder from disk.
     func presentProjectPicker() {
-        pendingConfigureURL = nil
-        pendingConfigureResumeSessionID = nil
+        clearPendingProjectConfiguration()
         showProjectPicker = true
     }
 
-    /// File → Open Project: lets the user add an existing project folder.
+    /// File → Add Existing Project: pick a folder to register in the open workspace.
     func presentOpenProject() {
-        pendingConfigureURL = nil
-        pendingConfigureResumeSessionID = nil
+        clearPendingProjectConfiguration()
         showOpenProject = true
     }
 
@@ -85,8 +83,7 @@ extension Bootstrap {
         showProjectPicker = false
         showNewProjectSheet = false
         showNewWorkspaceSheet = false
-        pendingConfigureURL = nil
-        pendingConfigureResumeSessionID = nil
+        clearPendingProjectConfiguration()
         startupError = nil
         try? await viewModel?.workspaceProjects?.clearActiveWorkspace()
         if let engine {
@@ -97,12 +94,31 @@ extension Bootstrap {
         viewModel?.resetForClosedWorkspace()
     }
 
-    /// File → Add Existing Project / Open Project sheet result.
+    /// File → Add Existing Project sheet result: register the folder into the
+    /// current workspace. Resolves type from project-local state / index; when
+    /// unknown, presents Configure Project then adds into the open workspace.
     func openProject(_ info: ProjectDraft, resumeSessionID: String? = nil) async {
+        _ = resumeSessionID
         guard let url = info.existingFolderURL else { return }
-        await openWorkspace(url,
-                            resumeSessionID: resumeSessionID,
-                            preferFreshAgentProcess: info.preferFreshAgentProcess)
+        guard workspace != nil, let model = viewModel else { return }
+
+        let resolved: ProjectType?
+        if let store = model.workspaceProjects {
+            resolved = await store.resolveProjectType(for: url)
+        } else {
+            resolved = ProjectLocalStateStore.load(from: url, fileSystem: Seams.live.fileSystem)?.projectType
+        }
+
+        if let mode = resolved {
+            await model.addExistingProject(
+                info.withProjectType(mode),
+                url: url,
+                projectType: mode
+            )
+            return
+        }
+
+        pendingConfigure = .addExisting(info)
     }
 
     /// Opens a folder after resolving its project type from project-local state
@@ -144,39 +160,51 @@ extension Bootstrap {
                 return
             }
         }
-        pendingConfigureURL = url
-        pendingConfigureResumeSessionID = resumeSessionID
-        pendingConfigurePreferFreshAgentProcess = preferFreshAgentProcess
+        pendingConfigure = .openWorkspace(
+            .existingFolder(url, preferFreshAgentProcess: preferFreshAgentProcess),
+            resumeSessionID: resumeSessionID
+        )
     }
 
     func confirmPendingProjectConfiguration(_ info: ProjectDraft) async {
-        guard let url = pendingConfigureURL ?? info.existingFolderURL else { return }
-        let resume = pendingConfigureResumeSessionID
-        let preferFresh = info.preferFreshAgentProcess || pendingConfigurePreferFreshAgentProcess
+        guard let pending = pendingConfigure else { return }
         guard let mode = info.projectType else { return }
-        pendingConfigureURL = nil
-        pendingConfigureResumeSessionID = nil
-        pendingConfigurePreferFreshAgentProcess = false
-        await openWorkspace(url,
-                            resumeSessionID: resume,
-                            projectType: mode,
-                            preferFreshAgentProcess: preferFresh)
+        let preferFresh = info.preferFreshAgentProcess || pending.draft.preferFreshAgentProcess
+        let url = pending.folderURL ?? info.existingFolderURL
+        guard let url else { return }
+        clearPendingProjectConfiguration()
+
+        switch pending {
+        case .addExisting:
+            guard let model = viewModel else { return }
+            var draft = info.withProjectType(mode)
+            draft.preferFreshAgentProcess = preferFresh
+            draft.existingFolderURL = url
+            await model.addExistingProject(draft, url: url, projectType: mode)
+        case .openWorkspace(_, let resume):
+            await openWorkspace(url,
+                                resumeSessionID: resume,
+                                projectType: mode,
+                                preferFreshAgentProcess: preferFresh)
+        }
     }
 
     func confirmPendingProjectConfiguration(mode: ProjectType,
                                             preferFreshAgentProcess: Bool = false) async {
-        await confirmPendingProjectConfiguration(ProjectDraft(
-            name: pendingConfigureURL?.lastPathComponent ?? "",
-            projectType: mode,
-            preferFreshAgentProcess: preferFreshAgentProcess,
-            existingFolderURL: pendingConfigureURL
-        ))
+        guard let pending = pendingConfigure else { return }
+        var draft = pending.draft.withProjectType(mode)
+        if preferFreshAgentProcess {
+            draft.preferFreshAgentProcess = true
+        }
+        await confirmPendingProjectConfiguration(draft)
     }
 
     func cancelPendingProjectConfiguration() {
-        pendingConfigureURL = nil
-        pendingConfigureResumeSessionID = nil
-        pendingConfigurePreferFreshAgentProcess = false
+        clearPendingProjectConfiguration()
+    }
+
+    private func clearPendingProjectConfiguration() {
+        pendingConfigure = nil
     }
 
     func openWorkspace(_ url: URL,
@@ -184,8 +212,7 @@ extension Bootstrap {
                        projectType: ProjectType,
                        preferFreshAgentProcess: Bool = false) async {
         showProjectPicker = false
-        pendingConfigureURL = nil
-        pendingConfigureResumeSessionID = nil
+        clearPendingProjectConfiguration()
         startupError = nil
         isPreparingWorkspace = true
         defer { isPreparingWorkspace = false }

@@ -21,11 +21,11 @@ public struct OpenProjectView: View {
     public var body: some View {
         FolderChooserShell(
             systemImage: "folder.badge.plus",
-            title: "Open a project",
+            title: "Add Existing Project",
             caption: "Choose a folder to add to the current workspace.",
             chooseLabel: "Choose Folder…",
             accessibilityChooseLabel: "Choose project folder",
-            accessibilityCancelLabel: "Cancel open project",
+            accessibilityCancelLabel: "Cancel add existing project",
             width: Theme.layout.openProjectWidth,
             onChoose: pickFolder,
             onCancel: onCancel
