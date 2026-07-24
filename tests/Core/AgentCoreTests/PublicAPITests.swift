@@ -276,6 +276,14 @@ struct AgentModeOptionTests {
         #expect(option.label == "Plan")
         #expect(option.selectCommands == [.setPermissionMode(.plan)])
     }
+
+    @Test("built-in mode ids preserve legacy slash command intent")
+    func builtInModeIDs() {
+        #expect(AgentModeCommandID.think == "think")
+        #expect(AgentModeCommandID.thinkOff == "think-off")
+        #expect(AgentModeCommandID.review == "review")
+        #expect(AgentModeCommandID.reviewOff == "review-off")
+    }
 }
 
 @Suite("AuthStatus — Hashable & pattern matching")

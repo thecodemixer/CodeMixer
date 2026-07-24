@@ -65,16 +65,16 @@ public enum ProjectLocalStateStore {
         guard fileSystem.fileExists(at: url) else { return nil }
         do {
             let data = try fileSystem.readData(at: url)
-            let probe = try JSONDecoder().decode(SchemaProbe.self, from: data)
-            guard probe.schemaVersion <= ProjectLocalState.currentSchemaVersion else {
+            let schemaVersion = try PersistenceJSON.schemaVersion(in: data)
+            guard schemaVersion <= ProjectLocalState.currentSchemaVersion else {
                 log.warning("""
                     \(url.path, privacy: .public) schemaVersion \
-                    \(probe.schemaVersion, privacy: .public) is newer than \
+                    \(schemaVersion, privacy: .public) is newer than \
                     \(ProjectLocalState.currentSchemaVersion, privacy: .public); ignoring
                     """)
                 return nil
             }
-            var state = try JSONDecoder().decode(ProjectLocalState.self, from: data)
+            var state = try PersistenceJSON.decode(ProjectLocalState.self, from: data)
             state.folderView = ProjectLocalState.normalizedFolderView(state.folderView,
                                                                       for: state.projectType)
             return state
@@ -94,9 +94,7 @@ public enum ProjectLocalStateStore {
                                                                        for: normalized.projectType)
         let dir = ProjectPaths.directoryURL(in: projectRoot)
         try fileSystem.createDirectory(at: dir, withIntermediates: true)
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-        let data = try encoder.encode(normalized)
+        let data = try PersistenceJSON.encode(normalized, withoutEscapingSlashes: true)
         try fileSystem.writeAtomically(data, to: ProjectPaths.projectStateURL(in: projectRoot))
     }
 
@@ -153,7 +151,4 @@ public enum ProjectLocalStateStore {
         return String(candidatePath.dropFirst(prefix.count))
     }
 
-    private struct SchemaProbe: Decodable {
-        var schemaVersion: Int
-    }
 }

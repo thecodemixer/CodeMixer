@@ -57,7 +57,11 @@ Accepts WebSocket connections on `RemoteDefaults.webSocketPort` (8421). Each
 2. Subscribes with `ClientFrame.subscribe(lastSeenEventID:)` — the bus replays
    from the ring buffer or returns `checkpointExpired`.
 3. Receives live `ServerFrame.event` fan-out from `MulticastEventBus`.
-4. Dispatches `ClientFrame.command` into `AgentEngine.send(_:)`.
+4. Dispatches `ClientFrame.command` into the bound `AgentEngineCommandPort`.
+
+Every frame carries `WireVersion.current` (`v2` today). Version mismatches are
+rejected with `ServerFrame.versionMismatch` and recorded in silent diagnostics;
+there is no dual-speak between protocol versions.
 
 `observeClientCount(_:)` notifies when `connections.count` changes. The GUI
 wires this to `EngineViewModel.setConnectedRemoteClients`; the daemon uses it

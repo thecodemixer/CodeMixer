@@ -16,7 +16,7 @@ The pillars:
 2. One typed input alphabet (`AgentCommand`), one typed output alphabet (`AgentEvent`). Every UI affordance maps to one `AgentCommand` case; every adapter byte maps to one `AgentEvent` case.
 3. `AgentCore` and `AgentUI` are agent-agnostic. Per-vendor knowledge lives in adapter modules behind `AgentAdapter`.
 4. Strict Swift 6 concurrency. Engines are `actor`s. `@MainActor` is the UI seam only. `@unchecked Sendable` is rare and always justified inline.
-5. All side-effects route through four DI seams (`Clock`, `RandomSource`, `Environment`, `FileSystem`). Tests inject fakes; production code never reads `Date()` or `getenv` directly.
+5. All side-effects route through four DI seams (`AgentClock`, `RandomSource`, `AgentEnvironment`, `FileSystem`). Tests inject fakes; production code never reads `Date()` or `getenv` directly.
 
 ---
 
@@ -48,6 +48,7 @@ Codemixer/
 ├── scripts/                                 local automation + validation helpers
 ├── docs/                                    architecture + style + reference patterns
 ├── Package.swift, src/, tests/               the SPM package (repo root)
+├── migration-tool/                          Bun/TS Custom ACP migrator (API+DB → MongoDB); not SPM
 ```
 
 ### Inside `src/`

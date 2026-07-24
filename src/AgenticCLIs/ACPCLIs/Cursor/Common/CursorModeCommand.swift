@@ -38,14 +38,14 @@ public enum CursorModeCommand: String, Sendable, CaseIterable {
         }
     }
 
-    /// Composer bottom-bar modes. Activation uses slash names so
-    /// `CursorACPAdapter.encodeCommand` remaps them to ACP `session/set_mode`.
+    /// Composer bottom-bar modes. Activation writes ACP `session/set_mode`
+    /// through `CursorACPAdapter.encodeCommand`.
     public static var agentModes: [AgentModeOption] {
         allCases.map {
             AgentModeOption(
                 id: $0.modeID,
                 label: $0.displayLabel,
-                selectCommands: [.runSlashCommand(name: $0.slashName, args: [])]
+                selectCommands: [.setAgentMode(id: $0.modeID)]
             )
         }
     }

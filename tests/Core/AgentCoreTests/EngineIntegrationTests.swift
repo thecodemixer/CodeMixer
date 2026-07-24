@@ -35,7 +35,7 @@ struct EngineIntegrationTests {
         try? await engine.start(adapter: adapter,
                                 workspace: URL(fileURLWithPath: env.appSupportDirectory.path))
 
-        let cmd1: AgentCommand = .updateAppearancePref(key: .theme, value: .string("dark"))
+        let cmd1: AgentCommand = .updateAppearancePref(.theme("dark"))
         try await engine.send(cmd1)
         let cmd2: AgentCommand = .updateAutoApprovalRules([
             AutoApprovalRule(match: "Bash echo *", decision: .allow)
@@ -63,7 +63,7 @@ struct EngineIntegrationTests {
         let env = FakeEnvironment()
         let prefs = PrefsStore(environment: env, fileSystem: fs)
         await prefs.load()
-        try await prefs.updateAppearance(.codeTheme, value: .string("solarized"))
+        try await prefs.updateAppearance(.codeTheme("solarized"))
 
         let sessions = SessionStore(environment: env, fileSystem: fs)
         await sessions.load()

@@ -1,6 +1,5 @@
 import SwiftUI
 import AppKit
-import Quartz
 import AgentCore
 
 /// Right-pane diff panel. Lists the changed files; selecting one loads the
@@ -73,7 +72,7 @@ public struct DiffPanelView: View {
                 .font(Theme.typography.caption)
                 .foregroundStyle(Theme.text.tertiary)
         }
-        .padding(Theme.spacing.s16)
+        .panelHeaderChrome()
     }
 
     private var fileList: some View {
@@ -96,7 +95,7 @@ public struct DiffPanelView: View {
                 .tag(path)
                 .revealOnIntent {
                     Button {
-                        model.send(.revertFile(path: path))
+                        model.revertFile(path: path)
                     } label: {
                         Image(systemName: "arrow.uturn.backward")
                             .foregroundStyle(Theme.signal.danger)
@@ -115,7 +114,7 @@ public struct DiffPanelView: View {
                         .accessibilityLabel("Quick Look \(path)")
                     Divider()
                     Button("Revert to HEAD", role: .destructive) {
-                        model.send(.revertFile(path: path))
+                        model.revertFile(path: path)
                     }
                     .accessibilityLabel("Revert \(path) to HEAD")
                 }
@@ -144,7 +143,7 @@ public struct DiffPanelView: View {
                         ForEach(hunks) { hunk in
                             HunkView(hunk: hunk) {
                                 guard let selected else { return }
-                                model.send(.revertHunk(path: selected, hunkID: hunk.id))
+                                model.revertHunk(path: selected, hunkID: hunk.id)
                             }
                         }
                     }
@@ -180,17 +179,7 @@ public struct DiffPanelView: View {
     }
 
     private func quickLook(_ path: String) {
-        let url = fileURL(for: path)
-        let bridge = QuickLookBridge(url: url)
-        qlBridge = bridge                       // retain until the panel is dismissed
-        let panel = QLPreviewPanel.shared()
-        panel?.dataSource = bridge
-        panel?.reloadData()
-        if panel?.isVisible == true {
-            panel?.orderFront(nil)
-        } else {
-            panel?.makeKeyAndOrderFront(nil)
-        }
+        qlBridge = presentQuickLook(url: fileURL(for: path)) // retain until the panel is dismissed
     }
 
     private func fileURL(for path: String) -> URL {
@@ -204,25 +193,6 @@ public struct DiffPanelView: View {
 
     private func displayName(for path: String) -> String {
         URL(fileURLWithPath: path).lastPathComponent
-    }
-}
-
-// MARK: - Quick Look bridge
-
-/// Minimal `QLPreviewPanelDataSource` serving one file URL.
-///
-/// Must be retained by the caller (the panel holds an `unowned unsafe` ref).
-/// `DiffPanelView` stores it in `@State private var qlBridge`.
-final class QuickLookBridge: NSObject, QLPreviewPanelDataSource, @unchecked Sendable {
-    // @unchecked Sendable: url is written once before any concurrent use.
-    private let url: URL
-    init(url: URL) { self.url = url }
-
-    func numberOfPreviewItems(in panel: QLPreviewPanel!) -> Int { 1 }
-
-    func previewPanel(_ panel: QLPreviewPanel!,
-                      previewItemAt index: Int) -> any QLPreviewItem {
-        url as NSURL
     }
 }
 

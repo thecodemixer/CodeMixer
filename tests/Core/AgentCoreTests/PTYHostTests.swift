@@ -7,13 +7,13 @@ struct PTYHostTests {
 
     @Test("Spawning /bin/echo emits the printed text and exits cleanly")
     func echoRoundTrip() async throws {
-        let spec = PTYHost.ChildSpec(
+        let spec = AgentTransportLaunchSpec(
             executable: SystemPaths.echo,
             arguments: ["hello-pty"],
             environment: ["TERM": "xterm-256color"],
             workingDirectory: nil
         )
-        let host = try PTYHost(spec: spec)
+        let host = try PTYHost(launch: spec)
 
         var collected = Data()
         let outbound = host.outboundBytes
@@ -32,13 +32,13 @@ struct PTYHostTests {
 
     @Test("Writing after close throws .alreadyClosed")
     func writeAfterClose() async throws {
-        let spec = PTYHost.ChildSpec(
+        let spec = AgentTransportLaunchSpec(
             executable: SystemPaths.cat,
             arguments: [],
             environment: [:],
             workingDirectory: nil
         )
-        let host = try PTYHost(spec: spec)
+        let host = try PTYHost(launch: spec)
         await host.close()
         do {
             try await host.write(Data("x".utf8))
@@ -50,13 +50,13 @@ struct PTYHostTests {
 
     @Test("Child exit code is decoded from wait status")
     func childExitCodeIsDecoded() async throws {
-        let spec = PTYHost.ChildSpec(
+        let spec = AgentTransportLaunchSpec(
             executable: SystemPaths.sh,
             arguments: ["-c", "exit 3"],
             environment: [:],
             workingDirectory: nil
         )
-        let host = try PTYHost(spec: spec)
+        let host = try PTYHost(launch: spec)
 
         let status = await host.exitStatus.value
 
@@ -65,13 +65,13 @@ struct PTYHostTests {
 
     @Test("Child signal termination is decoded from wait status")
     func childSignalTerminationIsDecoded() async throws {
-        let spec = PTYHost.ChildSpec(
+        let spec = AgentTransportLaunchSpec(
             executable: SystemPaths.sh,
             arguments: ["-c", "kill -TERM $$; sleep 1"],
             environment: [:],
             workingDirectory: nil
         )
-        let host = try PTYHost(spec: spec)
+        let host = try PTYHost(launch: spec)
 
         let status = await host.exitStatus.value
 

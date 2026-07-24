@@ -57,7 +57,7 @@ struct CodemixerApp: App {
                 }
                 .keyboardShortcut("w", modifiers: [.command, .shift])
                 .disabled(bootstrap.workspace == nil)
-                Button("Cancel Turn") { bootstrap.viewModel?.send(.cancelCurrentTurn) }
+                Button("Cancel Turn") { bootstrap.viewModel?.cancelCurrentTurn() }
                     .keyboardShortcut(".", modifiers: .command)
                     .disabled(bootstrap.viewModel?.canCancel != true)
             }

@@ -64,7 +64,7 @@ struct FakeCursorACPIntegrationTests {
         }
         #expect(sawPlan)
 
-        try await engine.send(.runSlashCommand(name: "/ask", args: []))
+        try await engine.send(.runSlashCommand(target: .builtin(name: "/ask"), args: []))
         let sawAsk = await pollUntil(timeout: .seconds(5)) {
             await sink.hasStatusPhrase(containing: "ask")
         }

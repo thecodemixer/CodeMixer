@@ -1,6 +1,5 @@
 import SwiftUI
 import AppKit
-import Quartz
 import AgentCore
 
 /// Shared file preview chrome for folder projects (docs / logs / modelhike).
@@ -115,38 +114,19 @@ struct FilePreviewPanel: View {
             .accessibilityLabel("Close preview")
             .onHover { DesktopActions.setPointingHandCursor($0) }
         }
-        .padding(.horizontal, Theme.spacing.s16)
-        .padding(.vertical, Theme.spacing.s8)
-        .background(Theme.surface.panel)
+        .panelHeaderChrome(verticalPadding: Theme.spacing.s8)
     }
 
     private var logFindBar: some View {
-        HStack(spacing: Theme.spacing.s8) {
-            Image(systemName: "text.magnifyingglass")
-                .foregroundStyle(Theme.text.tertiary)
-                .imageScale(.small)
-            TextField("Find in log", text: Binding(
-                get: { browser.logFindText },
-                set: { browser.logFindText = $0 }
-            ))
-            .textFieldStyle(.plain)
-            .font(Theme.typography.caption)
-            .focused($logFindFocused)
-            .accessibilityLabel("Find in log")
-            if !browser.logFindText.isEmpty {
-                Button {
-                    browser.logFindText = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(Theme.text.tertiary)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Clear log find")
-            }
-        }
-        .padding(.horizontal, Theme.spacing.s16)
-        .padding(.vertical, Theme.spacing.s8)
-        .background(Theme.surface.panel)
+        SearchFieldBar(
+            systemImage: "text.magnifyingglass",
+            placeholder: "Find in log",
+            text: Binding(get: { browser.logFindText }, set: { browser.logFindText = $0 }),
+            focus: $logFindFocused,
+            showsClear: !browser.logFindText.isEmpty,
+            clearAccessibilityLabel: "Clear log find",
+            onClear: { browser.logFindText = "" }
+        )
     }
 
     private var tocSidebar: some View {
@@ -270,6 +250,7 @@ struct FilePreviewPanel: View {
                 documentDirectory: browser.selectedRelativePath.map {
                     browser.absoluteURL(for: $0).deletingLastPathComponent()
                 } ?? browser.root,
+                fileSystem: browser.fileSystem,
                 scrollToAnchor: browser.pendingTOCAnchor
             )
             .onChange(of: browser.pendingTOCAnchor) { _, anchor in
@@ -283,20 +264,7 @@ struct FilePreviewPanel: View {
     }
 
     private func quickLook(url: URL) {
-        let bridge = QuickLookBridge(url: url)
-        qlBridge = bridge
-        let panel = QLPreviewPanel.shared()
-        panel?.dataSource = bridge
-        panel?.reloadData()
-        if panel?.isVisible == true {
-            panel?.orderFront(nil)
-        } else {
-            panel?.makeKeyAndOrderFront(nil)
-        }
-    }
-
-    private func byteCountString(_ count: Int) -> String {
-        ByteCountFormatter.string(fromByteCount: Int64(count), countStyle: .file)
+        qlBridge = presentQuickLook(url: url)
     }
 
     private func highlightedLogText(_ text: String, find: String) -> AttributedString {

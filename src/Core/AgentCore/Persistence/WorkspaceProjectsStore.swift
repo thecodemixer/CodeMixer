@@ -5,6 +5,14 @@ import AgentProtocol
 
 /// Agent-agnostic Workspace → Projects model and its persistence.
 ///
+/// One store, one source of truth — no facade. The nested types, state, and
+/// core queries live here; three same-file-scoped extensions in this
+/// directory carry the rest by concern: `+Codec` (`workspaces.json` load /
+/// persist, including the legacy-schema tolerant decode), `+Mutation`
+/// (create / add / rename / remove / restore / repair a project), and
+/// `+AdapterCache` (per-adapter model catalog pass-through to
+/// `WorkspaceAdapterLocalStateStore`).
+///
 /// A *workspace* is the loaded folder (one per window). Each workspace owns an
 /// ordered list of `ProjectRef`s: the workspace root is seeded as the default
 /// project; further projects are either created as subfolders of the workspace
@@ -80,12 +88,12 @@ public actor WorkspaceProjectsStore {
     /// - v4: `ProjectType.folder(...)` non-agent folder browser types
     public static let currentSchemaVersion = 4
 
-    private struct WorkspaceEntry: Codable, Hashable {
+    struct WorkspaceEntry: Codable, Hashable {
         var workspacePath: String
         var projects: [ProjectRef]
     }
 
-    private struct Persisted: Codable {
+    struct Persisted: Codable {
         var schemaVersion: Int
         var activeWorkspacePath: String?
         var workspaces: [WorkspaceEntry]
@@ -112,88 +120,22 @@ public actor WorkspaceProjectsStore {
 
     // MARK: - State
 
-    private let log = Logger(subsystem: AppIdentity.logSubsystem, category: "WorkspaceProjectsStore")
-    private let fileSystem: any FileSystem
-    private let url: URL
-    private var workspaces: [String: [ProjectRef]] = [:]
+    /// Non-private: read/written by the `+Codec`/`+Mutation` extensions in
+    /// this directory.
+    let log = Logger(subsystem: AppIdentity.logSubsystem, category: "WorkspaceProjectsStore")
+    let fileSystem: any FileSystem
+    let url: URL
+    var workspaces: [String: [ProjectRef]] = [:]
     /// Absolute path of the workspace that should reopen on next launch.
     /// `nil` means the user closed the workspace (or never opened one).
-    private var activeWorkspacePath: String?
+    var activeWorkspacePath: String?
     /// Projects that failed to decode. Surfaced so the UI can prompt for repair.
-    private(set) public var decodeFailures: [StoreError] = []
+    /// Setter is internal, not private, so `+Codec`/`+Mutation` can update it.
+    public internal(set) var decodeFailures: [StoreError] = []
 
     public init(environment: any AgentEnvironment, fileSystem: any FileSystem) {
         self.fileSystem = fileSystem
         self.url = AppSupportPaths.workspacesURL(in: environment.appSupportDirectory)
-    }
-
-    // MARK: - Loading
-
-    public func load() async {
-        decodeFailures = []
-        do {
-            try fileSystem.createDirectory(at: url.deletingLastPathComponent(),
-                                           withIntermediates: true)
-            guard fileSystem.fileExists(at: url) else { return }
-            let data = try fileSystem.readData(at: url)
-            let persisted = try JSONDecoder().decode(Persisted.self, from: data)
-            guard persisted.schemaVersion <= Self.currentSchemaVersion else {
-                log.warning("""
-                    workspaces.json schemaVersion \(persisted.schemaVersion, privacy: .public) \
-                    is newer than \(Self.currentSchemaVersion, privacy: .public); ignoring to \
-                    avoid corrupting a newer build's data.
-                    """)
-                await SilentDiagnostics.shared.record(kind: .workspacesSchemaTooNew,
-                                                      owner: "WorkspaceProjectsStore",
-                                                      summary: "workspaces.json schema too new; keeping in-memory model",
-                                                      details: "schemaVersion=\(persisted.schemaVersion)")
-                return
-            }
-
-            // Schema v1 used optional `agentID` instead of required `projectType`.
-            // We do not migrate: decode each project strictly and surface failures.
-            if persisted.schemaVersion < 2 {
-                let failures = try await decodeLegacyOrStrict(data: data)
-                if !failures.isEmpty {
-                    decodeFailures = failures
-                    await SilentDiagnostics.shared.record(
-                        kind: .other,
-                        owner: "WorkspaceProjectsStore",
-                        summary: "workspaces.json has undecodable projects; surfaced for repair",
-                        details: failures.map { String(describing: $0) }.joined(separator: "; ")
-                    )
-                }
-                return
-            }
-
-            var merged: [String: [ProjectRef]] = [:]
-            var duplicatePaths: [String] = []
-            for entry in persisted.workspaces {
-                if merged[entry.workspacePath] != nil {
-                    duplicatePaths.append(entry.workspacePath)
-                }
-                merged[entry.workspacePath] = entry.projects
-            }
-            workspaces = merged
-            activeWorkspacePath = persisted.activeWorkspacePath
-            if !duplicatePaths.isEmpty {
-                let paths = duplicatePaths.joined(separator: ", ")
-                log.warning("workspaces.json duplicate workspacePath(s); last entry wins: \(paths, privacy: .public)")
-                await SilentDiagnostics.shared.record(kind: .other,
-                                                      owner: "WorkspaceProjectsStore",
-                                                      summary: "duplicate workspacePath in workspaces.json; last entry wins",
-                                                      details: paths)
-            }
-        } catch {
-            // Whole-file failure: surface via diagnostics and keep empty model,
-            // but do not invent project types for any recovered project.
-            log.warning("workspaces load failed: \(String(describing: error), privacy: .public). Using empty model.")
-            decodeFailures = [.undecodableProject(path: url.path, detail: String(describing: error))]
-            await SilentDiagnostics.shared.record(kind: .workspacesQuietReset,
-                                                  owner: "WorkspaceProjectsStore",
-                                                  summary: "workspaces.json unreadable; using empty model",
-                                                  details: String(describing: error))
-        }
     }
 
     // MARK: - Active workspace (launch restore)
@@ -282,167 +224,7 @@ public actor WorkspaceProjectsStore {
         return await project(path: projectRoot.path)?.projectType
     }
 
-    // MARK: - Mutations
-
-    /// Create a new project as `<workspace>/<name>/` and register it.
-    @discardableResult
-    public func createProject(name: String,
-                              projectType: ProjectType,
-                              in workspace: URL) async throws -> ProjectRef {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard Self.isValidProjectName(trimmed) else {
-            throw StoreError.invalidProjectName(name)
-        }
-        let folder = workspace.appendingPathComponent(trimmed, isDirectory: true)
-        let key = Self.key(for: workspace)
-
-        if fileSystem.isDirectory(at: folder) {
-            if let existing = workspaces[key]?.first(where: { $0.path == folder.path }) {
-                return existing
-            }
-            throw StoreError.projectFolderExists(path: folder.path)
-        }
-
-        try fileSystem.createDirectory(at: folder, withIntermediates: true)
-        let ref = ProjectRef(path: folder.path, displayName: trimmed, projectType: projectType)
-        try await register(ref, in: workspace, rootProjectType: projectType)
-        try ProjectLocalStateStore.save(ref: ref, fileSystem: fileSystem)
-        return ref
-    }
-
-    /// Register an existing folder as a project of the workspace.
-    @discardableResult
-    public func addExistingProject(url projectURL: URL,
-                                   projectType: ProjectType,
-                                   displayName: String? = nil,
-                                   in workspace: URL) async throws -> ProjectRef {
-        let key = Self.key(for: workspace)
-        let trimmedName = displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let resolvedName: String = {
-            if let trimmedName, !trimmedName.isEmpty { return trimmedName }
-            return ProjectLocalStateStore.load(from: projectURL, fileSystem: fileSystem)?.displayName
-                ?? projectURL.lastPathComponent
-        }()
-        if let existing = workspaces[key]?.first(where: { $0.path == projectURL.path }) {
-            let updated = ProjectRef(path: existing.path,
-                                     displayName: resolvedName,
-                                     projectType: projectType)
-            try await register(updated, in: workspace, rootProjectType: projectType)
-            try ProjectLocalStateStore.save(ref: updated, fileSystem: fileSystem)
-            return updated
-        }
-        let ref = ProjectRef(path: projectURL.path,
-                             displayName: resolvedName,
-                             projectType: projectType)
-        try await register(ref, in: workspace, rootProjectType: projectType)
-        try ProjectLocalStateStore.save(ref: ref, fileSystem: fileSystem)
-        return ref
-    }
-
-    /// Repair an undecodable / type-less project by writing a chosen project type.
-    @discardableResult
-    public func setProjectType(path: String,
-                             projectType: ProjectType,
-                             in workspace: URL) async throws -> ProjectRef {
-        let key = Self.key(for: workspace)
-        var list = await projects(for: workspace, rootProjectType: projectType)
-        if let idx = list.firstIndex(where: { $0.path == path }) {
-            list[idx].projectType = projectType
-            workspaces[key] = list
-            try await persist()
-            try ProjectLocalStateStore.save(ref: list[idx], fileSystem: fileSystem)
-            try await persistWorkspaceLocal(projects: list, for: workspace)
-            decodeFailures.removeAll {
-                if case .undecodableProject(let p, _) = $0 { return p == path }
-                return false
-            }
-            return list[idx]
-        }
-        let ref = ProjectRef(path: path,
-                             displayName: URL(fileURLWithPath: path).lastPathComponent,
-                             projectType: projectType)
-        try await register(ref, in: workspace, rootProjectType: projectType)
-        try ProjectLocalStateStore.save(ref: ref, fileSystem: fileSystem)
-        return ref
-    }
-
-    @discardableResult
-    public func renameProject(path: String, to newName: String, in workspace: URL) async throws -> ProjectRef {
-        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard Self.isValidProjectName(trimmed) else { throw StoreError.invalidProjectName(newName) }
-        guard path != workspace.path else { throw StoreError.cannotRenameWorkspaceRoot(path: path) }
-        let key = Self.key(for: workspace)
-        var list = workspaces[key] ?? []
-        guard let idx = list.firstIndex(where: { $0.path == path }) else {
-            throw StoreError.invalidProjectName(newName)
-        }
-        let folder = URL(fileURLWithPath: path, isDirectory: true)
-        let renamedFolder = folder
-            .deletingLastPathComponent()
-            .appendingPathComponent(trimmed, isDirectory: true)
-        if renamedFolder.path != folder.path {
-            guard !fileSystem.fileExists(at: renamedFolder) else {
-                throw StoreError.projectFolderExists(path: renamedFolder.path)
-            }
-            // Foundation exposes same-parent folder renames as `moveItem`.
-            try fileSystem.move(from: folder, to: renamedFolder)
-        }
-
-        let renamed = ProjectRef(path: renamedFolder.path,
-                                 displayName: trimmed,
-                                 projectType: list[idx].projectType)
-        list[idx] = renamed
-        workspaces[key] = list
-        try await persist()
-        try ProjectLocalStateStore.save(ref: renamed, fileSystem: fileSystem)
-        try await persistWorkspaceLocal(projects: list, for: workspace)
-        return renamed
-    }
-
-    @discardableResult
-    public func removeProject(path: String, in workspace: URL) async throws -> RemovedProject? {
-        let key = Self.key(for: workspace)
-        guard var list = workspaces[key] else { return nil }
-        guard path != workspace.path else { return nil }
-        guard let idx = list.firstIndex(where: { $0.path == path }) else { return nil }
-        let removed = list.remove(at: idx)
-        workspaces[key] = list
-        try await persist()
-        try await persistWorkspaceLocal(projects: list, for: workspace)
-        return RemovedProject(ref: removed, index: idx)
-    }
-
-    public func restoreProject(_ removed: RemovedProject, in workspace: URL) async throws {
-        let key = Self.key(for: workspace)
-        var list = workspaces[key] ?? []
-        guard !list.contains(where: { $0.path == removed.ref.path }) else { return }
-        let clamped = min(max(removed.index, 0), list.count)
-        list.insert(removed.ref, at: clamped)
-        workspaces[key] = list
-        try await persist()
-        try await persistWorkspaceLocal(projects: list, for: workspace)
-    }
-
     // MARK: - Private
-
-    private func register(_ ref: ProjectRef,
-                          in workspace: URL,
-                          rootProjectType: ProjectType) async throws {
-        let key = Self.key(for: workspace)
-        // Do not pass `rootProjectType` here — that would seed the workspace folder as
-        // a synthetic root project. Empty workspace shells stay empty until the
-        // caller registers an explicit project (New Project / Add Existing).
-        _ = rootProjectType
-        var list = await projects(for: workspace)
-        if let idx = list.firstIndex(where: { $0.path == ref.path }) {
-            list[idx] = ref
-        } else {
-            list.append(ref)
-        }
-        workspaces[key] = list
-        try await persist()
-        try await persistWorkspaceLocal(projects: list, for: workspace)
-    }
 
     /// Overlay project-local `.codemixer/project.json` onto in-memory refs so
     /// the folder remains authoritative for mode + display name.
@@ -493,112 +275,27 @@ public actor WorkspaceProjectsStore {
         return updated
     }
 
-    private func persist() async throws {
-        let entries = workspaces
-            .map { WorkspaceEntry(workspacePath: $0.key, projects: $0.value) }
-            .sorted { $0.workspacePath < $1.workspacePath }
-        let persisted = Persisted(schemaVersion: Self.currentSchemaVersion,
-                                  activeWorkspacePath: activeWorkspacePath,
-                                  workspaces: entries)
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let data = try encoder.encode(persisted)
-        try fileSystem.writeAtomically(data, to: url)
-    }
-
-    private func persistWorkspaceLocal(for workspace: URL) async throws {
+    /// Non-private: called from `+Mutation` as well as the query/reconcile
+    /// paths above.
+    func persistWorkspaceLocal(for workspace: URL) async throws {
         let key = Self.key(for: workspace)
         let list = workspaces[key] ?? []
         try await persistWorkspaceLocal(projects: list, for: workspace)
     }
 
-    private func persistWorkspaceLocal(projects: [ProjectRef], for workspace: URL) async throws {
+    func persistWorkspaceLocal(projects: [ProjectRef], for workspace: URL) async throws {
         try WorkspaceLocalStateStore.save(projects: projects,
                                           to: workspace,
                                           fileSystem: fileSystem)
     }
 
-    public func cachedModels(for agentID: AgentID,
-                             in workspace: URL) -> WorkspaceAdapterLocalState.CachedAdapterModels? {
-        WorkspaceAdapterLocalStateStore.cachedModels(
-            for: agentID,
-            in: workspace,
-            fileSystem: fileSystem
-        )
-    }
+    static func key(for workspace: URL) -> String { workspace.path }
 
-    public func saveModels(_ models: [AgentModelOption],
-                           for agentID: AgentID,
-                           refreshedAt: Date,
-                           in workspace: URL) throws {
-        try WorkspaceAdapterLocalStateStore.saveModels(
-            models,
-            for: agentID,
-            refreshedAt: refreshedAt,
-            in: workspace,
-            fileSystem: fileSystem
-        )
-    }
-
-    /// Attempt a strict v2 decode of each project object. Legacy v1 entries
-    /// without `projectType` become `undecodableProject` failures — never
-    /// auto-migrated to Claude.
-    private func decodeLegacyOrStrict(data: Data) async throws -> [StoreError] {
-        struct LoosePersisted: Decodable {
-            var schemaVersion: Int
-            var workspaces: [LooseWorkspace]
-        }
-        struct LooseWorkspace: Decodable {
-            var workspacePath: String
-            var projects: [LooseProject]
-        }
-        struct LooseProject: Decodable {
-            var path: String
-            var displayName: String
-            var projectType: ProjectType?
-            var agentID: AgentID?
-        }
-
-        let loose = try JSONDecoder().decode(LoosePersisted.self, from: data)
-        var failures: [StoreError] = []
-        var merged: [String: [ProjectRef]] = [:]
-        for entry in loose.workspaces {
-            var refs: [ProjectRef] = []
-            for project in entry.projects {
-                if let mode = project.projectType {
-                    refs.append(ProjectRef(path: project.path,
-                                           displayName: project.displayName,
-                                           projectType: mode))
-                } else {
-                    failures.append(.undecodableProject(
-                        path: project.path,
-                        detail: "missing required projectType (legacy agentID=\(project.agentID?.rawValue ?? "nil"))"
-                    ))
-                }
-            }
-            if !refs.isEmpty {
-                merged[entry.workspacePath] = refs
-            }
-        }
-        workspaces = merged
-        return failures
-    }
-
-    private static func key(for workspace: URL) -> String { workspace.path }
-
-    private static func rootProject(for workspace: URL, mode: ProjectType) -> ProjectRef {
+    static func rootProject(for workspace: URL, mode: ProjectType) -> ProjectRef {
         ProjectRef(path: workspace.path,
                    displayName: workspace.lastPathComponent.isEmpty
                        ? workspace.path
                        : workspace.lastPathComponent,
                    projectType: mode)
-    }
-
-    private static func isValidProjectName(_ name: String) -> Bool {
-        !name.isEmpty
-            && name != "."
-            && name != ".."
-            && !name.contains("/")
-            && !name.contains("\\")
     }
 }

@@ -1,5 +1,5 @@
 import Foundation
-import CryptoKit
+import AgentProtocol
 
 /// One line in a diff hunk.
 public struct DiffLine: Sendable, Hashable, Identifiable {
@@ -43,13 +43,7 @@ public struct DiffLine: Sendable, Hashable, Identifiable {
                                  oldLineNumber: Int?,
                                  newLineNumber: Int?) -> UUID {
         let material = "\(kind)|\(oldLineNumber.map(String.init) ?? "-")|\(newLineNumber.map(String.init) ?? "-")|\(text)"
-        let digest = Array(SHA256.hash(data: Data(material.utf8)))
-        return UUID(uuid: (
-            digest[0], digest[1], digest[2], digest[3],
-            digest[4], digest[5], digest[6], digest[7],
-            digest[8], digest[9], digest[10], digest[11],
-            digest[12], digest[13], digest[14], digest[15]
-        ))
+        return StableID.uuid(from: material)
     }
 }
 
@@ -89,13 +83,7 @@ public struct DiffHunk: Sendable, Hashable, Identifiable {
             }
             material += "\n\(prefix)\(line.text)"
         }
-        let digest = Array(SHA256.hash(data: Data(material.utf8)))
-        return UUID(uuid: (
-            digest[0], digest[1], digest[2], digest[3],
-            digest[4], digest[5], digest[6], digest[7],
-            digest[8], digest[9], digest[10], digest[11],
-            digest[12], digest[13], digest[14], digest[15]
-        ))
+        return StableID.uuid(from: material)
     }
 }
 

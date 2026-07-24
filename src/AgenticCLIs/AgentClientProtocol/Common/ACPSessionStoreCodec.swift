@@ -44,10 +44,7 @@ enum ACPSessionStoreCodec {
         var lastActivity: Date
         var messageCount: Int
         var turns: [ACPConversationTurn]
-        var archived: Bool?
-        var needsAttention: Bool?
-        var isOverview: Bool?
-        var overviewURL: String?
+        var flags: SessionRecordFlags
 
         enum CodingKeys: String, CodingKey {
             case id, customAgentID, workspacePath, title, lastActivity, messageCount, turns
@@ -61,10 +58,7 @@ enum ACPSessionStoreCodec {
              lastActivity: Date,
              messageCount: Int,
              turns: [ACPConversationTurn],
-             archived: Bool? = nil,
-             needsAttention: Bool? = nil,
-             isOverview: Bool? = nil,
-             overviewURL: String? = nil) {
+             flags: SessionRecordFlags = SessionRecordFlags()) {
             self.id = id
             self.customAgentID = customAgentID
             self.workspacePath = workspacePath
@@ -72,10 +66,7 @@ enum ACPSessionStoreCodec {
             self.lastActivity = lastActivity
             self.messageCount = messageCount
             self.turns = turns
-            self.archived = archived
-            self.needsAttention = needsAttention
-            self.isOverview = isOverview
-            self.overviewURL = overviewURL
+            self.flags = flags
         }
 
         init(from decoder: any Decoder) throws {
@@ -87,11 +78,95 @@ enum ACPSessionStoreCodec {
             lastActivity = try c.decode(Date.self, forKey: .lastActivity)
             messageCount = try c.decode(Int.self, forKey: .messageCount)
             turns = try c.decodeIfPresent([ACPConversationTurn].self, forKey: .turns) ?? []
-            archived = try c.decodeIfPresent(Bool.self, forKey: .archived)
-            needsAttention = try c.decodeIfPresent(Bool.self, forKey: .needsAttention)
-            isOverview = try c.decodeIfPresent(Bool.self, forKey: .isOverview)
-            overviewURL = try c.decodeIfPresent(String.self, forKey: .overviewURL)
+            // Older writes omit these keys entirely for a never-flagged session.
+            flags = SessionRecordFlags(
+                archived: try c.decodeIfPresent(Bool.self, forKey: .archived) ?? false,
+                needsAttention: try c.decodeIfPresent(Bool.self, forKey: .needsAttention) ?? false,
+                isOverview: try c.decodeIfPresent(Bool.self, forKey: .isOverview) ?? false,
+                overviewURL: try c.decodeIfPresent(String.self, forKey: .overviewURL).flatMap(URL.init(string:))
+            )
         }
+
+        func encode(to encoder: any Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(id, forKey: .id)
+            try c.encode(customAgentID, forKey: .customAgentID)
+            try c.encode(workspacePath, forKey: .workspacePath)
+            try c.encode(title, forKey: .title)
+            try c.encode(lastActivity, forKey: .lastActivity)
+            try c.encode(messageCount, forKey: .messageCount)
+            try c.encode(turns, forKey: .turns)
+            try c.encode(flags.archived, forKey: .archived)
+            try c.encode(flags.needsAttention, forKey: .needsAttention)
+            try c.encode(flags.isOverview, forKey: .isOverview)
+            try c.encodeIfPresent(flags.overviewURL?.absoluteString, forKey: .overviewURL)
+        }
+    }
+
+    /// Lifecycle (archived), attention, and single-per-project overview state
+    /// for one session record. Shared by `ACPSessionIndex` and
+    /// `ACPProjectSessionStore` so the side effects below (archiving clears
+    /// attention; promoting an overview demotes/archives stale ones) live in
+    /// one place instead of two copies.
+    struct SessionRecordFlags: Sendable, Equatable {
+        var archived = false
+        var needsAttention = false
+        var isOverview = false
+        var overviewURL: URL?
+    }
+
+    /// Sets `archived`, applying the archive-clears-attention rule. No-op if
+    /// `key` has no entry.
+    static func setArchived(_ archived: Bool, key: String, in entries: inout [String: Entry]) {
+        guard var entry = entries[key] else { return }
+        entry.flags.archived = archived
+        if archived {
+            entry.flags.needsAttention = false
+        }
+        entries[key] = entry
+    }
+
+    /// Sets `needsAttention` directly (archiving is the only path that force-clears it).
+    static func setNeedsAttention(_ needsAttention: Bool, key: String, in entries: inout [String: Entry]) {
+        guard var entry = entries[key] else { return }
+        entry.flags.needsAttention = needsAttention
+        entries[key] = entry
+    }
+
+    /// Promotes `key` to the single overview entry for its
+    /// (customAgentID, workspacePath): demotes any other `.isOverview` entry
+    /// and archives entries sharing its title (a fresh spawn's control chat
+    /// otherwise collides in the sidebar with a stale one of the same name).
+    /// No-op if `key` has no entry.
+    static func setIsOverview(_ isOverview: Bool,
+                              overviewURL: URL?,
+                              key: String,
+                              in entries: inout [String: Entry]) {
+        guard var entry = entries[key] else { return }
+        if isOverview {
+            for (otherKey, var other) in entries where otherKey != key {
+                guard other.customAgentID == entry.customAgentID,
+                      other.workspacePath == entry.workspacePath else { continue }
+                var changed = false
+                if other.flags.isOverview {
+                    other.flags.isOverview = false
+                    other.flags.overviewURL = nil
+                    changed = true
+                }
+                if other.title == entry.title {
+                    other.flags.archived = true
+                    changed = true
+                }
+                if changed {
+                    entries[otherKey] = other
+                }
+            }
+        }
+        entry.flags.isOverview = isOverview
+        if let overviewURL {
+            entry.flags.overviewURL = overviewURL
+        }
+        entries[key] = entry
     }
 
     struct Store: Sendable, Codable {

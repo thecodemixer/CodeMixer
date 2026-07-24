@@ -34,8 +34,7 @@ extension AgentEngine {
             await bus.publish(.userTurn(id: bubbleID.uuidString, text: prompt))
             if bytes.isEmpty {
                 currentTurnID = bubbleID
-                currentTurnPromptText = prompt
-                currentTurnAwaitingAcceptance = false
+                promptAcceptance = .queued(prompt: prompt)
                 await bus.publish(.statusPhraseChanged(
                     source: .adapterPinned,
                     phrase: "Waiting for session…"
@@ -43,14 +42,12 @@ extension AgentEngine {
                 return
             }
             currentTurnID = bubbleID
-            currentTurnPromptText = prompt
-            currentTurnAwaitingAcceptance = true
+            promptAcceptance = .awaiting(prompt: prompt)
             await heartbeat?.startTurn(bubbleID, baseline: .awaitingFirstChunk)
             do {
                 try await writePromptBytes(bytes)
             } catch {
-                currentTurnAwaitingAcceptance = false
-                currentTurnPromptText = nil
+                promptAcceptance = .idle
                 currentTurnID = nil
                 cancelStartupSubmitRecovery()
                 await heartbeat?.endTurn()
@@ -63,8 +60,7 @@ extension AgentEngine {
             if adapter.transportDescriptor.supportsOutOfBandInterrupt {
                 await transport?.interrupt()
             }
-            currentTurnAwaitingAcceptance = false
-            currentTurnPromptText = nil
+            promptAcceptance = .idle
             cancelStartupSubmitRecovery()
             currentTurnID = nil
             await heartbeat?.endTurn()
@@ -128,10 +124,8 @@ extension AgentEngine {
              .compact,
              .selectModel,
              .setPermissionMode,
-             .toggleThinkMode,
-             .toggleReviewMode,
-             .runSlashCommand,
-             .runCustomCommand:
+             .setAgentMode,
+             .runSlashCommand:
             guard let bytes = adapter.encodeCommand(command) else {
                 await bus.publish(.error(.unsupportedCommand(name: String(describing: command))))
                 return
@@ -156,7 +150,7 @@ extension AgentEngine {
     private func handleOutOfBand(_ command: AgentCommand) async throws -> Void? {
         switch command {
         case .speakAssistantBubble(let eventID, let action):
-            await bus.publish(.speakBubbleRequested(id: "\(eventID.uuidString):\(action.rawValue)"))
+            await bus.publish(.speakBubbleRequested(eventID: eventID, action: action))
             return ()
         case .revertFile(let path):
             try await gitReverter.checkout(path: path, workspace: workspace)
@@ -173,9 +167,9 @@ extension AgentEngine {
             let state = await prefs.state()
             await bus.publish(.prefsChanged(rulesCount: state.autoApprovalRules.count))
             return ()
-        case .updateAppearancePref(let key, let value):
-            try await prefs.updateAppearance(key, value: value)
-            await bus.publish(.appearancePrefChanged(key: key, value: value))
+        case .updateAppearancePref(let patch):
+            try await prefs.updateAppearance(patch)
+            await bus.publish(.appearancePrefChanged(key: patch.key, value: patch.value))
             return ()
         case .requestSnapshot(let kind):
             let data = await snapshots.snapshot(
@@ -291,8 +285,7 @@ extension AgentEngine {
         transcript = []
         changedFiles = []
         currentTurnID = nil
-        currentTurnPromptText = nil
-        currentTurnAwaitingAcceptance = false
+        promptAcceptance = .idle
         cancelStartupSubmitRecovery()
         await heartbeat?.endTurn()
         // Preset so same-id SessionStart still publishes for UI unlock.

@@ -41,6 +41,23 @@ struct PairingServiceTests {
         }
     }
 
+    @Test("After the lockout window elapses, the next attempt sees no PIN rather than staying locked")
+    func lockoutExpiresIntoExpiredPINNotContinuedLockout() async {
+        let clock = FakeClock()
+        let random = FakeRandomSource(pins: ["111111"])
+        let service = PairingService(clock: clock, random: random)
+        _ = await service.startNewPairing()
+        for _ in 0..<5 {
+            _ = await service.attemptPair(pin: "000000", deviceName: "x")
+        }
+        // Past the 300-second lockout window: `lockedUntil` no longer applies,
+        // but the PIN itself was cleared when the lockout was set, so recovery
+        // requires `startNewPairing()`, not a fresh attempt against a stale PIN.
+        clock.advance(by: .seconds(301))
+        let outcome = await service.attemptPair(pin: "111111", deviceName: "x")
+        #expect(outcome == .expiredPIN)
+    }
+
     @Test("Wrong PIN before max attempts returns .invalidPIN")
     func invalidPIN() async {
         let clock = FakeClock()

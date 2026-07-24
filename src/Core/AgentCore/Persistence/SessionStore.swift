@@ -48,9 +48,11 @@ public actor SessionStore {
                                            withIntermediates: true)
             guard fileSystem.fileExists(at: url) else { return }
             let data = try fileSystem.readData(at: url)
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-            let decoded = try decoder.decode(State.self, from: data)
+            let decoded = try PersistenceJSON.decode(
+                State.self,
+                from: data,
+                dateDecodingStrategy: .iso8601
+            )
             cached = State(projects: decoded.projects.filter { Self.isPersistableWorkspacePath($0.path) })
         } catch {
             log.warning("sessions load failed: \(String(describing: error), privacy: .public). Using empty list.")
@@ -91,10 +93,7 @@ public actor SessionStore {
     }
 
     private func persist() async throws {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
-        let data = try encoder.encode(cached)
+        let data = try PersistenceJSON.encode(cached, dateEncodingStrategy: .iso8601)
         try fileSystem.writeAtomically(data, to: url)
     }
 }

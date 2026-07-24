@@ -85,7 +85,7 @@ public enum AgentEventWire: Codable, Sendable {
     // …
 }
 
-public let wireProtocolVersion: Int = 1
+public let wireProtocolVersion: Int = 2
 ```
 
 The wire layer is a one-shape-per-case `Codable` mirror. No clever encoding. No discriminator strings to remember. The compiler's exhaustiveness checks both sides.
@@ -326,7 +326,7 @@ Same pattern, different cardinality.
 - Wire types live in `Core/AgentProtocol/AgentEventWire.swift`.
 - Converter lives in `Core/AgentCore/Events/WireCodec.swift`.
 - Parity tests are in `tests/Remote/RemoteParityTests/` (`WireCodecParityTests`, `CommandDispatchParityTests`).
-- Wire version declared in `Core/AgentProtocol/WireVersion.swift`; frames in `WireFrames.swift`.
+- Wire version declared in `Core/AgentProtocol/WireVersion.swift`; frames in `WireFrames.swift`; current protocol version is `WireVersion.v2`.
 
 See [docs/architecture.md §§8, 30](../../architecture.md) for the Codemixer narrative on event-sourcing and protocol evolution.
 

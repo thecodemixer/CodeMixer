@@ -30,7 +30,8 @@ public enum ServerFrame: Sendable, Codable {
     /// A bus-tagged engine event. `id` is the opaque checkpoint token clients
     /// store and pass back as `subscribe.lastSeenEventID` on reconnect.
     case event(id: UUID, event: AgentEventWire)
-    case result(for: UUID, ok: Bool, error: WireAgentError?)
+    case commandSucceeded(for: UUID)
+    case commandFailed(for: UUID, error: WireAgentError?)
     case snapshot(kind: SnapshotKind, payload: Data)
     case pong(for: UUID)
     case paired(token: String)
@@ -53,6 +54,32 @@ public enum PairFailureReason: String, Sendable, Codable {
     case expiredPIN
     case rateLimited
     case lockedOut
+}
+
+// MARK: - Shared frame codec configuration
+
+/// Fresh `.iso8601`-configured encoder for wire frames.
+///
+/// Returns a new instance on every call rather than a shared one: Foundation's
+/// `.iso8601` date-encoding strategy has shared mutable formatter state that
+/// has SIGSEGV'd under concurrent encode calls from different tasks. This
+/// helper only removes the duplicated four-line setup that used to live
+/// separately in `ClientConnection`, `RemoteEngineClient`, and the server's
+/// per-connection sender; callers whose own tasks could race each other still
+/// need their own serialization around the call (see `ClientConnection`'s
+/// actor-isolated `FrameSendEncoder`).
+public func makeWireFrameEncoder() -> JSONEncoder {
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    return encoder
+}
+
+/// Fresh `.iso8601`-configured decoder for wire frames. See
+/// `makeWireFrameEncoder()` for why this returns a new instance per call.
+public func makeWireFrameDecoder() -> JSONDecoder {
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    return decoder
 }
 
 // MARK: - Codable shape: tagged-union JSON
@@ -144,9 +171,10 @@ extension ServerFrame {
             self = .event(id: try c.decode(UUID.self, forKey: .id),
                           event: try c.decode(AgentEventWire.self, forKey: .event))
         case .result:
-            self = .result(for: try c.decode(UUID.self, forKey: .for),
-                           ok: try c.decode(Bool.self, forKey: .ok),
-                           error: try c.decodeIfPresent(WireAgentError.self, forKey: .error))
+            let id = try c.decode(UUID.self, forKey: .for)
+            let ok = try c.decode(Bool.self, forKey: .ok)
+            let error = try c.decodeIfPresent(WireAgentError.self, forKey: .error)
+            self = ok ? .commandSucceeded(for: id) : .commandFailed(for: id, error: error)
         case .snapshot:
             self = .snapshot(kind: try c.decode(SnapshotKind.self, forKey: .kind),
                              payload: try c.decode(Data.self, forKey: .payload))
@@ -174,11 +202,15 @@ extension ServerFrame {
             try c.encode(Tag.event, forKey: .type)
             try c.encode(id, forKey: .id)
             try c.encode(e, forKey: .event)
-        case .result(let id, let ok, let err):
+        case .commandSucceeded(let id):
             try c.encode(Tag.result, forKey: .type)
             try c.encode(id, forKey: .for)
-            try c.encode(ok, forKey: .ok)
-            try c.encodeIfPresent(err, forKey: .error)
+            try c.encode(true, forKey: .ok)
+        case .commandFailed(let id, let error):
+            try c.encode(Tag.result, forKey: .type)
+            try c.encode(id, forKey: .for)
+            try c.encode(false, forKey: .ok)
+            try c.encodeIfPresent(error, forKey: .error)
         case .snapshot(let kind, let payload):
             try c.encode(Tag.snapshot, forKey: .type)
             try c.encode(kind, forKey: .kind)

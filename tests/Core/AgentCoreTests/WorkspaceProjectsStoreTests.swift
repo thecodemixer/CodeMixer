@@ -295,8 +295,8 @@ struct WorkspaceProjectsStoreTests {
         #expect(stillCached?.models.map(\.code) == ["sonnet", "opus"])
     }
 
-    @Test("loading schema-v2 workspace.json migrates adapterModelCaches to per-adapter files")
-    func migratesV2AdapterModelCaches() throws {
+    @Test("loading schema-v2 workspace.json ignores legacy adapterModelCaches")
+    func ignoresV2AdapterModelCaches() throws {
         let fs = InMemoryFileSystem()
         try fs.createDirectory(at: ProjectPaths.directoryURL(in: workspace), withIntermediates: true)
         let stamped = Date(timeIntervalSince1970: 1_700_000_000)
@@ -328,15 +328,15 @@ struct WorkspaceProjectsStoreTests {
         #expect(loaded?.projects.count == 1)
 
         let adapterURL = ProjectPaths.workspaceAdapterStateURL(in: workspace, agentID: .claudeCode)
-        #expect(fs.fileExists(at: adapterURL))
+        #expect(!fs.fileExists(at: adapterURL))
         let cached = WorkspaceAdapterLocalStateStore.cachedModels(
             for: .claudeCode,
             in: workspace,
             fileSystem: fs
         )
-        #expect(cached?.models.map(\.code) == ["sonnet"])
+        #expect(cached == nil)
 
-        // Re-load must not leave adapterModelCaches in workspace.json.
+        // Re-load normalizes the schema and drops unknown legacy fields.
         let rewritten = try fs.readData(at: ProjectPaths.workspaceStateURL(in: workspace))
         let json = try JSONSerialization.jsonObject(with: rewritten) as? [String: Any]
         #expect(json?["adapterModelCaches"] == nil)

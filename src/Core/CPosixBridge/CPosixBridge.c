@@ -43,18 +43,6 @@ int cpx_killpg(pid_t pid, int sig) {
     return killpg(pid, sig);
 }
 
-int cpx_set_cloexec(int fd) {
-    int flags = fcntl(fd, F_GETFD);
-    if (flags == -1) { return -1; }
-    return fcntl(fd, F_SETFD, flags | FD_CLOEXEC);
-}
-
-int cpx_set_nonblock(int fd) {
-    int flags = fcntl(fd, F_GETFL);
-    if (flags == -1) { return -1; }
-    return fcntl(fd, F_SETFL, flags | O_NONBLOCK);
-}
-
 int cpx_spawn_under_pty(const char *executable,
                         char *const argv[],
                         char *const envp[],

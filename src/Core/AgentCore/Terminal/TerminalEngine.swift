@@ -61,10 +61,6 @@ public actor TerminalEngine: TerminalSnapshotting {
         return String(data: data, encoding: .utf8) ?? ""
     }
 
-    public func cursorRow() -> Int {
-        terminal.buffer.y
-    }
-
     /// True if the terminal received a BEL (0x07) since the last call.
     public func consumeBell() -> Bool {
         let rang = bridge.bellRang

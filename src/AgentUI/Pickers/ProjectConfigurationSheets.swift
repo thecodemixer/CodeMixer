@@ -325,6 +325,7 @@ public struct NewProjectSheet: View {
     public let onCancel: () -> Void
     /// `folderURL` is set only when registering an existing directory for a folder type.
     public let onCreate: (_ name: String, _ projectType: ProjectType, _ folderURL: URL?) async -> Void
+    private let random: any RandomSource
 
     @State private var name: String = ""
     @State private var category: ProjectTypeCategory = .singleAgent
@@ -340,8 +341,10 @@ public struct NewProjectSheet: View {
     @State private var isCreating = false
 
     public init(onCancel: @escaping () -> Void,
+                random: any RandomSource = SystemRandomSource(),
                 onCreate: @escaping (_ name: String, _ projectType: ProjectType, _ folderURL: URL?) async -> Void) {
         self.onCancel = onCancel
+        self.random = random
         self.onCreate = onCreate
     }
 
@@ -353,7 +356,7 @@ public struct NewProjectSheet: View {
             customExecutable: customExecutable,
             customArguments: customArguments,
             customTransport: customTransport,
-            idFactory: { UUID().uuidString }
+            idFactory: { random.uuid().uuidString }
         )
     }
 
@@ -500,6 +503,7 @@ public struct ConfigureProjectSheet: View {
     public let projectURL: URL
     public let onCancel: () -> Void
     public let onConfirm: (ProjectType) -> Void
+    private let random: any RandomSource
 
     @State private var category: ProjectTypeCategory = .singleAgent
     @State private var builtInAgent: AgentID = .claudeCode
@@ -511,9 +515,11 @@ public struct ConfigureProjectSheet: View {
     @State private var customTransport: AgentTransportKind = .agentClientProtocol
 
     public init(projectURL: URL,
+                random: any RandomSource = SystemRandomSource(),
                 onCancel: @escaping () -> Void,
                 onConfirm: @escaping (ProjectType) -> Void) {
         self.projectURL = projectURL
+        self.random = random
         self.onCancel = onCancel
         self.onConfirm = onConfirm
     }
@@ -526,7 +532,7 @@ public struct ConfigureProjectSheet: View {
             customExecutable: customExecutable,
             customArguments: customArguments,
             customTransport: customTransport,
-            idFactory: { UUID().uuidString }
+            idFactory: { random.uuid().uuidString }
         )
     }
 

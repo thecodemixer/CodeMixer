@@ -244,7 +244,7 @@ struct CustomACPAdapterTests {
             $0.name == "/document" && $0.summary == "Docs"
         })
 
-        let encoded = adapter.encodeCommand(.runSlashCommand(name: "/document", args: []))
+        let encoded = adapter.encodeCommand(.runSlashCommand(target: .builtin(name: "/document"), args: []))
         #expect(encoded != nil)
         let text = String(decoding: encoded!, as: UTF8.self)
         #expect(text.contains("\"method\":\"session/set_mode\""))

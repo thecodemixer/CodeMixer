@@ -240,9 +240,9 @@ custom_rules:
       - "src/Core/AgentCore/Seams/.*\\.swift"
 
   no_processinfo_in_engine:
-    name: "Engine modules must use Environment seam"
+    name: "Engine modules must use AgentEnvironment seam"
     regex: "ProcessInfo\\.processInfo\\.environment"
-    message: "Use Environment via dependency injection (see dependency-injection-seams pattern)."
+    message: "Use AgentEnvironment via dependency injection (see dependency-injection-seams pattern)."
     severity: warning
     included:
       - "src/Core/AgentCore/.*\\.swift"

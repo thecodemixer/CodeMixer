@@ -156,39 +156,53 @@ No `protocol` until you have two non-test implementations OR a clear test seam. 
 
 **Rule:** two callers is not enough to extract. Three is.
 
-The exception: protocols that exist as test seams (`Clock`, `RandomSource`, `Environment`, `FileSystem`). These have exactly one production implementation and one fake, but the test seam justifies the interface.
+The exception: protocols that exist as test seams (`AgentClock`, `RandomSource`, `AgentEnvironment`, `FileSystem`). These have exactly one production implementation and one fake, but the test seam justifies the interface.
 
 ### 1.6 Time, randomness, environment, and the file system are injected
 
-Production domain code never calls `Date()`, `Int.random`, `ProcessInfo.processInfo.environment`, or `FileManager.default`. These are all wrapped in protocols:
+Production domain/model code never calls `Date()`, `UUID()` / random APIs, `ProcessInfo.processInfo.environment`, or `FileManager.default` directly. These are all wrapped in protocols:
 
 ```swift
-public protocol Clock: Sendable {
-    var now: Date { get }
+public protocol AgentClock: Sendable {
+    func now() -> Date
     func sleep(for duration: Duration) async throws
 }
 
 public protocol RandomSource: Sendable {
-    func next<T: FixedWidthInteger>(in range: Range<T>) -> T
+    func uuid() -> UUID
+    func bytes(_ count: Int) -> Data
+    func pin(digits: Int) -> String
 }
 
-public protocol Environment: Sendable {
-    func value(for name: String) -> String?
+public protocol AgentEnvironment: Sendable {
+    func processEnvironment() -> [String: String]
+    var homeDirectory: URL { get }
+    var appSupportDirectory: URL { get }
+    var cachesDirectory: URL { get }
+    var claudeDirectory: URL { get }
+    var deviceName: String { get }
 }
 
 public protocol FileSystem: Sendable {
-    func read(_ url: URL) throws -> Data
-    func write(_ data: Data, to url: URL) throws
-    func exists(_ url: URL) -> Bool
-    func remove(_ url: URL) throws
+    func fileExists(at url: URL) -> Bool
+    func isDirectory(at url: URL) -> Bool
+    func createDirectory(at url: URL, withIntermediates: Bool) throws
+    func readData(at url: URL) throws -> Data
+    func readData(at url: URL, fromOffset offset: Int) throws -> Data
+    func byteCount(at url: URL) throws -> Int
+    func writeAtomically(_ data: Data, to url: URL) throws
+    func move(from source: URL, to destination: URL) throws
+    func remove(at url: URL) throws
+    func contentsOfDirectory(at url: URL) throws -> [URL]
+    func modificationDate(at url: URL) throws -> Date
 }
 ```
 
-Live implementations live in `Core/AgentCore/Seams/Live*.swift`. Deterministic fakes live in `AgentTestSupport/Fake*.swift`.
+Live implementations live in `Core/AgentCore/Seams/`. Deterministic fakes live in `AgentTestSupport/Fake*.swift`. System/framework calls that are themselves the boundary live in `*/External/*.swift`.
 
 **Why:** tests that depend on the wall clock are flaky tests. Tests that exercise heartbeats, timeouts, or retries are impossible to write correctly without an injected clock. We make all such tests millisecond-fast and deterministic by construction.
 
-A custom SwiftLint rule rejects `Date()`, `Int.random`, `ProcessInfo.processInfo.environment`, and `FileManager.default` in any file outside `Core/AgentCore/Seams/Live*.swift`.
+A custom policy script rejects direct framework calls outside the approved seam and `*/External/*.swift` wrappers.
 
 ### 1.7 Errors are stories, not strings
 
@@ -433,7 +447,7 @@ Checked by SwiftLint, SwiftFormat, custom scripts, and CI. A pull request that v
 
     Enforced by `scripts/check-direct-framework-calls.swift` in CI.
 - **No `print`.** Use `os.Logger`.
-- **No `Date()`, `Int.random`, `ProcessInfo.processInfo.environment`, `FileManager.default`** outside `Core/AgentCore/Seams/Live*.swift` and `*/External/*.swift`.
+- **No `Date()`, `UUID()` / random APIs, `ProcessInfo.processInfo.environment`, `FileManager.default`** outside approved seams and `*/External/*.swift`.
 - **No `nonisolated(unsafe)` or `@unchecked Sendable`** without a proof-comment.
 - **No singletons** except `AdapterRegistry.shared` (justified as a discovery point).
 - **No protocol with one production implementation** unless it's a test seam.
@@ -536,16 +550,24 @@ We use **Swift Testing** (`@Test`, `#expect`, `#require`), not XCTest.
 ### Structure
 
 ```swift
-@Test("HeartbeatActivityMonitor emits noEventGap every 500ms while busy")
+actor TickRecorder {
+    private(set) var ticks: [HeartbeatActivityMonitor.Tick] = []
+    func record(_ tick: HeartbeatActivityMonitor.Tick) { ticks.append(tick) }
+}
+
+@Test("HeartbeatActivityMonitor emits ticks every poll interval while busy")
 func heartbeatTickRate() async throws {
     let clock = FakeClock()
-    let monitor = HeartbeatActivityMonitor(clock: clock)
-    await monitor.enterTurn()
+    let recorder = TickRecorder()
+    let monitor = HeartbeatActivityMonitor(clock: clock) { tick in
+        await recorder.record(tick)
+    }
 
-    clock.advance(by: .milliseconds(500))
-    let firstGap = try await monitor.events.first(timeout: .milliseconds(10))
+    await monitor.startTurn(UUID(uuidString: "00000000-0000-0000-0000-000000000001")!)
+    clock.advance(by: ActivityTiming.noEventPollInterval)
+    await Task.yield()
 
-    #expect(firstGap == .noEventGap(turnID: monitor.currentTurnID, elapsed: .milliseconds(500)))
+    #expect(await recorder.ticks.first?.elapsed == ActivityTiming.noEventPollInterval)
 }
 ```
 
@@ -700,7 +722,7 @@ Protocols are the most-abused tool in Swift. Pinned rules:
 
 ### When to write a protocol
 
-1. **A genuine test seam** with one production impl and one fake (`Clock`, `RandomSource`, `FileSystem`, `Environment`, `AgentAdapter`).
+1. **A genuine test seam** with one production impl and one fake (`AgentClock`, `RandomSource`, `FileSystem`, `AgentEnvironment`, `AgentAdapter`).
 2. **A polymorphic boundary** with ≥2 production implementations (`AgentAdapter` — Claude today, Codex tomorrow).
 3. **A capability witness** that lets the compiler enforce a constraint generically (`Sendable`, `Hashable`).
 
@@ -1565,7 +1587,7 @@ Minimal opinionated `.swiftlint.yml`:
 - Most rules as warnings
 - Errors only for the egregious: `force_unwrapping`, `force_try`, `large_tuple`, `function_body_length=60`, `file_length=400`, `function_parameter_count=5`
 - Custom rules:
-  - Reject `Date()`, `Int.random`, `ProcessInfo.processInfo.environment`, `FileManager.default` outside `Core/AgentCore/Seams/Live*.swift`
+  - Reject `Date()`, `UUID()` / random APIs, `ProcessInfo.processInfo.environment`, `FileManager.default` outside approved seams and `*/External/*.swift`
   - Reject `print(`
   - Reject bare `// TODO` without `(#NNN)`
   - Reject `internal` keyword (it's the default; spelling it is noise)
@@ -1723,7 +1745,7 @@ Terms used throughout this document and the rest of the repository docs.
 - **Snapshot**: a value-typed read of an actor's state at a point in time, safe to pass across isolation boundaries.
 - **Strict concurrency**: `-strict-concurrency=complete`; the compiler enforces `Sendable` and isolation across every boundary.
 - **Structured concurrency**: tasks whose lifetimes are bounded by a parent scope (`async let`, `withTaskGroup`). Contrasted with *unstructured* (`Task {}`).
-- **Test seam**: a protocol-shaped abstraction whose only justification is testability (`Clock`, `RandomSource`).
+- **Test seam**: a protocol-shaped abstraction whose only justification is testability (`AgentClock`, `RandomSource`).
 - **TTL** (time-to-live): how long a staged upload remains before janitorial cleanup.
 - **Token**: in our context, the bearer token issued during pairing — not an LLM token (which is `usage.tokens`).
 - **UDS**: Unix domain socket; used for `claude` hook delivery.

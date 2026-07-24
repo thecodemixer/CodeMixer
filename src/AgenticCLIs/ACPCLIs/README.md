@@ -11,6 +11,8 @@ for `ProjectType.custom` ACP projects.
 ```
 ACPCLIs/
 ├── README.md
+├── Common/
+│   └── ACPBackedAdapter.swift   # shared AgentAdapter forwarding to `inner: ACPAdapter`
 ├── Cursor/
 │   ├── Adapter/CursorACPAdapter.swift
 │   └── Common/
@@ -26,6 +28,16 @@ ACPCLIs/
     │   └── CustomACPModeMapping.swift
     └── digital-twin/fake-custom-acp/   # `swift build --product fake-custom-acp`
 ```
+
+`CursorACPAdapter` and `CustomACPAdapter` both wrap an `ACPAdapter` and conform to
+`ACPBackedAdapter`, which supplies the `AgentAdapter` requirements that are pure
+byte-for-byte forwarding to `inner` (`makeEventStream`, `encodeUserPrompt`,
+`cancelSequence`, `sessionBootstrapBytes`, `encodeResumeSession`,
+`encodePermissionResponse`) plus the two vendors' identical
+`defaultEnvOverrides`/`authStatus`/`enumerateProjectCommands`/
+`resumeArgvAddition` answers. Identity, launch argv, and mode-mapping
+(`encodeCommand`, `availableAgentModes`, `availableModels`,
+`listResumableSessions`) differ per vendor and stay in each adapter.
 
 ## Cursor ACP contract snapshot
 

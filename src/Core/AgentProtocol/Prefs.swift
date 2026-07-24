@@ -47,6 +47,84 @@ public enum AppearancePrefValue: Sendable, Codable, Hashable {
     }
 }
 
+/// A single appearance preference mutation.
+///
+/// The wire module stores theme-like choices as raw strings because the
+/// concrete theme enums live in AgentCore, but each preference now carries only
+/// its valid value shape.
+public enum AppearancePrefPatch: Sendable, Codable, Hashable {
+    case theme(String)
+    case codeTheme(String)
+    case fontFamily(String)
+    case floatingCornerStyle(String)
+    case fontSizeScale(Double)
+    case showUsageChip(Bool)
+    case reduceMotion(Bool)
+    case densityMode(String)
+    case sidebarVisible(Bool)
+    case showSilentRecoveryLog(Bool)
+
+    public init?(key: AppearancePrefKey, value: AppearancePrefValue) {
+        switch (key, value) {
+        case (.theme, .string(let value)):
+            self = .theme(value)
+        case (.codeTheme, .string(let value)):
+            self = .codeTheme(value)
+        case (.fontFamily, .string(let value)):
+            self = .fontFamily(value)
+        case (.floatingCornerStyle, .string(let value)):
+            self = .floatingCornerStyle(value)
+        case (.fontSizeScale, .double(let value)):
+            self = .fontSizeScale(value)
+        case (.showUsageChip, .bool(let value)):
+            self = .showUsageChip(value)
+        case (.reduceMotion, .bool(let value)):
+            self = .reduceMotion(value)
+        case (.densityMode, .string(let value)):
+            self = .densityMode(value)
+        case (.sidebarVisible, .bool(let value)):
+            self = .sidebarVisible(value)
+        case (.showSilentRecoveryLog, .bool(let value)):
+            self = .showSilentRecoveryLog(value)
+        default:
+            return nil
+        }
+    }
+
+    public var key: AppearancePrefKey {
+        switch self {
+        case .theme: return .theme
+        case .codeTheme: return .codeTheme
+        case .fontFamily: return .fontFamily
+        case .floatingCornerStyle: return .floatingCornerStyle
+        case .fontSizeScale: return .fontSizeScale
+        case .showUsageChip: return .showUsageChip
+        case .reduceMotion: return .reduceMotion
+        case .densityMode: return .densityMode
+        case .sidebarVisible: return .sidebarVisible
+        case .showSilentRecoveryLog: return .showSilentRecoveryLog
+        }
+    }
+
+    public var value: AppearancePrefValue {
+        switch self {
+        case .theme(let value),
+             .codeTheme(let value),
+             .fontFamily(let value),
+             .floatingCornerStyle(let value),
+             .densityMode(let value):
+            return .string(value)
+        case .fontSizeScale(let value):
+            return .double(value)
+        case .showUsageChip(let value),
+             .reduceMotion(let value),
+             .sidebarVisible(let value),
+             .showSilentRecoveryLog(let value):
+            return .bool(value)
+        }
+    }
+}
+
 /// Single auto-approval rule for tool permissions.
 ///
 /// `match` is a glob-style pattern over the canonical tool-name + argument

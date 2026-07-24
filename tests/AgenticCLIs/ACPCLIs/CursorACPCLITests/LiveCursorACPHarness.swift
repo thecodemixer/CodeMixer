@@ -198,7 +198,7 @@ struct LiveCursorACPHarness {
             case .plan:
                 try await engine.send(.setPermissionMode(.plan))
             case .ask:
-                try await engine.send(.runSlashCommand(name: "/ask", args: []))
+                try await engine.send(.runSlashCommand(target: .builtin(name: "/ask"), args: []))
             case .agent:
                 try await engine.send(.setPermissionMode(.default))
             case .debug:
@@ -212,7 +212,7 @@ struct LiveCursorACPHarness {
 
         // debug is diagnostic-only — expect unsupportedCommand, not a mode update.
         let beforeDebug = await sink.eventCount()
-        try await engine.send(.runSlashCommand(name: "/debug", args: []))
+        try await engine.send(.runSlashCommand(target: .builtin(name: "/debug"), args: []))
         let sawUnsupported = await poll(timeout: .seconds(5)) {
             await sink.hasUnsupportedCommand(after: beforeDebug)
         }

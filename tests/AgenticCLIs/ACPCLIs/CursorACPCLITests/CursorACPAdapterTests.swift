@@ -98,7 +98,7 @@ struct CursorACPAdapterTests {
     @Test("debug slash command is unsupported as a chat mode")
     func debugUnsupported() {
         let adapter = CursorACPAdapter()
-        #expect(adapter.encodeCommand(.runSlashCommand(name: "/debug", args: [])) == nil)
+        #expect(adapter.encodeCommand(.runSlashCommand(target: .builtin(name: "/debug"), args: [])) == nil)
     }
 
     @Test("agent modes expose agent plan ask for composer")
@@ -107,7 +107,7 @@ struct CursorACPAdapterTests {
         #expect(modes.map(\.id) == ["agent", "plan", "ask"])
         #expect(modes.map(\.label) == ["Agent", "Plan", "Ask"])
         #expect(modes.allSatisfy { option in
-            option.selectCommands == [.runSlashCommand(name: "/\(option.id)", args: [])]
+            option.selectCommands == [.setAgentMode(id: option.id)]
         })
     }
 

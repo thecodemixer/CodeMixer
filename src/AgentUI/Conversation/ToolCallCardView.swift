@@ -96,12 +96,19 @@ struct ToolCallCardView: View {
     }
 
     private var iconTint: Color {
-        entry.finished ? (entry.success ? Theme.signal.success : Theme.signal.danger) : Theme.signal.info
+        switch entry.phase {
+        case .running: return Theme.signal.info
+        case .succeeded: return Theme.signal.success
+        case .failed: return Theme.signal.danger
+        }
     }
 
     private var state: String {
-        if !entry.finished { return "Running…" }
-        return entry.success ? "Done" : "Failed"
+        switch entry.phase {
+        case .running: return "Running…"
+        case .succeeded: return "Done"
+        case .failed: return "Failed"
+        }
     }
 
     private var accessibilityLabel: String {
@@ -114,8 +121,22 @@ struct ToolCallCardView: View {
     }
 }
 
+/// A tool call's lifecycle stage. Computed from `ToolCallEntry.finished`/
+/// `success` rather than stored alongside them — there's no third flag that
+/// can fall out of sync with those two.
+enum ToolCallPhase: Equatable {
+    case running(progress: ToolProgress?)
+    case succeeded
+    case failed
+}
+
 extension EngineViewModel.ToolCallEntry {
     var displayName: String {
         name.first.map { "\(String($0).uppercased())\(name.dropFirst())" } ?? name
+    }
+
+    var phase: ToolCallPhase {
+        guard finished else { return .running(progress: progress) }
+        return success ? .succeeded : .failed
     }
 }

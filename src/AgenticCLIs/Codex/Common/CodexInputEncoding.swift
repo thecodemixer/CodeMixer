@@ -1,4 +1,5 @@
 import Foundation
+import AgentProtocol
 
 import AgentCore
 
@@ -125,10 +126,11 @@ public enum CodexInputEncoding {
         )
     }
 
-    static func queuedTurns(state: CodexSessionState) -> Data {
-        let frames = state.takeQueuedInputs().map {
-            turnStart(inputs: $0, state: state)
-        }
+    /// Flushes prompt batches returned by `CodexSessionState.activateThread(id:)`
+    /// as `turn/start` frames now that a thread id is known.
+    static func queuedTurns(_ batches: [[CodexUserInput]],
+                            state: CodexSessionState) -> Data {
+        let frames = batches.map { turnStart(inputs: $0, state: state) }
         return CodexRPCCodec.concatenate(frames)
     }
 

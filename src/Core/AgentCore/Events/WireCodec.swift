@@ -26,13 +26,13 @@ public enum WireCodec {
         case .thinkingComplete(let block, let duration):
             return .thinkingComplete(blockID: block, durationMS: ms(of: duration))
         case .toolStart(let id, let name, let input, let startedAt):
-            return .toolStart(id: id, name: name, input: encode(input), startedAt: startedAt)
+            return .toolStart(id: id, name: name, input: input, startedAt: startedAt)
         case .toolProgress(let callID, let progress):
-            return .toolProgress(callID: callID, progress: encode(progress))
+            return .toolProgress(callID: callID, progress: progress)
         case .toolEnd(let id, let success, let output, let ms):
-            return .toolEnd(id: id, success: success, output: encode(output), durationMS: ms)
+            return .toolEnd(id: id, success: success, output: output, durationMS: ms)
         case .permissionRequest(let prompt):
-            return .permissionRequest(prompt: encode(prompt))
+            return .permissionRequest(prompt: prompt)
         case .permissionAlreadyResolved(let id, let by):
             return .permissionAlreadyResolved(id: id, byDevice: by)
         case .statusPhraseChanged(let source, let phrase):
@@ -55,8 +55,8 @@ public enum WireCodec {
             return .stopped(reason: reason)
         case .error(let err):
             return .error(WireAgentErrorCoding.encode(err))
-        case .speakBubbleRequested(let id):
-            return .speakBubbleRequested(id: id)
+        case .speakBubbleRequested(let eventID, let action):
+            return .speakBubbleRequested(eventID: eventID, action: action)
         case .fileReverted(let path):
             return .fileReverted(path: path)
         case .prefsChanged(let n):
@@ -99,13 +99,13 @@ public enum WireCodec {
         case .thinkingComplete(let block, let ms):
             return .thinkingComplete(blockID: block, duration: .milliseconds(ms))
         case .toolStart(let id, let name, let input, let at):
-            return .toolStart(id: id, name: name, input: decode(input), startedAt: at)
+            return .toolStart(id: id, name: name, input: input, startedAt: at)
         case .toolProgress(let callID, let progress):
-            return .toolProgress(callID: callID, progress: decode(progress))
+            return .toolProgress(callID: callID, progress: progress)
         case .toolEnd(let id, let success, let output, let ms):
-            return .toolEnd(id: id, success: success, output: decode(output), durationMS: ms)
+            return .toolEnd(id: id, success: success, output: output, durationMS: ms)
         case .permissionRequest(let prompt):
-            return .permissionRequest(prompt: decode(prompt))
+            return .permissionRequest(prompt: prompt)
         case .permissionAlreadyResolved(let id, let by):
             return .permissionAlreadyResolved(id: id, byDevice: by)
         case .statusPhraseChanged(let source, let phrase):
@@ -131,8 +131,8 @@ public enum WireCodec {
             return .stopped(reason: reason)
         case .error(let wireErr):
             return .error(WireAgentErrorCoding.decode(wireErr))
-        case .speakBubbleRequested(let id):
-            return .speakBubbleRequested(id: id)
+        case .speakBubbleRequested(let eventID, let action):
+            return .speakBubbleRequested(eventID: eventID, action: action)
         case .fileReverted(let path):
             return .fileReverted(path: path)
         case .prefsChanged(let n):
@@ -162,60 +162,6 @@ public enum WireCodec {
     }
 
     // MARK: - Sub-encodings
-
-    private static func encode(_ input: ToolInput) -> WireToolInput {
-        WireToolInput(summary: input.summary, jsonPayload: input.jsonPayload)
-    }
-    private static func decode(_ wire: WireToolInput) -> ToolInput {
-        ToolInput(summary: wire.summary, jsonPayload: wire.jsonPayload)
-    }
-
-    private static func encode(_ output: ToolOutput) -> WireToolOutput {
-        WireToolOutput(summary: output.summary, jsonPayload: output.jsonPayload, errorMessage: output.errorMessage)
-    }
-    private static func decode(_ wire: WireToolOutput) -> ToolOutput {
-        ToolOutput(summary: wire.summary, jsonPayload: wire.jsonPayload, errorMessage: wire.errorMessage)
-    }
-
-    private static func encode(_ p: ToolProgress) -> WireToolProgress {
-        switch p {
-        case .bashLine(let line): return .bashLine(line)
-        case .fileBytes(let w, let t): return .fileBytes(written: w, total: t)
-        case .generic(let m): return .generic(message: m)
-        }
-    }
-    private static func decode(_ p: WireToolProgress) -> ToolProgress {
-        switch p {
-        case .bashLine(let line): return .bashLine(line)
-        case .fileBytes(let w, let t): return .fileBytes(written: w, total: t)
-        case .generic(let m): return .generic(message: m)
-        }
-    }
-
-    private static func encode(_ p: PermissionPrompt) -> WirePermissionPrompt {
-        WirePermissionPrompt(
-            id: p.id,
-            toolName: p.toolName,
-            summary: p.summary,
-            argumentsSummary: p.argumentsSummary,
-            requestedAt: p.requestedAt,
-            options: p.options?.map {
-                WirePermissionOption(optionId: $0.optionId, label: $0.label)
-            }
-        )
-    }
-    private static func decode(_ p: WirePermissionPrompt) -> PermissionPrompt {
-        PermissionPrompt(
-            id: p.id,
-            toolName: p.toolName,
-            summary: p.summary,
-            argumentsSummary: p.argumentsSummary,
-            requestedAt: p.requestedAt,
-            options: p.options?.map {
-                PermissionOption(optionId: $0.optionId, label: $0.label)
-            }
-        )
-    }
 
     private static func ms(of duration: Duration) -> Int {
         let comp = duration.components

@@ -22,13 +22,7 @@ actor InteractiveTerminalTransport: AgentTransport {
     private var closed = false
 
     init(launch: AgentTransportLaunchSpec) throws {
-        let host = try PTYHost(spec: PTYHost.ChildSpec(
-            executable: launch.executable,
-            arguments: launch.arguments,
-            environment: launch.environment,
-            workingDirectory: launch.workingDirectory,
-            windowSize: launch.windowSize
-        ))
+        let host = try PTYHost(launch: launch)
         let terminal = TerminalEngine(size: launch.windowSize)
         self.host = host
         self.terminal = terminal

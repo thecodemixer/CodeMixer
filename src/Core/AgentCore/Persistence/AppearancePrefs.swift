@@ -79,30 +79,28 @@ public struct AppearancePrefs: Sendable, Codable, Hashable {
         case showUsageChip, reduceMotion, densityMode, sidebarVisible, showSilentRecoveryLog
     }
 
-    public mutating func update(_ key: AppearancePrefKey, _ value: AppearancePrefValue) {
-        switch (key, value) {
-        case (.theme, .string(let v)):
+    public mutating func update(_ patch: AppearancePrefPatch) {
+        switch patch {
+        case .theme(let v):
             theme = Theme.AppearanceTheme(rawValue: v) ?? theme
-        case (.codeTheme, .string(let v)):
+        case .codeTheme(let v):
             codeTheme = v
-        case (.fontFamily, .string(let v)):
+        case .fontFamily(let v):
             fontFamily = Theme.FontFamily(rawValue: v) ?? fontFamily
-        case (.floatingCornerStyle, .string(let v)):
+        case .floatingCornerStyle(let v):
             floatingCornerStyle = Theme.FloatingCornerStyle(rawValue: v) ?? floatingCornerStyle
-        case (.fontSizeScale, .double(let v)):
+        case .fontSizeScale(let v):
             fontSizeScale = v
-        case (.showUsageChip, .bool(let v)):
+        case .showUsageChip(let v):
             showUsageChip = v
-        case (.reduceMotion, .bool(let v)):
+        case .reduceMotion(let v):
             reduceMotion = v
-        case (.densityMode, .string(let v)):
+        case .densityMode(let v):
             densityMode = Theme.DensityMode(rawValue: v) ?? densityMode
-        case (.sidebarVisible, .bool(let v)):
+        case .sidebarVisible(let v):
             sidebarVisible = v
-        case (.showSilentRecoveryLog, .bool(let v)):
+        case .showSilentRecoveryLog(let v):
             showSilentRecoveryLog = v
-        default:
-            break
         }
     }
 

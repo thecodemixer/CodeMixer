@@ -20,10 +20,8 @@ public enum AgentCommand: Sendable, Codable, Hashable {
     case compact                                       // /compact
     case selectModel(id: String)                       // /model
     case setPermissionMode(PermissionMode)
-    case toggleThinkMode(enabled: Bool)                // /think
-    case toggleReviewMode(enabled: Bool)               // /review
-    case runSlashCommand(name: String, args: [String])
-    case runCustomCommand(path: String, args: [String])
+    case setAgentMode(id: String)
+    case runSlashCommand(target: SlashCommandTarget, args: [String])
 
     // MARK: Permission prompts
 
@@ -46,7 +44,7 @@ public enum AgentCommand: Sendable, Codable, Hashable {
     // MARK: Settings (atomic — all clients see the update)
 
     case updateAutoApprovalRules([AutoApprovalRule])
-    case updateAppearancePref(key: AppearancePrefKey, value: AppearancePrefValue)
+    case updateAppearancePref(AppearancePrefPatch)
 
     // MARK: Diagnostics
 
@@ -57,6 +55,19 @@ public enum AgentCommand: Sendable, Codable, Hashable {
     /// Publish a Codemixer-owned conversation marker without writing to the
     /// agent CLI transcript. See `ClientAction` for persistence limits.
     case recordClientAction(ClientAction)
+}
+
+/// Which slash-command namespace an agent command targets.
+public enum SlashCommandTarget: Sendable, Codable, Hashable {
+    case builtin(name: String)
+    case custom(path: String)
+
+    public var commandText: String {
+        switch self {
+        case .builtin(let name): name
+        case .custom(let path): path
+        }
+    }
 }
 
 /// Shared inbound entry point for the agent engine.

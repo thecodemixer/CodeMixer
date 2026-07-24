@@ -1,5 +1,5 @@
-import SwiftUI
 import AgentCore
+import SwiftUI
 
 /// Dialog shown via File → Open Project.
 ///
@@ -16,39 +16,18 @@ public struct OpenProjectView: View {
     }
 
     public var body: some View {
-        VStack(spacing: Theme.spacing.s24) {
-            VStack(spacing: Theme.spacing.s8) {
-                Image(systemName: "folder.badge.plus")
-                    .accessibilityHidden(true)
-                    .font(Theme.typography.heroIcon)
-                    .foregroundStyle(Theme.text.tertiary)
-                Text("Open a project")
-                    .font(Theme.typography.title)
-                Text("Choose a folder to add to the current workspace.")
-                    .font(Theme.typography.caption)
-                    .foregroundStyle(Theme.text.secondary)
-                    .multilineTextAlignment(.center)
-            }
-            .padding(.top, Theme.spacing.s32)
-
-            Button("Choose Folder…") { pickFolder() }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .keyboardShortcut(.return)
-                .accessibilityLabel("Choose project folder")
-
-            HStack {
-                Spacer()
-                Button("Cancel", action: onCancel)
-                    .keyboardShortcut(.cancelAction)
-                    .accessibilityLabel("Cancel open project")
-            }
-            .padding(.bottom, Theme.spacing.s24)
-        }
+        FolderChooserShell(
+            systemImage: "folder.badge.plus",
+            title: "Open a project",
+            caption: "Choose a folder to add to the current workspace.",
+            chooseLabel: "Choose Folder…",
+            accessibilityChooseLabel: "Choose project folder",
+            accessibilityCancelLabel: "Cancel open project",
+            width: Theme.layout.openProjectWidth,
+            onChoose: pickFolder,
+            onCancel: onCancel
+        )
         .padding(.horizontal, Theme.spacing.s32)
-        .frame(width: Theme.layout.openProjectWidth)
-        .fixedSize(horizontal: true, vertical: true)
-        .background(Theme.surface.canvas)
     }
 
     // MARK: - Private

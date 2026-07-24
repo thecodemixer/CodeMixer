@@ -3,6 +3,7 @@ import Testing
 @testable import AgentCore
 import AgentProtocol
 import AgentTestSupport
+import ClaudeCode
 
 /// One test per `AgentCommand` case (plus the permission auto-deny timeout).
 /// We use `RecordingMockAdapter` to capture adapter-level effects without
@@ -10,6 +11,15 @@ import AgentTestSupport
 /// so the PTY child stays alive while the engine writes bytes to it.
 @Suite("AgentEngine — command matrix", .serialized)
 struct AgentEngineCommandTests {
+
+    /// PTY-TUI mock wired to Claude's input-row classifier (engine stays
+    /// vendor-agnostic; tests supply the adapter heuristic).
+    private func ptyTUIAdapter() -> RecordingMockAdapter {
+        RecordingMockAdapter(
+            capabilities: .ptyTUIFallback,
+            terminalInputClassifier: ClaudeTerminalInputClassification.classify
+        )
+    }
 
     // MARK: Conversation
 
@@ -399,26 +409,26 @@ struct AgentEngineCommandTests {
         try await assertSlash(.setPermissionMode(.acceptEdits), contains: "acceptEdits")
     }
 
-    @Test("toggleThinkMode on writes /think; off writes /think off")
-    func toggleThink() async throws {
-        try await assertSlash(.toggleThinkMode(enabled: true), contains: "/think")
-        try await assertSlash(.toggleThinkMode(enabled: false), contains: "off")
+    @Test("setAgentMode think ids write /think bytes")
+    func setThinkMode() async throws {
+        try await assertSlash(.setAgentMode(id: AgentModeCommandID.think), contains: "/think")
+        try await assertSlash(.setAgentMode(id: AgentModeCommandID.thinkOff), contains: "off")
     }
 
-    @Test("toggleReviewMode on/off")
-    func toggleReview() async throws {
-        try await assertSlash(.toggleReviewMode(enabled: true), contains: "/review")
-        try await assertSlash(.toggleReviewMode(enabled: false), contains: "off")
+    @Test("setAgentMode review ids write /review bytes")
+    func setReviewMode() async throws {
+        try await assertSlash(.setAgentMode(id: AgentModeCommandID.review), contains: "/review")
+        try await assertSlash(.setAgentMode(id: AgentModeCommandID.reviewOff), contains: "off")
     }
 
     @Test("runSlashCommand concatenates name + args")
     func runSlash() async throws {
-        try await assertSlash(.runSlashCommand(name: "/foo", args: ["a", "b"]), contains: "/foo a b")
+        try await assertSlash(.runSlashCommand(target: .builtin(name: "/foo"), args: ["a", "b"]), contains: "/foo a b")
     }
 
     @Test("runCustomCommand writes path + args")
     func runCustom() async throws {
-        try await assertSlash(.runCustomCommand(path: "/proj/review.md", args: ["x"]),
+        try await assertSlash(.runSlashCommand(target: .custom(path: "/proj/review.md"), args: ["x"]),
                               contains: "/proj/review.md x")
     }
 
@@ -574,7 +584,10 @@ struct AgentEngineCommandTests {
         try await h.engine.send(.speakAssistantBubble(eventID: id, action: .play))
         try await Task.sleep(for: .milliseconds(20))
         let events = await h.collectedSoFar()
-        #expect(events.contains { if case .speakBubbleRequested = $0 { return true }; return false })
+        #expect(events.contains {
+            if case .speakBubbleRequested(eventID: id, action: .play) = $0 { return true }
+            return false
+        })
         await h.shutdown()
     }
 
@@ -642,7 +655,7 @@ struct AgentEngineCommandTests {
     @Test("updateAppearancePref publishes appearancePrefChanged and persists")
     func updateAppearance() async throws {
         let h = try await EngineHarness.make()
-        try await h.engine.send(.updateAppearancePref(key: .theme, value: .string("dark")))
+        try await h.engine.send(.updateAppearancePref(.theme("dark")))
         try await Task.sleep(for: .milliseconds(20))
         let state = await h.engine.prefs.state()
         #expect(state.appearance.theme == .dark)
@@ -698,7 +711,7 @@ struct AgentEngineCommandTests {
     @Test("resumed sessions without a live SessionStart reuse stalled-turn events")
     func resumedSessionStartupStalls() async throws {
         let clock = FakeClock()
-        let adapter = RecordingMockAdapter(capabilities: .ptyTUIFallback)
+        let adapter = ptyTUIAdapter()
         let h = try await EngineHarness.make(clock: clock,
                                              adapter: adapter,
                                              resumeSessionID: "old-session")
@@ -725,7 +738,7 @@ struct AgentEngineCommandTests {
     func readyResumePromptCancelsWatchdog() async throws {
         let clock = FakeClock()
         let transport = ScriptedTransport()
-        let adapter = RecordingMockAdapter(capabilities: .ptyTUIFallback)
+        let adapter = ptyTUIAdapter()
         let h = try await EngineHarness.make(clock: clock,
                                              adapter: adapter,
                                              resumeSessionID: "old-session",
@@ -768,7 +781,7 @@ struct AgentEngineCommandTests {
     func resumedPromptWaitsForClaudeReadyPrompt() async throws {
         let clock = FakeClock()
         let transport = ScriptedTransport()
-        let adapter = RecordingMockAdapter(capabilities: .ptyTUIFallback)
+        let adapter = ptyTUIAdapter()
         let h = try await EngineHarness.make(clock: clock,
                                              adapter: adapter,
                                              resumeSessionID: "old-session",
@@ -810,7 +823,7 @@ struct AgentEngineCommandTests {
     func resumedPromptReleasesAfterSessionStartFallback() async throws {
         let clock = FakeClock()
         let transport = ScriptedTransport()
-        let adapter = RecordingMockAdapter(capabilities: .ptyTUIFallback)
+        let adapter = ptyTUIAdapter()
         let h = try await EngineHarness.make(clock: clock,
                                              adapter: adapter,
                                              resumeSessionID: "old-session",
@@ -840,7 +853,7 @@ struct AgentEngineCommandTests {
     func newTUISessionPromptWaitsForClaudeReadyPrompt() async throws {
         let clock = FakeClock()
         let transport = ScriptedTransport()
-        let adapter = RecordingMockAdapter(capabilities: .ptyTUIFallback)
+        let adapter = ptyTUIAdapter()
         let h = try await EngineHarness.make(clock: clock, adapter: adapter, transport: transport)
 
         let sendTask = Task {
@@ -872,7 +885,7 @@ struct AgentEngineCommandTests {
     func startupTimeoutDoesNotReleasePromptWhilePermissionPending() async throws {
         let clock = FakeClock()
         let transport = ScriptedTransport()
-        let adapter = RecordingMockAdapter(capabilities: .ptyTUIFallback)
+        let adapter = ptyTUIAdapter()
         let h = try await EngineHarness.make(clock: clock, adapter: adapter, transport: transport)
 
         let sendTask = Task {
@@ -906,7 +919,7 @@ struct AgentEngineCommandTests {
     func resumedPromptReleasesAfterStartupTimeout() async throws {
         let clock = FakeClock()
         let transport = ScriptedTransport()
-        let adapter = RecordingMockAdapter(capabilities: .ptyTUIFallback)
+        let adapter = ptyTUIAdapter()
         let h = try await EngineHarness.make(clock: clock,
                                              adapter: adapter,
                                              resumeSessionID: "old-session",
@@ -943,51 +956,82 @@ struct AgentEngineCommandTests {
 
     @Test("ready prompt detector accepts current and guarded fallback prompts")
     func readyPromptDetectorAcceptsKnownPrompts() {
-        #expect(AgentEngine.rowsContainClaudeReadyPrompt([
+        #expect(ClaudeTerminalInputClassification.classify([
             "● high · /effort",
             "────────────────",
             "❯\u{00A0}",
             "? for shortcuts · ← for agents"
-        ]))
-        #expect(AgentEngine.rowsContainClaudeReadyPrompt([
+        ]) == .ready)
+        #expect(ClaudeTerminalInputClassification.classify([
             ">",
             "? for shortcuts"
-        ]))
+        ]) == .ready)
+        // History paints prior prompts; only the last empty ❯ is "ready".
+        #expect(ClaudeTerminalInputClassification.classify([
+            "❯ Reply with exactly: pong",
+            "⏺ pong",
+            "❯",
+            "⏸ manual mode on · ? for shortcuts · ← 1 agent"
+        ]) == .ready)
+        #expect(ClaudeTerminalInputClassification.classify([
+            "❯",
+            "⏸manualmodeon·?forshortcuts·←1 agent"
+        ]) == .ready)
     }
 
     @Test("ready prompt detector rejects replayed prompt text and stray arrows")
     func readyPromptDetectorRejectsFalsePositives() {
-        #expect(!AgentEngine.rowsContainClaudeReadyPrompt([
+        #expect(ClaudeTerminalInputClassification.classify([
             "❯ good day",
             "⏺ Good day, Alice!"
-        ]))
-        #expect(!AgentEngine.rowsContainClaudeReadyPrompt([
+        ]) == .unsubmitted)
+        #expect(ClaudeTerminalInputClassification.classify([
             ">",
             "some shell transcript without Claude footer"
-        ]))
+        ]) == .unknown)
+        // Last row still carries text — not ready, even if an earlier ❯ is empty.
+        #expect(ClaudeTerminalInputClassification.classify([
+            "❯",
+            "❯ still typing",
+            "? for shortcuts"
+        ]) == .unsubmitted)
     }
 
     @Test("unsubmitted-prompt detector matches input rows still carrying text")
     func unsubmittedPromptDetectorMatchesPendingText() {
-        #expect(AgentEngine.rowsShowUnsubmittedPrompt([
+        #expect(ClaudeTerminalInputClassification.classify([
             "❯ still here",
             "? for shortcuts"
-        ]))
-        #expect(AgentEngine.rowsShowUnsubmittedPrompt([
+        ]) == .unsubmitted)
+        #expect(ClaudeTerminalInputClassification.classify([
             "> pending text",
             "? for shortcuts"
-        ]))
+        ]) == .unsubmitted)
+        // History + live unsubmitted input: last prompt row wins.
+        #expect(ClaudeTerminalInputClassification.classify([
+            "❯ Reply with exactly: pong",
+            "⏺ pong",
+            "❯ resume-pong",
+            "? for shortcuts"
+        ]) == .unsubmitted)
     }
 
     @Test("unsubmitted-prompt detector ignores empty input rows and arrows")
     func unsubmittedPromptDetectorIgnoresEmptyInput() {
-        #expect(!AgentEngine.rowsShowUnsubmittedPrompt([
+        #expect(ClaudeTerminalInputClassification.classify([
             "❯\u{00A0}",
             "? for shortcuts"
-        ]))
-        #expect(!AgentEngine.rowsShowUnsubmittedPrompt([
+        ]) == .ready)
+        #expect(ClaudeTerminalInputClassification.classify([
             "> pending text without footer"
-        ]))
+        ]) == .unknown)
+        // Historical prompt text must not look like a live unsubmitted row.
+        #expect(ClaudeTerminalInputClassification.classify([
+            "❯ Reply with exactly: pong",
+            "⏺ pong",
+            "❯",
+            "? for shortcuts"
+        ]) == .ready)
     }
 
     // MARK: Startup submit recovery (missed-Enter safety net)
@@ -996,7 +1040,7 @@ struct AgentEngineCommandTests {
     func startupSubmitRecoveryResendsEnterWhenUnsubmitted() async throws {
         let clock = FakeClock()
         let transport = ScriptedTransport()
-        let adapter = RecordingMockAdapter(capabilities: .ptyTUIFallback)
+        let adapter = ptyTUIAdapter()
         let h = try await EngineHarness.make(clock: clock,
                                              adapter: adapter,
                                              resumeSessionID: "old-session",
@@ -1035,7 +1079,7 @@ struct AgentEngineCommandTests {
     func startupSubmitRecoveryStaysQuietWhenAccepted() async throws {
         let clock = FakeClock()
         let transport = ScriptedTransport()
-        let adapter = RecordingMockAdapter(capabilities: .ptyTUIFallback)
+        let adapter = ptyTUIAdapter()
         let h = try await EngineHarness.make(clock: clock,
                                              adapter: adapter,
                                              resumeSessionID: "old-session",
@@ -1073,7 +1117,7 @@ struct AgentEngineCommandTests {
     func startupSubmitRecoveryResendsPromptWhenSwallowed() async throws {
         let clock = FakeClock()
         let transport = ScriptedTransport()
-        let adapter = RecordingMockAdapter(capabilities: .ptyTUIFallback)
+        let adapter = ptyTUIAdapter()
         let h = try await EngineHarness.make(clock: clock,
                                              adapter: adapter,
                                              resumeSessionID: "old-session",
@@ -1114,7 +1158,7 @@ struct AgentEngineCommandTests {
     func startupSubmitRecoveryIgnoresHistoricalUserTurns() async throws {
         let clock = FakeClock()
         let transport = ScriptedTransport()
-        let adapter = RecordingMockAdapter(capabilities: .ptyTUIFallback)
+        let adapter = ptyTUIAdapter()
         let h = try await EngineHarness.make(clock: clock,
                                              adapter: adapter,
                                              resumeSessionID: "old-session",
@@ -1153,11 +1197,11 @@ struct AgentEngineCommandTests {
         await h.shutdown()
     }
 
-    @Test("startup submit recovery keeps resending until Claude accepts")
-    func startupSubmitRecoveryPersistsUntilAccepted() async throws {
+    @Test("startup submit recovery rewrites the full prompt at most once")
+    func startupSubmitRecoveryRewritesFullPromptAtMostOnce() async throws {
         let clock = FakeClock()
         let transport = ScriptedTransport()
-        let adapter = RecordingMockAdapter(capabilities: .ptyTUIFallback)
+        let adapter = ptyTUIAdapter()
         let h = try await EngineHarness.make(clock: clock,
                                              adapter: adapter,
                                              resumeSessionID: "old-session",
@@ -1181,18 +1225,23 @@ struct AgentEngineCommandTests {
         try await sendTask.value
         #expect(await transport.writtenTexts() == ["persist"])
 
-        // Claude keeps swallowing writes during resume repaint: each recovery
-        // tick that sees the empty ready prompt without acceptance re-sends.
+        // First recovery tick may rewrite once when the empty ready row means
+        // the original write was swallowed.
         await transport.emit("❯\u{00A0}\n? for shortcuts\n")
         try await Task.sleep(for: .milliseconds(40))
         clock.advance(by: ActivityTiming.startupSubmitRecoveryDelay + .milliseconds(1))
         try await waitUntil(timeout: .seconds(2)) {
             await transport.writtenTexts() == ["persist", "persist"]
         }
+
+        // A later ready tick must NOT dump a third copy — that became a second
+        // Claude turn (duplicate prompt + duplicate reply) when the first
+        // write was merely late to accept.
+        await transport.emit("❯\u{00A0}\n? for shortcuts\n")
+        try await Task.sleep(for: .milliseconds(40))
         clock.advance(by: ActivityTiming.startupSubmitRecoveryDelay + .milliseconds(1))
-        try await waitUntil(timeout: .seconds(2)) {
-            await transport.writtenTexts() == ["persist", "persist", "persist"]
-        }
+        try await Task.sleep(for: .milliseconds(80))
+        #expect(await transport.writtenTexts() == ["persist", "persist"])
 
         // Once Claude accepts (live UserPromptSubmit hook), recovery stops.
         #expect(h.adapter.emit(.userTurn(id: "old-session", text: "persist")))
@@ -1200,7 +1249,55 @@ struct AgentEngineCommandTests {
         clock.advance(by: ActivityTiming.startupSubmitRecoveryDelay + .milliseconds(1))
         try await Task.sleep(for: .milliseconds(80))
 
-        #expect(await transport.writtenTexts() == ["persist", "persist", "persist"])
+        #expect(await transport.writtenTexts() == ["persist", "persist"])
+        await h.shutdown()
+    }
+
+    @Test("startup submit recovery never full-resends after seeing unsubmitted text")
+    func startupSubmitRecoveryEnterOnlyAfterUnsubmitted() async throws {
+        let clock = FakeClock()
+        let transport = ScriptedTransport()
+        let adapter = ptyTUIAdapter()
+        let h = try await EngineHarness.make(clock: clock,
+                                             adapter: adapter,
+                                             resumeSessionID: "old-session",
+                                             transport: transport)
+
+        try await spinUntil(clock: clock, target: 1, timeout: .seconds(2))
+        await transport.emit("❯\u{00A0}\n? for shortcuts\n")
+        #expect(h.adapter.emit(.sessionStarted(sessionID: "old-session",
+                                              model: nil,
+                                              cwd: h.workspace)))
+        try await spinUntil(clock: clock, target: 2, timeout: .seconds(2))
+        clock.advance(by: ActivityTiming.resumePromptReadySettleDelay)
+        let sendTask = Task {
+            try await h.engine.send(.sendPrompt(text: "stuck", attachments: []))
+        }
+        defer { sendTask.cancel() }
+        for _ in 0..<3 {
+            clock.advance(by: ActivityTiming.resumePromptReadyPollInterval)
+            try await Task.sleep(for: .milliseconds(40))
+        }
+        try await sendTask.value
+        #expect(await transport.writtenTexts() == ["stuck"])
+
+        // Prompt is on-screen; recovery should only press Enter.
+        await transport.emit("❯ stuck\n? for shortcuts\n")
+        try await Task.sleep(for: .milliseconds(40))
+        clock.advance(by: ActivityTiming.startupSubmitRecoveryDelay + .milliseconds(1))
+        try await waitUntil(timeout: .seconds(2)) {
+            let texts = await transport.writtenTexts()
+            return texts.count >= 2 && texts.last == "\r"
+        }
+
+        // After Claude clears to ready (acceptance in flight, hook late), do
+        // not rewrite the whole prompt — that would start a second turn.
+        await transport.emit("❯\u{00A0}\n? for shortcuts\n")
+        try await Task.sleep(for: .milliseconds(40))
+        clock.advance(by: ActivityTiming.startupSubmitRecoveryDelay + .milliseconds(1))
+        try await Task.sleep(for: .milliseconds(80))
+        let texts = await transport.writtenTexts()
+        #expect(texts.filter { $0 == "stuck" }.count == 1)
         await h.shutdown()
     }
 
@@ -1208,7 +1305,7 @@ struct AgentEngineCommandTests {
     func startupSubmitRecoveryRetriesWhilePainting() async throws {
         let clock = FakeClock()
         let transport = ScriptedTransport()
-        let adapter = RecordingMockAdapter(capabilities: .ptyTUIFallback)
+        let adapter = ptyTUIAdapter()
         let h = try await EngineHarness.make(clock: clock,
                                              adapter: adapter,
                                              resumeSessionID: "old-session",
@@ -1350,13 +1447,13 @@ struct AgentEngineCommandTests {
             .init("compact", .compact, "/compact\n"),
             .init("selectModel", .selectModel(id: "sonnet"), "/model sonnet\n"),
             .init("setPermissionMode", .setPermissionMode(.acceptEdits), "/permission acceptEdits\n"),
-            .init("toggleThinkMode on", .toggleThinkMode(enabled: true), "/think\n"),
-            .init("toggleThinkMode off", .toggleThinkMode(enabled: false), "/think off\n"),
-            .init("toggleReviewMode on", .toggleReviewMode(enabled: true), "/review\n"),
-            .init("toggleReviewMode off", .toggleReviewMode(enabled: false), "/review off\n"),
-            .init("runSlashCommand", .runSlashCommand(name: "/foo", args: ["a", "b"]), "/foo a b\n"),
+            .init("setAgentMode think", .setAgentMode(id: AgentModeCommandID.think), "/think\n"),
+            .init("setAgentMode think off", .setAgentMode(id: AgentModeCommandID.thinkOff), "/think off\n"),
+            .init("setAgentMode review", .setAgentMode(id: AgentModeCommandID.review), "/review\n"),
+            .init("setAgentMode review off", .setAgentMode(id: AgentModeCommandID.reviewOff), "/review off\n"),
+            .init("runSlashCommand", .runSlashCommand(target: .builtin(name: "/foo"), args: ["a", "b"]), "/foo a b\n"),
             .init("runCustomCommand",
-                  .runCustomCommand(path: "/proj/review.md", args: ["x"]),
+                  .runSlashCommand(target: .custom(path: "/proj/review.md"), args: ["x"]),
                   "/proj/review.md x\n")
         ]
     }
@@ -1787,21 +1884,21 @@ struct EncodeCommandDefaultTests {
         #expect(String(data: data ?? Data(), encoding: .utf8) == "/model claude-opus-4\n")
     }
 
-    @Test("toggleThinkMode on produces /think")
+    @Test("setAgentMode think produces /think")
     func thinkOn() {
-        let data = adapter.encodeCommand(.toggleThinkMode(enabled: true))
+        let data = adapter.encodeCommand(.setAgentMode(id: AgentModeCommandID.think))
         #expect(String(data: data ?? Data(), encoding: .utf8) == "/think\n")
     }
 
-    @Test("toggleThinkMode off produces /think off")
+    @Test("setAgentMode think-off produces /think off")
     func thinkOff() {
-        let data = adapter.encodeCommand(.toggleThinkMode(enabled: false))
+        let data = adapter.encodeCommand(.setAgentMode(id: AgentModeCommandID.thinkOff))
         #expect(String(data: data ?? Data(), encoding: .utf8) == "/think off\n")
     }
 
     @Test("runSlashCommand joins name and args with spaces")
     func runSlashCommand() {
-        let data = adapter.encodeCommand(.runSlashCommand(name: "/memory", args: ["add", "note"]))
+        let data = adapter.encodeCommand(.runSlashCommand(target: .builtin(name: "/memory"), args: ["add", "note"]))
         #expect(String(data: data ?? Data(), encoding: .utf8) == "/memory add note\n")
     }
 

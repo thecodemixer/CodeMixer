@@ -196,7 +196,7 @@ public struct CommandPaletteView: View {
     private func move(_ delta: Int) {
         let count = filtered.count
         guard count > 0 else { return }
-        selection = (selection + delta + count) % count
+        selection = wrappingListIndex(current: selection, delta: delta, count: count)
     }
 
     private func runSelection() {

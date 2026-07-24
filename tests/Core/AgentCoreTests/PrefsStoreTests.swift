@@ -23,7 +23,7 @@ struct PrefsStoreTests {
         let env = FakeEnvironment()
         let store = PrefsStore(environment: env, fileSystem: fs)
 
-        try await store.updateAppearance(.theme, value: .string("dark"))
+        try await store.updateAppearance(.theme("dark"))
 
         let freshStore = PrefsStore(environment: env, fileSystem: fs)
         await freshStore.load()
@@ -83,7 +83,7 @@ struct PrefsStoreTests {
 
         // Fire both updates concurrently; the actor serialises them.
         try await withThrowingTaskGroup(of: Void.self) { group in
-            group.addTask { try await store.updateAppearance(.theme, value: .string("dark")) }
+            group.addTask { try await store.updateAppearance(.theme("dark")) }
             group.addTask {
                 let rule = AutoApprovalRule(match: "Read *", decision: .allow)
                 try await store.updateRules([rule])

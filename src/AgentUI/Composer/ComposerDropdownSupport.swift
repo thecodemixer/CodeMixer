@@ -1,5 +1,5 @@
-import SwiftUI
 import AgentCore
+import SwiftUI
 
 // MARK: - Dropdown primitives
 
@@ -218,7 +218,7 @@ struct ComposerDropdownPanel: View {
     private func moveHighlight(_ delta: Int) -> KeyPress.Result {
         let items = filtered
         guard !items.isEmpty else { return .ignored }
-        highlightedIndex = (highlightedIndex + delta + items.count) % items.count
+        highlightedIndex = wrappingListIndex(current: highlightedIndex, delta: delta, count: items.count)
         return .handled
     }
 

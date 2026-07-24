@@ -39,6 +39,17 @@ public actor HTTPSidecarServer {
     /// two TTL windows even under continuous use.
     public static let janitorInterval: TimeInterval = 60 * 60
 
+    /// `start()`/`stop()` always set or clear the listener and its two
+    /// background tasks together; this replaces the three previously
+    /// independently-optional fields so "listener without an accept task" is
+    /// unrepresentable.
+    private enum RunningState {
+        case stopped
+        case running(listener: NetworkListenerHandle,
+                     acceptTask: Task<Void, Never>,
+                     janitorTask: Task<Void, Never>)
+    }
+
     private let log = Logger(subsystem: AppIdentity.logSubsystem, category: "HTTP")
     private let attachmentsDirectory: URL
     private let serverInfo: ServerInfo
@@ -46,9 +57,7 @@ public actor HTTPSidecarServer {
     private let clock: any AgentClock
     private let random: any RandomSource
     private let fileSystem: any FileSystem
-    private var listener: NetworkListenerHandle?
-    private var acceptTask: Task<Void, Never>?
-    private var janitorTask: Task<Void, Never>?
+    private var state: RunningState = .stopped
     private let startedAt: Date
 
     public init(attachmentsDirectory: URL,
@@ -79,30 +88,29 @@ public actor HTTPSidecarServer {
         } catch {
             throw SidecarError.listenerFailed(error.localizedDescription)
         }
-        self.listener = handle
-        acceptTask = Task { [weak self] in
+        let acceptTask: Task<Void, Never> = Task { [weak self] in
             for await connection in handle.connections {
                 let conn = connection
                 Task { [weak self] in await self?.handle(conn) }
             }
         }
-        janitorTask = Task { [weak self] in
+        let janitorTask: Task<Void, Never> = Task { [weak self] in
             guard let self else { return }
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(Int(HTTPSidecarServer.janitorInterval)))
                 await self.purgeExpiredAttachments()
             }
         }
+        state = .running(listener: handle, acceptTask: acceptTask, janitorTask: janitorTask)
         log.notice("HTTP sidecar listening on port \(handle.port, privacy: .public)")
     }
 
     public func stop() async {
-        acceptTask?.cancel()
-        acceptTask = nil
-        janitorTask?.cancel()
-        janitorTask = nil
-        await listener?.cancel()
-        listener = nil
+        guard case .running(let listener, let acceptTask, let janitorTask) = state else { return }
+        acceptTask.cancel()
+        janitorTask.cancel()
+        await listener.cancel()
+        state = .stopped
     }
 
     // MARK: - Janitor
@@ -127,7 +135,10 @@ public actor HTTPSidecarServer {
         purgeExpiredAttachments()
     }
 
-    public var boundPort: UInt16? { listener?.port }
+    public var boundPort: UInt16? {
+        if case .running(let listener, _, _) = state { return listener.port }
+        return nil
+    }
 
     // MARK: - Connection handling
 

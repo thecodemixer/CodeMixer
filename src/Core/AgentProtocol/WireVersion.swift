@@ -8,6 +8,7 @@ import Foundation
 /// dual-speak or `unknown`-case fallback decoding across versions.
 public enum WireVersion: Int, Sendable, Codable {
     case v1 = 1
+    case v2 = 2
 
-    public static let current: WireVersion = .v1
+    public static let current: WireVersion = .v2
 }

@@ -94,7 +94,8 @@ private struct Line: Identifiable {
         case .engineRestarted:                    (kind, body, tint) = ("restart", "", Theme.signal.warning)
         case .stopped(let r):                     (kind, body, tint) = ("stop", String(describing: r), Theme.text.secondary)
         case .error(let e):                       (kind, body, tint) = ("error", String(describing: e), Theme.signal.danger)
-        case .speakBubbleRequested(let id):       (kind, body, tint) = ("tts", id, Theme.text.tertiary)
+        case .speakBubbleRequested(let eventID, let action):
+            (kind, body, tint) = ("tts", "\(eventID.uuidString):\(action.rawValue)", Theme.text.tertiary)
         case .fileReverted(let p):                (kind, body, tint) = ("revert", p, Theme.signal.warning)
         case .prefsChanged(let n):                (kind, body, tint) = ("prefs", "rules=\(n)", Theme.text.tertiary)
         case .appearancePrefChanged(let k, let v): (kind, body, tint) = ("appearance", "\(k.rawValue)=\(v)", Theme.text.tertiary)

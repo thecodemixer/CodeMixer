@@ -79,9 +79,20 @@ public protocol TerminalSnapshotting: Sendable {
 
     /// Concatenated snapshot as a single string with `\n` separators.
     func snapshotText() async -> String
+}
 
-    /// Current cursor row (0-indexed).
-    func cursorRow() async -> Int
+/// Live input-row state scraped from a headless VT snapshot.
+///
+/// `.ptyTUIFallback` adapters classify their own prompt chrome so the engine
+/// can gate resume writes and recover swallowed first prompts without knowing
+/// vendor glyphs (`❯`, Ink footers, …).
+public enum TerminalInputState: Sendable, Hashable {
+    /// No heuristic, or the snapshot is ambiguous (painting / unknown chrome).
+    case unknown
+    /// Empty ready prompt — safe to write the next prompt.
+    case ready
+    /// Input row still holds unsubmitted text — recovery should send Enter.
+    case unsubmitted
 }
 
 /// The single protocol every CLI agent implements.
@@ -115,6 +126,13 @@ public protocol AgentAdapter: Sendable {
     // MARK: Event stream
 
     func makeEventStream(inputs: AgentInputs) -> AsyncStream<AgentEvent>
+
+    // MARK: Terminal input classification (optional TUI)
+
+    /// Classify the live input row from a headless VT snapshot. Used by the
+    /// engine's resume-startup gate and first-prompt submit recovery for
+    /// `.ptyTUIFallback` adapters. Default `.unknown` (no scrape).
+    func classifyTerminalInput(rows: [String]) -> TerminalInputState
 
     // MARK: Input encoding
 
@@ -209,6 +227,8 @@ public extension AgentAdapter {
                             sessionID: String,
                             workspace: URL) async -> Bool { false }
 
+    func classifyTerminalInput(rows: [String]) -> TerminalInputState { .unknown }
+
     func availableModels() -> [AgentModelOption] { [] }
 
     func modelCatalogRefreshKind() -> ModelCatalogRefreshKind { .automatic }
@@ -234,12 +254,21 @@ public extension AgentAdapter {
         case .compact:             line = "/compact\n"
         case .selectModel(let id): line = "/model \(id)\n"
         case .setPermissionMode(let m): line = "/permission \(m.rawValue)\n"
-        case .toggleThinkMode(let enabled): line = enabled ? "/think\n" : "/think off\n"
-        case .toggleReviewMode(let enabled): line = enabled ? "/review\n" : "/review off\n"
-        case .runSlashCommand(let name, let args):
-            line = ([name] + args).joined(separator: " ") + "\n"
-        case .runCustomCommand(let path, let args):
-            line = ([path] + args).joined(separator: " ") + "\n"
+        case .setAgentMode(let id):
+            switch id {
+            case AgentModeCommandID.think:
+                line = "/think\n"
+            case AgentModeCommandID.thinkOff:
+                line = "/think off\n"
+            case AgentModeCommandID.review:
+                line = "/review\n"
+            case AgentModeCommandID.reviewOff:
+                line = "/review off\n"
+            default:
+                return nil
+            }
+        case .runSlashCommand(let target, let args):
+            line = ([target.commandText] + args).joined(separator: " ") + "\n"
         default:
             return nil
         }

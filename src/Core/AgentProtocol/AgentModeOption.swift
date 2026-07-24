@@ -19,3 +19,13 @@ public struct AgentModeOption: Sendable, Hashable, Codable, Identifiable {
         self.selectCommands = selectCommands
     }
 }
+
+/// Built-in mode command identifiers used by slash-compatible adapters.
+public struct AgentModeCommandID: Sendable, Hashable {
+    private init() {}
+
+    public static var think: String { "think" }
+    public static var thinkOff: String { "think-off" }
+    public static var review: String { "review" }
+    public static var reviewOff: String { "review-off" }
+}

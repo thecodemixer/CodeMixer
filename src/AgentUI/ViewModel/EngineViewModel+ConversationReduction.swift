@@ -247,7 +247,9 @@ extension EngineViewModel {
         case .prefsChanged(let count):
             diagnostics.append(diagnostic(level: .info, message: "Auto-approval rules updated (\(count))."))
         case .appearancePrefChanged(let key, let value):
-            appearancePrefs.update(key, value)
+            if let patch = AppearancePrefPatch(key: key, value: value) {
+                appearancePrefs.update(patch)
+            }
             if key == .sidebarVisible, case .bool(let visible) = value {
                 sidebarVisible = visible
             }
@@ -256,12 +258,11 @@ extension EngineViewModel {
         case .clientAction(let action):
             messages.append(.clientAction(action))
         case .agentDashboard(let url, let title):
-            if isRestartingCustomACPCLI {
+            if customACPRestartPhase != .idle {
                 // Drop ads that arrive during close/teardown; only accept after
                 // cold openProject has completed.
-                guard customACPRestartAwaitingDashboard else { return }
-                customACPRestartAwaitingDashboard = false
-                isRestartingCustomACPCLI = false
+                guard customACPRestartPhase == .awaitingDashboard else { return }
+                customACPRestartPhase = .idle
                 status = .idle
                 dashboardLoadGeneration += 1
             }

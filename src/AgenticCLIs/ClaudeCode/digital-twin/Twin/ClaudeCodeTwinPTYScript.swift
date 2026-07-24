@@ -3,7 +3,7 @@ import Foundation
 /// PTY/TUI frames the twin prints so `ClaudeTUIFallback` and resume heuristics parse them.
 public enum ClaudeCodeTwinPTYScript: Sendable {
     public static let promptReady = "❯ \n"
-    /// Matches `AgentEngine.rowsContainClaudeReadyPrompt`: empty `❯` row plus a
+    /// Matches `ClaudeTerminalInputClassification` ready: empty `❯` row plus a
     /// footer row containing `for shortcuts`.
     public static let startupPromptReady = "❯ \n? for shortcuts\n"
     public static let promptWithShortcutFooter = "for shortcuts\n> \n"

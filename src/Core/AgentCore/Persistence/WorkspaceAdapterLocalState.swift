@@ -46,16 +46,16 @@ public enum WorkspaceAdapterLocalStateStore {
         guard fileSystem.fileExists(at: url) else { return nil }
         do {
             let data = try fileSystem.readData(at: url)
-            let probe = try JSONDecoder().decode(SchemaProbe.self, from: data)
-            guard probe.schemaVersion <= WorkspaceAdapterLocalState.currentSchemaVersion else {
+            let schemaVersion = try PersistenceJSON.schemaVersion(in: data)
+            guard schemaVersion <= WorkspaceAdapterLocalState.currentSchemaVersion else {
                 log.warning("""
                     \(url.path, privacy: .public) schemaVersion \
-                    \(probe.schemaVersion, privacy: .public) is newer than \
+                    \(schemaVersion, privacy: .public) is newer than \
                     \(WorkspaceAdapterLocalState.currentSchemaVersion, privacy: .public); ignoring
                     """)
                 return nil
             }
-            return try JSONDecoder().decode(WorkspaceAdapterLocalState.self, from: data)
+            return try PersistenceJSON.decode(WorkspaceAdapterLocalState.self, from: data)
         } catch {
             log.warning("workspace adapter state load failed: \(String(describing: error), privacy: .public)")
             return nil
@@ -70,9 +70,7 @@ public enum WorkspaceAdapterLocalStateStore {
         normalized.schemaVersion = WorkspaceAdapterLocalState.currentSchemaVersion
         let dir = ProjectPaths.directoryURL(in: workspaceRoot)
         try fileSystem.createDirectory(at: dir, withIntermediates: true)
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-        let data = try encoder.encode(normalized)
+        let data = try PersistenceJSON.encode(normalized, withoutEscapingSlashes: true)
         try fileSystem.writeAtomically(
             data,
             to: ProjectPaths.workspaceAdapterStateURL(in: workspaceRoot, agentID: agentID)
@@ -101,7 +99,4 @@ public enum WorkspaceAdapterLocalStateStore {
         )
     }
 
-    private struct SchemaProbe: Decodable {
-        var schemaVersion: Int
-    }
 }

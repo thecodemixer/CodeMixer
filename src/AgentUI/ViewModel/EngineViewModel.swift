@@ -4,6 +4,65 @@ import SwiftUI
 import AgentCore
 import AgentProtocol
 
+/// The detail pane's current surface for the active project.
+///
+/// Not `Sendable`: constructed and read only on the main actor, alongside
+/// every other `EngineViewModel` field.
+public enum DetailPanePresentation: Equatable {
+    case conversation
+    case dashboard
+    /// The file list for a non-agent folder project. `pendingRelativePath`
+    /// is a one-shot instruction the browser view consumes on the next
+    /// appearance (opening a sidebar shortcut before the browser exists yet);
+    /// `selectedRelativePath` is the already-consumed, currently-highlighted
+    /// selection.
+    case folderBrowser(kind: FolderProjectKind, selectedRelativePath: String?, pendingRelativePath: String?)
+    /// Same folder project, but the pane shows only the file preview
+    /// (sidebar pin opened directly into a file). Always has a concrete
+    /// path — there is nothing to preview otherwise.
+    case folderPreviewOnly(kind: FolderProjectKind, relativePath: String)
+
+    var isFolderBrowser: Bool {
+        switch self {
+        case .folderBrowser, .folderPreviewOnly: return true
+        case .conversation, .dashboard: return false
+        }
+    }
+
+    var isFolderPreviewOnly: Bool {
+        if case .folderPreviewOnly = self { return true }
+        return false
+    }
+
+    var folderProjectKind: FolderProjectKind? {
+        switch self {
+        case .folderBrowser(let kind, _, _), .folderPreviewOnly(let kind, _): return kind
+        case .conversation, .dashboard: return nil
+        }
+    }
+
+    var activeFolderSelectionRelativePath: String? {
+        switch self {
+        case .folderBrowser(_, let selected, _): return selected
+        case .folderPreviewOnly(_, let path): return path
+        case .conversation, .dashboard: return nil
+        }
+    }
+}
+
+/// A Custom ACP CLI restart's progress through close → respawn → re-advertise.
+public enum CustomACPRestartPhase: Equatable {
+    /// No restart in flight.
+    case idle
+    /// The old process has been asked to close; a cold `openProject` for the
+    /// respawned process hasn't been sent yet.
+    case tearingDown
+    /// Cold `openProject` was sent. Waiting for the respawned agent's first
+    /// `agentDashboard` advertisement — anything from the old process's
+    /// in-flight requests before this point is stale and must be ignored.
+    case awaitingDashboard
+}
+
 /// `@MainActor` `@Observable` projection of the engine's event stream into
 /// SwiftUI-readable state.
 ///
@@ -36,35 +95,61 @@ public final class EngineViewModel {
     public var activePendingPermission: PermissionPrompt? {
         pendingPermissionsBySession[permissionOwnerKey(for: sessionID)]
     }
-    /// Back-compat alias of `activePendingPermission` (what the active chat shows).
-    public var pendingPermission: PermissionPrompt? { activePendingPermission }
     /// Sentinel key when a prompt arrives before any session id is known
     /// (single-session Claude / Codex paths).
     static let unscopedPermissionSessionKey = ""
+    /// Which surface the detail pane shows for the active project: chat,
+    /// the non-agent folder browser (with its selection state), or the
+    /// dashboard. Stored as the single source of truth so the previous six
+    /// independently-mutated fields (`showsFolderBrowser`, `showsPreviewOnly`,
+    /// `activeFolderProjectKind`, `activeFolderSelectionRelativePath`,
+    /// `pendingFolderSelectionRelativePath`, `showsOverviewDashboard`) — which
+    /// had to move in lockstep by convention to avoid representing e.g.
+    /// "folder browser and dashboard both active" — collapse into one value.
+    /// `dashboardURL`/`dashboardTitle` stay separate: they cache the current
+    /// project's dashboard address independent of whether the dashboard
+    /// surface is currently selected (an `agentDashboard` advertisement must
+    /// never steal focus from a file chat, but its URL is still worth caching
+    /// for the next time the user picks Overview).
+    public internal(set) var detailPane: DetailPanePresentation = .conversation
     public internal(set) var dashboardURL: URL?
     public internal(set) var dashboardTitle: String?
     /// Selects the detail pane's dashboard when available. Overview sessions
     /// default this to true; file sessions default to chat.
-    public internal(set) var showsOverviewDashboard: Bool = false
+    public var showsOverviewDashboard: Bool { detailPane == .dashboard }
     /// True while the detail pane shows a non-agent folder browser.
-    public internal(set) var showsFolderBrowser: Bool = false
+    public var showsFolderBrowser: Bool { detailPane.isFolderBrowser }
     /// Active folder project kind when `showsFolderBrowser` is true.
-    public internal(set) var activeFolderProjectKind: FolderProjectKind?
+    public var activeFolderProjectKind: FolderProjectKind? { detailPane.folderProjectKind }
     /// Relative path to preselect when opening a folder shortcut from the sidebar.
-    public var pendingFolderSelectionRelativePath: String?
+    public var pendingFolderSelectionRelativePath: String? {
+        get {
+            if case .folderBrowser(_, _, let pending) = detailPane { return pending }
+            return nil
+        }
+        set {
+            guard case .folderBrowser(let kind, let selected, _) = detailPane else { return }
+            detailPane = .folderBrowser(kind: kind, selectedRelativePath: selected, pendingRelativePath: newValue)
+        }
+    }
     /// Currently selected file in the folder browser (drives sidebar active marker).
-    public internal(set) var activeFolderSelectionRelativePath: String?
+    public var activeFolderSelectionRelativePath: String? { detailPane.activeFolderSelectionRelativePath }
     /// When true, the folder detail pane shows only the file preview (sidebar pin open).
-    public internal(set) var showsPreviewOnly: Bool = false
+    public var showsPreviewOnly: Bool { detailPane.isFolderPreviewOnly }
     /// Pinned relative paths keyed by project path (pin-capable folder kinds).
     public internal(set) var folderPinnedPathsByProject: [String: [String]] = [:]
     /// Automatic newest-log shortcuts keyed by project path.
     public internal(set) var folderAutomaticShortcutsByProject: [String: [FolderSidebarShortcut]] = [:]
+    /// Where a Custom ACP CLI restart is in its close → respawn → re-advertise
+    /// sequence. Stored as one value so "waiting for a dashboard advertisement"
+    /// can never be represented before the old process has actually been torn
+    /// down — the two booleans this replaced could disagree about that.
+    public internal(set) var customACPRestartPhase: CustomACPRestartPhase = .idle
     /// True while Restart ACP CLI has closed the process and is waiting for a
     /// fresh `agentDashboard` from the respawned Custom ACP agent.
-    public internal(set) var isRestartingCustomACPCLI: Bool = false
+    public var isRestartingCustomACPCLI: Bool { customACPRestartPhase != .idle }
     /// Set after cold `openProject` succeeds; `agentDashboard` before this is ignored.
-    var customACPRestartAwaitingDashboard: Bool = false
+    var customACPRestartAwaitingDashboard: Bool { customACPRestartPhase == .awaitingDashboard }
     /// Bumped on each Custom ACP restart so the WebView reloads even if the
     /// advertised dashboard URL string is unchanged.
     public internal(set) var dashboardLoadGeneration: Int = 0
@@ -80,20 +165,21 @@ public final class EngineViewModel {
     /// Active session was restored from Codemixer's project cache because the
     /// ACP agent reported that it no longer owns the session.
     public internal(set) var cachedTranscriptLoadedSessionID: String?
+    var composerGateState: ComposerGateState = .unlocked
     /// Holds the composer closed briefly after opening a saved session so the
     /// first prompt cannot race Claude's resume/startup TUI.
-    public internal(set) var isComposerLockedForSessionResume: Bool = false
+    var isComposerLockedForSessionResume: Bool { composerGateState.isLocked }
     /// True while the composer lock was armed by `.sessionHandshakeGate`
     /// (Cursor / ACP). History replay must not clear this — only SessionStart.
-    internal var isComposerLockedForSessionHandshake: Bool = false
+    internal var isComposerLockedForSessionHandshake: Bool { composerGateState.isHandshake }
     /// Same-project warm `session/load` (process already live) — shorter hard
     /// unlock and "Loading session…" copy instead of cold-spawn messaging.
-    public internal(set) var isWarmSessionSwitch: Bool = false
+    var isWarmSessionSwitch: Bool { composerGateState.isWarmSessionSwitch }
     /// Claude Code resume has two clocks: the UI can replay JSONL history
     /// quickly, while the live `claude --resume` PTY may still be painting
     /// history and not yet accepting input. While true, replayed content may
     /// end the visual switch state but must not unlock the composer.
-    internal var isComposerWaitingForClaudeCodeResume: Bool = false
+    internal var isComposerWaitingForClaudeCodeResume: Bool { composerGateState.waitsForClaudeCodeResume }
     public internal(set) var sessionTokens: Int = 0
     public internal(set) var sessionCostUSD: Double?
     public internal(set) var appearancePrefs: AppearancePrefs = .init()
@@ -298,7 +384,7 @@ public final class EngineViewModel {
     #endif
 
     /// Forward a typed command to the engine. Errors land in `diagnostics`.
-    public func send(_ command: AgentCommand) {
+    func send(_ command: AgentCommand) {
         Task { [engine] in
             do {
                 try await engine.send(command)

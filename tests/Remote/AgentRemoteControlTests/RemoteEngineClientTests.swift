@@ -32,7 +32,7 @@ struct RemoteEngineClientTests {
         try await client.connect()
         let sub = await client.bus.subscribe()
 
-        try await client.send(.updateAppearancePref(key: .theme, value: .string("remote")))
+        try await client.send(.updateAppearancePref(.theme("remote")))
 
         let event = await nextEvent(from: sub.stream)
 
@@ -71,7 +71,7 @@ struct RemoteEngineClientTests {
         let serverConnection = try #require(await accepted.value)
 
         let commandTask = Task {
-            try await client.send(.updateAppearancePref(key: .theme, value: .string("remote")))
+            try await client.send(.updateAppearancePref(.theme("remote")))
         }
 
         try await Task.sleep(for: .milliseconds(100))

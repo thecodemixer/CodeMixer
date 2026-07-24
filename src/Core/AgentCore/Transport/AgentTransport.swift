@@ -16,33 +16,29 @@ public enum AgentTransportKind: String, Sendable, Hashable, Codable {
 /// invalid kind/flag combinations cannot be constructed downstream.
 public struct AgentTransportDescriptor: Sendable, Hashable, Codable {
     public let kind: AgentTransportKind
-    public let requiresTerminalEmulation: Bool
-    public let supportsOutOfBandInterrupt: Bool
 
-    private init(kind: AgentTransportKind,
-                 requiresTerminalEmulation: Bool,
-                 supportsOutOfBandInterrupt: Bool) {
+    public var requiresTerminalEmulation: Bool {
+        kind == .interactiveTerminal
+    }
+
+    public var supportsOutOfBandInterrupt: Bool {
+        kind == .interactiveTerminal
+    }
+
+    private init(kind: AgentTransportKind) {
         self.kind = kind
-        self.requiresTerminalEmulation = requiresTerminalEmulation
-        self.supportsOutOfBandInterrupt = supportsOutOfBandInterrupt
     }
 
     public static let interactiveTerminal = AgentTransportDescriptor(
-        kind: .interactiveTerminal,
-        requiresTerminalEmulation: true,
-        supportsOutOfBandInterrupt: true
+        kind: .interactiveTerminal
     )
 
     public static let stdioJSONRPC = AgentTransportDescriptor(
-        kind: .stdioJSONRPC,
-        requiresTerminalEmulation: false,
-        supportsOutOfBandInterrupt: false
+        kind: .stdioJSONRPC
     )
 
     public static let agentClientProtocol = AgentTransportDescriptor(
-        kind: .agentClientProtocol,
-        requiresTerminalEmulation: false,
-        supportsOutOfBandInterrupt: false
+        kind: .agentClientProtocol
     )
 
     /// Reconstruct a static descriptor from its kind. Encoding persists only
@@ -108,10 +104,8 @@ typealias AgentTransportFactory = @Sendable (
 
 /// Failures raised by the transport factory / stdio host.
 public enum AgentTransportError: Error, Sendable, Equatable {
-    case unsupportedKind(AgentTransportKind)
     case launchFailed(detail: String)
     case alreadyClosed
-    case processExited(code: Int32, stderr: String)
     case writeFailed(detail: String)
 }
 

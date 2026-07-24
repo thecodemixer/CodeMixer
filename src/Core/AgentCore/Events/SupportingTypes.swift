@@ -1,107 +1,5 @@
 import Foundation
-import CryptoKit
-import AgentProtocol
-
-/// Custom permission option surfaced by ACP agents with non-standard choices.
-public struct PermissionOption: Sendable, Hashable, Identifiable {
-    public let optionId: String
-    public let label: String
-
-    public var id: String { optionId }
-
-    public init(optionId: String, label: String) {
-        self.optionId = optionId
-        self.label = label
-    }
-}
-
-/// Permission prompt the agent surfaced before executing a tool.
-public struct PermissionPrompt: Sendable, Hashable, Identifiable {
-    public let id: UUID
-    public let toolName: String
-    public let summary: String
-    public let argumentsSummary: String
-    public let requestedAt: Date
-    public let options: [PermissionOption]?
-
-    public init(id: UUID,
-                toolName: String,
-                summary: String,
-                argumentsSummary: String,
-                requestedAt: Date,
-                options: [PermissionOption]? = nil) {
-        self.id = id
-        self.toolName = toolName
-        self.summary = summary
-        self.argumentsSummary = argumentsSummary
-        self.requestedAt = requestedAt
-        self.options = options
-    }
-
-    public init(toolName: String,
-                summary: String,
-                argumentsSummary: String,
-                requestedAt: Date,
-                options: [PermissionOption]? = nil) {
-        self.init(id: PermissionPrompt.stableID(
-            toolName: toolName,
-            summary: summary,
-            argumentsSummary: argumentsSummary,
-            requestedAt: requestedAt
-        ),
-        toolName: toolName,
-        summary: summary,
-        argumentsSummary: argumentsSummary,
-        requestedAt: requestedAt,
-        options: options)
-    }
-
-    private static func stableID(toolName: String,
-                                 summary: String,
-                                 argumentsSummary: String,
-                                 requestedAt: Date) -> UUID {
-        let material = "\(toolName)|\(summary)|\(argumentsSummary)|\(requestedAt.timeIntervalSince1970)"
-        let digest = Array(SHA256.hash(data: Data(material.utf8)))
-        return UUID(uuid: (
-            digest[0], digest[1], digest[2], digest[3],
-            digest[4], digest[5], digest[6], digest[7],
-            digest[8], digest[9], digest[10], digest[11],
-            digest[12], digest[13], digest[14], digest[15]
-        ))
-    }
-}
-
-/// Compact, structured description of a tool's input. Adapters fill in only
-/// the fields that matter; everything else is `nil`.
-public struct ToolInput: Sendable, Hashable {
-    public var summary: String
-    public var jsonPayload: String?
-
-    public init(summary: String, jsonPayload: String? = nil) {
-        self.summary = summary
-        self.jsonPayload = jsonPayload
-    }
-}
-
-public struct ToolOutput: Sendable, Hashable {
-    public var summary: String
-    public var jsonPayload: String?
-    public var errorMessage: String?
-
-    public init(summary: String, jsonPayload: String? = nil, errorMessage: String? = nil) {
-        self.summary = summary
-        self.jsonPayload = jsonPayload
-        self.errorMessage = errorMessage
-    }
-}
-
-/// Live progress for a running tool call. Typed so each renderer reaches for
-/// exactly the data it needs.
-public enum ToolProgress: Sendable, Hashable {
-    case bashLine(String)
-    case fileBytes(written: Int, total: Int?)
-    case generic(message: String)
-}
+@_exported import AgentProtocol
 
 /// Authentication state for an adapter.
 public enum AuthStatus: Sendable, Hashable {
@@ -146,8 +44,8 @@ public struct SlashCommand: Sendable, Hashable, Identifiable {
     public let name: String
     public let summary: String
     public let isProjectDefined: Bool
-    /// When `false`, palette activation routes through `runSlashCommand` /
-    /// `runCustomCommand` (e.g. Cursor ACP mode switches). Default `true`
+    /// When `false`, palette activation routes through `runSlashCommand`
+    /// (e.g. Cursor ACP mode switches). Default `true`
     /// submits the command text as a user prompt with optimistic UI feedback.
     public let sendsAsPrompt: Bool
 
@@ -206,6 +104,3 @@ public struct SessionSummary: Sendable, Hashable, Identifiable {
         self.overviewURL = overviewURL
     }
 }
-
-/// Why a session ended.
-public typealias DomainStopReason = AgentProtocol.StopReason

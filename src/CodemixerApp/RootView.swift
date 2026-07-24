@@ -171,10 +171,10 @@ struct RootView: View {
                 Button("Compact Context") { model.compactContext() }
                 if let workspace = model.workspace {
                     Button("Reopen Current Project") {
-                        model.send(.openProject(path: workspace.path, resumeSessionID: model.sessionID))
+                        model.openProject(path: workspace.path, resumeSessionID: model.sessionID)
                     }
                 }
-                Button("Close Session") { model.send(.closeSession) }
+                Button("Close Session") { model.closeCurrentSession() }
                 Button("Close Workspace") {
                     Task { await bootstrap.closeWorkspace() }
                 }
@@ -209,10 +209,10 @@ struct RootView: View {
                 }
             }
             Section("Export Snapshot") {
-                Button("Conversation") { model.send(.requestSnapshot(.conversation)) }
-                Button("Diff") { model.send(.requestSnapshot(.diff)) }
-                Button("Sessions") { model.send(.requestSnapshot(.sessions)) }
-                Button("Preferences") { model.send(.requestSnapshot(.prefs)) }
+                Button("Conversation") { model.requestSnapshot(.conversation) }
+                Button("Diff") { model.requestSnapshot(.diff) }
+                Button("Sessions") { model.requestSnapshot(.sessions) }
+                Button("Preferences") { model.requestSnapshot(.prefs) }
             }
             Divider()
             Button("Show Debug Terminal") { bootstrap.showDebugTerminal = true }

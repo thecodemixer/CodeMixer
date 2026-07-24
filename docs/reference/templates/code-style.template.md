@@ -91,7 +91,7 @@ Read this once, fully, before opening your editor. Re-read the *Pre-merge review
 > - Function parameter count ≤ 5.
 > - No `print(...)` — use `Logger`.
 > - No bare `// TODO` — every TODO names an owner and a ticket.
-> - Direct `Date()` / `Int.random` / `ProcessInfo.processInfo.environment` / `FileManager.default` forbidden outside `Seams/Live*.swift`.
+> - Direct `Date()` / `UUID()` or random APIs / `ProcessInfo.processInfo.environment` / `FileManager.default` forbidden outside approved seams and `*/External/*.swift`.
 > - `@MainActor` forbidden outside the UI module.
 > - All `@unchecked Sendable` annotations require a documented invariants block.
 

@@ -209,7 +209,10 @@ struct WireCodecParityTests {
             .engineRestarted,
             .stopped(reason: .naturalExit),
             .error(.binaryNotFound(agentID: .claudeCode, hint: "install")),
-            .speakBubbleRequested(id: "bubble-1"),
+            .speakBubbleRequested(
+                eventID: UUID(uuidString: "00000000-0000-0000-0000-000000000005")!,
+                action: .play
+            ),
             .fileReverted(path: "/tmp/a.txt"),
             .prefsChanged(rulesCount: 2),
             .appearancePrefChanged(key: .theme, value: .string("dark")),
@@ -329,8 +332,8 @@ extension AgentEvent {
             return r1 == r2
         case (.error(let e1), .error(let e2)):
             return e1 == e2
-        case (.speakBubbleRequested(let id1), .speakBubbleRequested(let id2)):
-            return id1 == id2
+        case (.speakBubbleRequested(let id1, let a1), .speakBubbleRequested(let id2, let a2)):
+            return id1 == id2 && a1 == a2
         case (.fileReverted(let p1), .fileReverted(let p2)):
             return p1 == p2
         case (.prefsChanged(let n1), .prefsChanged(let n2)):

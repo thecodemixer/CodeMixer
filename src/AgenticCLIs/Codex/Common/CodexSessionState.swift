@@ -31,13 +31,30 @@ public final class CodexSessionState: @unchecked Sendable {
         let signature: String
     }
 
+    /// Thread lifecycle relative to App Server `thread/start` / `thread/resume`.
+    /// Prompts that arrive before the thread id is known accumulate in
+    /// `.awaitingThread`; `activateThread(id:)` moves to `.active` and returns
+    /// those queued batches so the caller can flush `turn/start` frames without
+    /// dropping them.
+    enum ThreadPhase: Sendable, Hashable {
+        case awaitingThread(queued: [[CodexUserInput]])
+        case active(threadID: String)
+    }
+
+    /// Whether a turn is in flight and, if so, which thread it belongs to.
+    /// The thread id is captured at `beginTurn` time from `ThreadPhase.active`
+    /// (a thread's id never changes without also clearing the turn).
+    enum TurnPhase: Sendable, Hashable {
+        case idle
+        case active(turnID: String, threadID: String)
+    }
+
     private let lock = NSLock()
     private var nextID = 1
     private var requests: [JSONValue: RequestPurpose] = [:]
     private var context: Context?
-    private var threadIDStorage: String?
-    private var activeTurnIDStorage: String?
-    private var queuedInputs: [[CodexUserInput]] = []
+    private var threadPhase: ThreadPhase = .awaitingThread(queued: [])
+    private var turnPhase: TurnPhase = .idle
     private var pendingApprovals: [UUID: PendingApproval] = [:]
     private var autoApprovalSignatures: Set<String> = []
     private var itemIDs: [String: UUID] = [:]
@@ -56,9 +73,8 @@ public final class CodexSessionState: @unchecked Sendable {
             )
             nextID = 1
             requests.removeAll()
-            threadIDStorage = nil
-            activeTurnIDStorage = nil
-            queuedInputs.removeAll()
+            threadPhase = .awaitingThread(queued: [])
+            turnPhase = .idle
             pendingApprovals.removeAll()
             autoApprovalSignatures.removeAll()
             itemIDs.removeAll()
@@ -86,16 +102,28 @@ public final class CodexSessionState: @unchecked Sendable {
         withLock { context }
     }
 
-    func setThreadID(_ id: String) {
-        withLock { threadIDStorage = id }
+    /// Activates the thread and returns any prompt batches queued while
+    /// awaiting `thread/start` / `thread/resume`. Callers must flush those
+    /// batches as `turn/start` frames (see `CodexInputEncoding.queuedTurns`).
+    @discardableResult
+    func activateThread(id: String) -> [[CodexUserInput]] {
+        withLock {
+            let queued: [[CodexUserInput]]
+            if case .awaitingThread(let pending) = threadPhase {
+                queued = pending
+            } else {
+                queued = []
+            }
+            threadPhase = .active(threadID: id)
+            return queued
+        }
     }
 
     func prepareNewThread() {
         withLock {
             requests.removeAll()
-            threadIDStorage = nil
-            activeTurnIDStorage = nil
-            queuedInputs.removeAll()
+            threadPhase = .awaitingThread(queued: [])
+            turnPhase = .idle
             pendingApprovals.removeAll()
             autoApprovalSignatures.removeAll()
             itemIDs.removeAll()
@@ -105,36 +133,46 @@ public final class CodexSessionState: @unchecked Sendable {
     }
 
     func threadID() -> String? {
-        withLock { threadIDStorage }
+        withLock {
+            if case .active(let threadID) = threadPhase { return threadID }
+            return nil
+        }
     }
 
+    /// No-ops if no thread is active yet — this never happens over the real
+    /// App Server wire (turn/start always follows a completed thread/start).
     func beginTurn(_ id: String) {
-        withLock { activeTurnIDStorage = id }
+        withLock {
+            guard case .active(let threadID) = threadPhase else { return }
+            turnPhase = .active(turnID: id, threadID: threadID)
+        }
     }
 
     func completeTurn(_ id: String?) {
         withLock {
-            guard id == nil || activeTurnIDStorage == id else { return }
-            activeTurnIDStorage = nil
+            guard case .active(let turnID, _) = turnPhase,
+                  id == nil || turnID == id else { return }
+            turnPhase = .idle
         }
     }
 
     func activeTurn() -> (threadID: String, turnID: String)? {
         withLock {
-            guard let threadIDStorage, let activeTurnIDStorage else { return nil }
-            return (threadIDStorage, activeTurnIDStorage)
+            guard case .active(let turnID, let threadID) = turnPhase else { return nil }
+            return (threadID, turnID)
         }
     }
 
     func enqueue(_ inputs: [CodexUserInput]) {
-        withLock { queuedInputs.append(inputs) }
-    }
-
-    func takeQueuedInputs() -> [[CodexUserInput]] {
         withLock {
-            let inputs = queuedInputs
-            queuedInputs.removeAll()
-            return inputs
+            switch threadPhase {
+            case .awaitingThread(var queued):
+                queued.append(inputs)
+                threadPhase = .awaitingThread(queued: queued)
+            case .active:
+                // `turnStart` only enqueues when `threadID()` is nil.
+                break
+            }
         }
     }
 

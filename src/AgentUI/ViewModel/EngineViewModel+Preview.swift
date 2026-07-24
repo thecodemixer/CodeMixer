@@ -47,9 +47,9 @@ public extension EngineViewModel {
         model.availableAgentModes = [
             AgentModeOption(id: "agent", label: "Agent", selectCommands: []),
             AgentModeOption(id: "think", label: "Think",
-                                   selectCommands: [.toggleThinkMode(enabled: true)]),
+                                   selectCommands: [.setAgentMode(id: AgentModeCommandID.think)]),
             AgentModeOption(id: "review", label: "Review",
-                                   selectCommands: [.toggleReviewMode(enabled: true)]),
+                                   selectCommands: [.setAgentMode(id: AgentModeCommandID.review)]),
         ]
         model.selectedAgentModeID = "agent"
         return model

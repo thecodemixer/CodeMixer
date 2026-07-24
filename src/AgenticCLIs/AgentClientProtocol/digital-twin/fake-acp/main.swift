@@ -1,43 +1,19 @@
 import Foundation
 import AgentClientProtocol
+import AgentProtocol
 
 /// Stdio ACP agent-server twin for CI and local development without a real backend.
 @main
 struct FakeACPCLI {
     static func main() {
-        setbuf(stdout, nil)
         let env = ProcessInfo.processInfo.environment
         let scenario = ACPTwinScenario.from(environment: env)
         var server = FakeACPServer(scenario: scenario)
-        while let line = readLine() {
-            guard !line.isEmpty else { continue }
-            var frame = Data(line.utf8)
-            if frame.last == 0x0D { frame.removeLast() }
-            do {
-                let incoming = try ACPIncoming.decode(frame)
-                let replies = server.handle(incoming)
-                for reply in replies {
-                    writeFrame(reply)
-                }
-            } catch {
-                writeFrame(ACPRPCCodec.errorResponse(
-                    id: .number(-1),
-                    code: -32_600,
-                    message: String(describing: error)
-                ))
-            }
-        }
-    }
-
-    private static func writeFrame(_ data: Data) {
-        data.withUnsafeBytes { raw in
-            guard let base = raw.baseAddress else { return }
-            _ = write(STDOUT_FILENO, base, raw.count)
-        }
+        runACPTwinStdioLoop(&server)
     }
 }
 
-private struct FakeACPServer {
+private struct FakeACPServer: ACPTwinServer {
     let scenario: ACPTwinScenario
     var authenticated = false
     var sessionID = UUID().uuidString

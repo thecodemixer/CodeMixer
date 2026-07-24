@@ -108,4 +108,48 @@ struct ACPProtocolTests {
         ])
         #expect(String(decoding: joined, as: UTF8.self) == "a\nb\n")
     }
+
+    @Test("ACPSessionModes parses advertised modes")
+    func sessionModes() {
+        let modes = ACPSessionModes.parse(.object([
+            "currentModeId": .string("plan"),
+            "availableModes": .array([
+                .object([
+                    "id": .string("agent"),
+                    "name": .string(""),
+                ]),
+                .object([
+                    "id": .string("plan"),
+                    "name": .string("Plan"),
+                    "description": .string("Read-only"),
+                ]),
+                .object(["id": .string("")]),
+            ]),
+        ]))
+
+        #expect(modes.currentModeID == "plan")
+        #expect(modes.available == [
+            ACPSessionMode(id: "agent", name: "agent", description: nil),
+            ACPSessionMode(id: "plan", name: "Plan", description: "Read-only"),
+        ])
+    }
+
+    @Test("ACPInitializeResult parses dashboard metadata and auth method")
+    func initializeResult() {
+        let parsed = ACPInitializeResult.parse(.object([
+            "agentInfo": .object([
+                "_meta": .object([
+                    "codemixer.dev/dashboardUrl": .string("http://127.0.0.1:8423/dashboard"),
+                    "codemixer.dev/dashboardTitle": .string("Dashboard"),
+                ]),
+            ]),
+            "authMethods": .array([
+                .object(["id": .string("device")]),
+            ]),
+        ]))
+
+        #expect(parsed.dashboardURL?.absoluteString == "http://127.0.0.1:8423/dashboard")
+        #expect(parsed.dashboardTitle == "Dashboard")
+        #expect(parsed.authMethodID == "device")
+    }
 }

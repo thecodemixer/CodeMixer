@@ -5,6 +5,7 @@
     "EngineViewModel — event reduction": 4.0,
     "EngineViewModel — optimistic send + navigator": 3.0,
     "ClaudeTranscriptTailer fixtures": 5.0,
+    "ClaudeAdapter — hook-driven event stream": 3.0,
     "AgentEngine + ClaudeAdapter + fake-claude": 5.0,
     "AgentEngine + ACPAdapter + fake-acp": 5.0,
     "AgentEngine + CursorACPAdapter + fake-acp": 5.0,

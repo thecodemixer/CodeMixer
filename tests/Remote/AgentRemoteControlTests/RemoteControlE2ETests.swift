@@ -44,7 +44,7 @@ struct RemoteControlE2ETests {
         }
 
         let cmdID = UUID()
-        let cmd: AgentCommand = .updateAppearancePref(key: .theme, value: .string("dark"))
+        let cmd: AgentCommand = .updateAppearancePref(.theme("dark"))
         try await client.send(try encoder.encode(ClientFrame.command(id: cmdID, command: cmd)))
 
         var sawResult = false
@@ -53,7 +53,7 @@ struct RemoteControlE2ETests {
             guard let data = try await client.receive() else { break }
             guard let frame = try? decoder.decode(ServerFrame.self, from: data) else { continue }
             switch frame {
-            case .result(let id, true, _) where id == cmdID:
+            case .commandSucceeded(let id) where id == cmdID:
                 sawResult = true
             case .event(_, let wire):
                 if case .appearancePrefChanged = wire { sawEvent = true }
@@ -85,12 +85,12 @@ struct RemoteControlE2ETests {
         let decoder = JSONDecoder()
 
         let cmdID = UUID()
-        let cmd: AgentCommand = .updateAppearancePref(key: .theme, value: .string("dark"))
+        let cmd: AgentCommand = .updateAppearancePref(.theme("dark"))
         try await client.send(try encoder.encode(ClientFrame.command(id: cmdID, command: cmd)))
 
         let response = try #require(try await client.receive())
         let frame = try decoder.decode(ServerFrame.self, from: response)
-        if case .result(let id, false, let error?) = frame {
+        if case .commandFailed(let id, let error?) = frame {
             #expect(id == cmdID)
             #expect(error.code == "not_paired")
         } else {
@@ -139,10 +139,10 @@ struct RemoteControlE2ETests {
         let cmdID = UUID()
         try await client.send(try encoder.encode(ClientFrame.command(
             id: cmdID,
-            command: .updateAppearancePref(key: .theme, value: .string("loopback"))
+            command: .updateAppearancePref(.theme("loopback"))
         )))
         let resultData = try #require(try await client.receive())
-        if case .result(let id, true, _) = try decoder.decode(ServerFrame.self, from: resultData) {
+        if case .commandSucceeded(let id) = try decoder.decode(ServerFrame.self, from: resultData) {
             #expect(id == cmdID)
         } else {
             Issue.record("expected command success after auth")
@@ -181,11 +181,11 @@ struct RemoteControlE2ETests {
         let cmdID = UUID()
         try await client.send(try encoder.encode(ClientFrame.command(
             id: cmdID,
-            command: .updateAppearancePref(key: .theme, value: .string("metadata-auth"))
+            command: .updateAppearancePref(.theme("metadata-auth"))
         )))
 
         let resultData = try #require(try await client.receive())
-        if case .result(let id, true, _) = try decoder.decode(ServerFrame.self, from: resultData) {
+        if case .commandSucceeded(let id) = try decoder.decode(ServerFrame.self, from: resultData) {
             #expect(id == cmdID)
         } else {
             Issue.record("expected command success with Authorization metadata")
@@ -209,6 +209,38 @@ struct RemoteControlE2ETests {
         #expect(payload == nil)
 
         await client.close()
+        await server.stop()
+        await engine.shutdown(reason: .naturalExit)
+    }
+
+    @Test("connectedClientCount tracks connect and disconnect for every accepted peer")
+    func connectedClientCountTracksConnectAndDisconnect() async throws {
+        let net = InMemoryNetwork()
+        let (server, transport, _, engine) = try await makeServer(transport: net.transport,
+                                                                  requireAuth: false)
+        let port = await server.boundPort ?? 0
+        let recorder = ClientCountRecorder()
+        await server.observeClientCount { count in
+            Task { await recorder.record(count) }
+        }
+        try await waitUntil { await recorder.last == 0 }
+
+        let first = try await transport.connect(to: .loopback(port: port), options: .plainWebSocket)
+        try await waitUntil { await recorder.last == 1 }
+        #expect(await server.connectedClientCount == 1)
+
+        let second = try await transport.connect(to: .loopback(port: port), options: .plainWebSocket)
+        try await waitUntil { await recorder.last == 2 }
+        #expect(await server.connectedClientCount == 2)
+
+        await first.close()
+        try await waitUntil { await recorder.last == 1 }
+        #expect(await server.connectedClientCount == 1)
+
+        await second.close()
+        try await waitUntil { await recorder.last == 0 }
+        #expect(await server.connectedClientCount == 0)
+
         await server.stop()
         await engine.shutdown(reason: .naturalExit)
     }
@@ -256,12 +288,11 @@ struct RemoteControlE2ETests {
         let cmdID = UUID()
         try await client.send(try encoder.encode(
             ClientFrame.command(id: cmdID,
-                                command: .updateAppearancePref(key: .theme,
-                                                               value: .string("dusk")))
+                                command: .updateAppearancePref(.theme("dusk")))
         ))
         let data = try #require(try await client.receive())
         let frame = try decoder.decode(ServerFrame.self, from: data)
-        if case .result(let id, true, _) = frame { #expect(id == cmdID) }
+        if case .commandSucceeded(let id) = frame { #expect(id == cmdID) }
         else { Issue.record("unexpected frame: \(frame)") }
 
         await client.close()
@@ -315,7 +346,7 @@ struct RemoteControlE2ETests {
             switch frame {
             case .event(_, .userTurn(_, let text)) where text == "wire fail":
                 userTurnIndex = framesSeen
-            case .result(let id, false, let error?) where id == cmdID:
+            case .commandFailed(let id, let error?) where id == cmdID:
                 resultIndex = framesSeen
                 #expect(error.code == "unknown")
                 #expect(error.message.contains("writeFailed"))
@@ -360,12 +391,12 @@ struct RemoteControlE2ETests {
             .init(.compact, "/compact\n"),
             .init(.selectModel(id: "sonnet"), "/model sonnet\n"),
             .init(.setPermissionMode(.acceptEdits), "/permission acceptEdits\n"),
-            .init(.toggleThinkMode(enabled: true), "/think\n"),
-            .init(.toggleThinkMode(enabled: false), "/think off\n"),
-            .init(.toggleReviewMode(enabled: true), "/review\n"),
-            .init(.toggleReviewMode(enabled: false), "/review off\n"),
-            .init(.runSlashCommand(name: "/foo", args: ["a", "b"]), "/foo a b\n"),
-            .init(.runCustomCommand(path: "/proj/review.md", args: ["x"]), "/proj/review.md x\n")
+            .init(.setAgentMode(id: AgentModeCommandID.think), "/think\n"),
+            .init(.setAgentMode(id: AgentModeCommandID.thinkOff), "/think off\n"),
+            .init(.setAgentMode(id: AgentModeCommandID.review), "/review\n"),
+            .init(.setAgentMode(id: AgentModeCommandID.reviewOff), "/review off\n"),
+            .init(.runSlashCommand(target: .builtin(name: "/foo"), args: ["a", "b"]), "/foo a b\n"),
+            .init(.runSlashCommand(target: .custom(path: "/proj/review.md"), args: ["x"]), "/proj/review.md x\n")
         ]
 
         let net = InMemoryNetwork()
@@ -397,7 +428,7 @@ struct RemoteControlE2ETests {
                                                                          command: testCase.command)))
 
             let data = try #require(try await client.receive())
-            if case .result(let id, false, let error?) = try decoder.decode(ServerFrame.self, from: data) {
+            if case .commandFailed(let id, let error?) = try decoder.decode(ServerFrame.self, from: data) {
                 #expect(id == cmdID)
                 #expect(error.code == "unknown")
                 #expect(error.message.contains("writeFailed"))
@@ -611,7 +642,7 @@ struct RemoteControlE2ETests {
         )))
 
         let data = try #require(try await client.receive())
-        if case .result(let id, false, let error?) = try decoder.decode(ServerFrame.self, from: data) {
+        if case .commandFailed(let id, let error?) = try decoder.decode(ServerFrame.self, from: data) {
             #expect(id == cmdID)
             #expect(error.code == "unknown")
             #expect(error.message.contains("writeFailed"))
@@ -666,7 +697,7 @@ struct RemoteControlE2ETests {
         )))
 
         let data = try #require(try await client.receive())
-        if case .result(let id, false, let error?) = try decoder.decode(ServerFrame.self, from: data) {
+        if case .commandFailed(let id, let error?) = try decoder.decode(ServerFrame.self, from: data) {
             #expect(id == editCommandID)
             #expect(error.code == "unknown")
             #expect(error.message.contains("writeFailed"))
@@ -702,6 +733,32 @@ struct RemoteControlE2ETests {
                      random: seams.random,
                      environment: seams.environment,
                      fileSystem: seams.fileSystem)
+    }
+
+    /// Polls a condition against the real clock. `observeClientCount` fires
+    /// from actor-isolated code on connect/disconnect, so the recorder's
+    /// latest value settles within a few scheduler turns, not on a fixed delay.
+    private func waitUntil(timeout: Duration = .seconds(1),
+                           predicate: () async -> Bool) async throws {
+        let start = ContinuousClock.now
+        while !(await predicate()) {
+            if start.duration(to: .now) > timeout {
+                Issue.record("timed out waiting for condition")
+                return
+            }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+    }
+}
+
+/// Collects `observeClientCount` callbacks in delivery order for a
+/// deterministic connect/disconnect characterization lock.
+private actor ClientCountRecorder {
+    private(set) var values: [Int] = []
+    var last: Int? { values.last }
+
+    func record(_ count: Int) {
+        values.append(count)
     }
 }
 

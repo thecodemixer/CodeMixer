@@ -37,12 +37,16 @@ public final class FSEventsStream: @unchecked Sendable {
     private let lock = NSLock()
     private let paths: [String]
     private let debounce: TimeInterval
+    private let clock: any AgentClock
     private var stream: FSEventStreamRef?
     private let continuation: AsyncStream<RawEvent>.Continuation
 
-    public init(paths: [String], debounce: TimeInterval = 0.2) {
+    public init(paths: [String],
+                debounce: TimeInterval = 0.2,
+                clock: any AgentClock = SystemClock()) {
         self.paths = paths
         self.debounce = debounce
+        self.clock = clock
         var c: AsyncStream<RawEvent>.Continuation!
         self.events = AsyncStream(bufferingPolicy: .bufferingNewest(StreamBufferDefaults.fileSystemEvents)) { c = $0 }
         self.continuation = c
@@ -69,7 +73,7 @@ public final class FSEventsStream: @unchecked Sendable {
             let nsArray = Unmanaged<NSArray>.fromOpaque(paths).takeUnretainedValue()
             let pathStrings = (nsArray as? [String]) ?? []
             let flagsBuf = UnsafeBufferPointer(start: flags, count: count)
-            let now = Date()
+            let now = me.clock.now()
             for i in 0..<min(count, pathStrings.count) {
                 let raw = RawEvent(path: pathStrings[i],
                                    flags: flagsBuf[i],

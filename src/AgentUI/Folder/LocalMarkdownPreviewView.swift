@@ -9,6 +9,9 @@ struct LocalMarkdownPreviewView: View {
     let markdown: String
     let projectRoot: URL
     let documentDirectory: URL
+    /// Same seam the owning `FolderProjectBrowserModel` reads the document
+    /// through — inline images must not bypass it with a fresh `FileSystem`.
+    let fileSystem: any FileSystem
     var scrollToAnchor: String?
 
     var body: some View {
@@ -19,7 +22,7 @@ struct LocalMarkdownPreviewView: View {
                 documentDirectory: documentDirectory,
                 imageData: { relative in
                     let url = projectRoot.appendingPathComponent(relative)
-                    return try? SystemFileSystem().readData(at: url)
+                    return try? fileSystem.readData(at: url)
                 }
             ),
             projectRoot: projectRoot,

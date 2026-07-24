@@ -63,6 +63,7 @@ CODEMIXER_LIVE_CLAUDE=1 swift test --no-parallel --filter LiveClaudeIntegrationT
 | Variable | Required | Purpose |
 | --- | --- | --- |
 | `CODEMIXER_LIVE_CLAUDE=1` | Yes (for live turn) | Opt in to network + real Claude account |
+| `CODEMIXER_LIVE_CLAUDE_RESUME_DIAG=1` | No | Also dump SwiftTerm rows around `--resume` (`resumeHangDiagnostic`) |
 | `CODEMIXER_LIVE_WORKSPACE` | No | Trusted workspace directory (defaults to process cwd) |
 | `CLAUDE_BIN` | No | Override `claude` executable path |
 | `CODEMIXER_FAKE_CLAUDE` | Must be unset | Live harness refuses to run when the fake twin is armed |
@@ -127,6 +128,9 @@ Static helpers for assertions without a full turn:
 
 - `LiveClaudeHarness.launchArgvIsInteractive()` — argv never contains `-p` / `--print`.
 - `LiveClaudeHarness.billingMarkers(in:prompt:)` — parse transcript JSONL billing fields.
+- `LiveClaudeHarness.runResumeHangDiagnostic(_:)` — seed + `--resume` with per-second
+  SwiftTerm row dumps (`CODEMIXER_LIVE_CLAUDE_RESUME_DIAG=1`). Use when a live
+  resume stops accepting the first follow-up prompt.
 
 ---
 

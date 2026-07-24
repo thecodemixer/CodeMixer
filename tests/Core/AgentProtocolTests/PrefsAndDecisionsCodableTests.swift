@@ -24,6 +24,17 @@ struct PrefsAndDecisionsCodableTests {
         for action in [TTSAction.play, .pause, .stop] { try roundTrip(action) }
     }
 
+    @Test("SlashCommandTarget preserves builtin names and custom paths")
+    func slashCommandTarget() throws {
+        let builtin = SlashCommandTarget.builtin(name: "/review")
+        let custom = SlashCommandTarget.custom(path: ".claude/commands/release.md")
+
+        #expect(builtin.commandText == "/review")
+        #expect(custom.commandText == ".claude/commands/release.md")
+        try roundTrip(builtin)
+        try roundTrip(custom)
+    }
+
     @Test("StopReason round-trips")
     func stopReason() throws {
         for reason in [StopReason.userCancel, .naturalExit, .spawnFailed, .crashed, .authExpired] {
@@ -62,6 +73,7 @@ struct PrefsAndDecisionsCodableTests {
     func appearancePrefKey() throws {
         let cases: [AppearancePrefKey] = [
             .theme, .codeTheme, .fontFamily, .floatingCornerStyle, .fontSizeScale, .showUsageChip, .reduceMotion, .densityMode,
+            .sidebarVisible, .showSilentRecoveryLog,
         ]
         for c in cases { try roundTrip(c) }
     }
@@ -71,6 +83,32 @@ struct PrefsAndDecisionsCodableTests {
         try roundTrip(AppearancePrefValue.string("dark"))
         try roundTrip(AppearancePrefValue.bool(true))
         try roundTrip(AppearancePrefValue.double(1.25))
+    }
+
+    @Test("AppearancePrefPatch round-trips and projects legacy event key values")
+    func appearancePrefPatch() throws {
+        let cases: [(AppearancePrefPatch, AppearancePrefKey, AppearancePrefValue)] = [
+            (.theme("dark"), .theme, .string("dark")),
+            (.codeTheme("solarized"), .codeTheme, .string("solarized")),
+            (.fontFamily("serif"), .fontFamily, .string("serif")),
+            (.floatingCornerStyle("sharp"), .floatingCornerStyle, .string("sharp")),
+            (.fontSizeScale(1.25), .fontSizeScale, .double(1.25)),
+            (.showUsageChip(true), .showUsageChip, .bool(true)),
+            (.reduceMotion(true), .reduceMotion, .bool(true)),
+            (.densityMode("compact"), .densityMode, .string("compact")),
+            (.sidebarVisible(false), .sidebarVisible, .bool(false)),
+            (.showSilentRecoveryLog(true), .showSilentRecoveryLog, .bool(true)),
+        ]
+
+        for (patch, key, value) in cases {
+            #expect(patch.key == key)
+            #expect(patch.value == value)
+            #expect(AppearancePrefPatch(key: key, value: value) == patch)
+            try roundTrip(patch)
+        }
+
+        #expect(AppearancePrefPatch(key: .theme, value: .bool(true)) == nil)
+        #expect(AppearancePrefPatch(key: .showUsageChip, value: .string("yes")) == nil)
     }
 
     @Test("AutoApprovalRule preserves every field")

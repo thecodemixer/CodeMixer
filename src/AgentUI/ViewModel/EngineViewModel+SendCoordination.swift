@@ -4,6 +4,39 @@ import AgentProtocol
 
 extension EngineViewModel {
 
+    func updateAppearance(_ patch: AppearancePrefPatch) {
+        send(.updateAppearancePref(patch))
+    }
+
+    func updateAutoApprovalRules(_ rules: [AutoApprovalRule]) {
+        send(.updateAutoApprovalRules(rules))
+        syncAutoApprovalRules(rules)
+    }
+
+    public func openProject(path: String, resumeSessionID: String? = nil) {
+        send(.openProject(path: path, resumeSessionID: resumeSessionID))
+    }
+
+    public func closeCurrentSession() {
+        send(.closeSession)
+    }
+
+    public func requestSnapshot(_ kind: SnapshotKind) {
+        send(.requestSnapshot(kind))
+    }
+
+    func revertFile(path: String) {
+        send(.revertFile(path: path))
+    }
+
+    func revertHunk(path: String, hunkID: UUID) {
+        send(.revertHunk(path: path, hunkID: hunkID))
+    }
+
+    func requestAssistantBubbleSpeech(eventID: UUID, action: TTSAction) {
+        send(.speakAssistantBubble(eventID: eventID, action: action))
+    }
+
     // MARK: - Optimistic send
 
     /// Send a prompt with instant local feedback: append the user bubble and
@@ -30,8 +63,8 @@ extension EngineViewModel {
                 ),
                 commands: [
                     command.isProjectDefined
-                        ? .runCustomCommand(path: command.name, args: [])
-                        : .runSlashCommand(name: command.name, args: []),
+                        ? .runSlashCommand(target: .custom(path: command.name), args: [])
+                        : .runSlashCommand(target: .builtin(name: command.name), args: []),
                 ]
             )
             return
@@ -158,10 +191,18 @@ extension EngineViewModel {
     }
 
     func agentMode(matchingSlashName name: String) -> AgentModeOption? {
-        availableAgentModes.first { mode in
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let modeID = (trimmed.hasPrefix("/") ? String(trimmed.dropFirst()) : trimmed).lowercased()
+        return availableAgentModes.first { mode in
             mode.selectCommands.contains { command in
-                guard case .runSlashCommand(let slashName, let args) = command else { return false }
-                return slashName == name && args.isEmpty
+                switch command {
+                case .setAgentMode(let id):
+                    return id.lowercased() == modeID
+                case .runSlashCommand(.builtin(let slashName), let args):
+                    return slashName == name && args.isEmpty
+                default:
+                    return false
+                }
             }
         }
     }

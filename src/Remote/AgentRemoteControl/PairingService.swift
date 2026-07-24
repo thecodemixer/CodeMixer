@@ -21,14 +21,16 @@ public actor PairingService {
         public var lastSeen: Date
     }
 
-    private struct ActivePIN {
-        let value: String
-        let expiresAt: Date
-    }
-
-    private struct AttemptRecord {
-        var count: Int = 0
-        var lockedUntil: Date?
+    /// Server-global pairing state. `attemptCount` resets on every fresh PIN;
+    /// a lockout discards the PIN outright, so a locked-out server has no
+    /// PIN to fall back on once `until` passes — the next attempt sees
+    /// `.unpaired` and reports `.expiredPIN`, not a renewed chance at the
+    /// old PIN. `paired` devices are tracked separately: once paired, a
+    /// device's token survives PIN churn.
+    enum AuthState: Sendable, Equatable {
+        case unpaired
+        case awaitingPIN(pin: String, expiresAt: Date, attemptCount: Int)
+        case lockedOut(until: Date)
     }
 
     private static let pinTTL = RemoteAuthTiming.pinTTL
@@ -38,8 +40,7 @@ public actor PairingService {
 
     private let clock: any AgentClock
     private let random: any RandomSource
-    private var activePIN: ActivePIN?
-    private var attempts: AttemptRecord = AttemptRecord()
+    private var state: AuthState = .unpaired
     private var lastAttemptAt: Date?
     private var paired: [String: PairedDevice] = [:]
     private let store: PairedDeviceStore?
@@ -61,20 +62,23 @@ public actor PairingService {
     /// Generate a fresh PIN (replaces any prior PIN). Returns the PIN itself.
     public func startNewPairing() -> String {
         let pin = random.pin(digits: 6)
-        activePIN = ActivePIN(value: pin, expiresAt: clock.now().addingTimeInterval(Self.pinTTL))
-        attempts = AttemptRecord()
+        state = .awaitingPIN(pin: pin,
+                             expiresAt: clock.now().addingTimeInterval(Self.pinTTL),
+                             attemptCount: 0)
         lastAttemptAt = nil
         return pin
     }
 
     public func attemptPair(pin candidate: String, deviceName: String) -> PairOutcome {
         let now = clock.now()
-        if let lockedUntil = attempts.lockedUntil, lockedUntil > now {
+        if case .lockedOut(let until) = state, until > now {
             return .lockedOut
         }
-        guard let active = activePIN else { return .expiredPIN }
-        if active.expiresAt < now {
-            activePIN = nil
+        guard case .awaitingPIN(let pin, let expiresAt, let attemptCount) = state else {
+            return .expiredPIN
+        }
+        if expiresAt < now {
+            state = .unpaired
             return .expiredPIN
         }
         if let lastAttemptAt, now.timeIntervalSince(lastAttemptAt) < Self.minAttemptInterval {
@@ -82,15 +86,14 @@ public actor PairingService {
         }
         lastAttemptAt = now
 
-        if constantTimeEqual(candidate, active.value) {
+        if constantTimeEqual(candidate, pin) {
             let token = random.bytes(32).base64EncodedString()
             let device = PairedDevice(token: token,
                                       deviceName: deviceName,
                                       pairedAt: now,
                                       lastSeen: now)
             paired[token] = device
-            activePIN = nil
-            attempts = AttemptRecord()
+            state = .unpaired
             lastAttemptAt = nil
             if let store {
                 Task { await store.save(device) }
@@ -98,12 +101,12 @@ public actor PairingService {
             return .success(token: token, deviceName: deviceName)
         }
 
-        attempts.count += 1
-        if attempts.count >= Self.maxAttempts {
-            attempts.lockedUntil = now.addingTimeInterval(Self.lockoutSeconds)
-            activePIN = nil
+        let nextAttemptCount = attemptCount + 1
+        if nextAttemptCount >= Self.maxAttempts {
+            state = .lockedOut(until: now.addingTimeInterval(Self.lockoutSeconds))
             return .lockedOut
         }
+        state = .awaitingPIN(pin: pin, expiresAt: expiresAt, attemptCount: nextAttemptCount)
         return .invalidPIN
     }
 

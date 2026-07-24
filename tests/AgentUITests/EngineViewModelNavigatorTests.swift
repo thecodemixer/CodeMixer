@@ -200,7 +200,6 @@ struct EngineViewModelNavigatorTests {
         vm.dashboardURL = dashboardURL
         vm.dashboardTitle = "Migration Dashboard"
         vm.messages = [.assistant(bubbleID: UUID(), text: "file chat")]
-        vm.showsOverviewDashboard = false
         vm.supportsResumableSessions = true
         vm.projectCapabilities[project.path] = .init(
             supportsResumableSessions: true,
@@ -254,7 +253,6 @@ struct EngineViewModelNavigatorTests {
         let dashboardURL = URL(string: "http://127.0.0.1:9422/")!
         vm.workspace = other
         vm.sessionID = "other-chat"
-        vm.showsOverviewDashboard = false
         vm.projectCapabilities[migration.path] = .init(
             supportsResumableSessions: true,
             requiresSessionHandshakeGate: true,
@@ -1273,7 +1271,7 @@ struct EngineViewModelNavigatorTests {
         vm.dashboardURL = URL(string: "http://127.0.0.1:9/")
         vm.dashboardTitle = "Migration Dashboard"
         vm.messages = [.user(bubbleID: UUID(), text: "stale")]
-        vm.showsOverviewDashboard = true
+        vm.detailPane = .dashboard
         let reviewPrompt = PermissionPrompt(toolName: "Review",
                                             summary: "stale review",
                                             argumentsSummary: "{}",
@@ -1299,7 +1297,9 @@ struct EngineViewModelNavigatorTests {
         #expect(port.commands.isEmpty)
         #expect(vm.dashboardURL != nil)
 
+        let generationBeforeRestart = vm.dashboardLoadGeneration
         vm.restartCustomACPCLI(projectPath: custom.path)
+        #expect(vm.dashboardLoadGeneration == generationBeforeRestart + 1)
         #expect(vm.isRestartingCustomACPCLI)
         #expect(vm.dashboardURL == nil)
         #expect(vm.showsOverviewDashboard)

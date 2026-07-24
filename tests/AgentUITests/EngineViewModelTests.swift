@@ -138,7 +138,7 @@ struct EngineViewModelTests {
         let (vm, bus) = makeModel()
         let workspace = TestPaths.underTemporary("proj")
         vm.workspace = workspace
-        vm.showsOverviewDashboard = true
+        vm.detailPane = .dashboard
         vm.projectCapabilities[workspace.path] = .init(
             supportsResumableSessions: true,
             requiresSessionHandshakeGate: false,
@@ -725,7 +725,7 @@ struct EngineViewModelTests {
             AgentModeOption(
                 id: "ask",
                 label: "Ask",
-                selectCommands: [.runSlashCommand(name: "/ask", args: [])]
+                selectCommands: [.runSlashCommand(target: .builtin(name: "/ask"), args: [])]
             ),
         ]
         vm.activateSlashCommand(
@@ -738,7 +738,7 @@ struct EngineViewModelTests {
         }
         #expect(action.kind == .mode)
         #expect(action.detail == "Ask")
-        #expect(port.commands[1] == .runSlashCommand(name: "/ask", args: []))
+        #expect(port.commands[1] == .runSlashCommand(target: .builtin(name: "/ask"), args: []))
         #expect(vm.selectedAgentModeID == "ask")
         await bus.shutdown()
     }
@@ -779,7 +779,7 @@ struct EngineViewModelTests {
         }
         #expect(action.kind == .slashCommand)
         #expect(action.detail == "/debug")
-        #expect(port.commands[1] == .runSlashCommand(name: "/debug", args: []))
+        #expect(port.commands[1] == .runSlashCommand(target: .builtin(name: "/debug"), args: []))
         await bus.publish(.clientAction(action))
         await drain()
         #expect(vm.messages.count == 1)
@@ -800,8 +800,8 @@ struct EngineViewModelTests {
             id: "think",
             label: "Think",
             selectCommands: [
-                .toggleThinkMode(enabled: true),
-                .toggleReviewMode(enabled: false),
+                .setAgentMode(id: AgentModeCommandID.think),
+                .setAgentMode(id: AgentModeCommandID.reviewOff),
             ]
         )
         vm.selectAgentMode(mode)
@@ -812,8 +812,8 @@ struct EngineViewModelTests {
         }
         #expect(action.kind == .mode)
         #expect(action.detail == "Think")
-        #expect(port.commands[1] == .toggleThinkMode(enabled: true))
-        #expect(port.commands[2] == .toggleReviewMode(enabled: false))
+        #expect(port.commands[1] == .setAgentMode(id: AgentModeCommandID.think))
+        #expect(port.commands[2] == .setAgentMode(id: AgentModeCommandID.reviewOff))
         #expect(vm.selectedAgentModeID == "think")
         await bus.shutdown()
     }
@@ -831,11 +831,11 @@ struct EngineViewModelTests {
         defer { vm.unsubscribe() }
         await bus.publish(.permissionRequest(prompt: prompt))
         await drain()
-        #expect(vm.pendingPermission != nil)
+        #expect(vm.activePendingPermission != nil)
 
         vm.respondToPermission(id: prompt.id, decision: .allow)
         await drain()
-        #expect(vm.pendingPermission == nil)
+        #expect(vm.activePendingPermission == nil)
         #expect(port.commands.count == 2)
         guard case .recordClientAction(let action) = port.commands[0] else {
             Issue.record("expected recordClientAction"); return
@@ -969,7 +969,7 @@ struct EngineViewModelTests {
 
     // MARK: - Permissions
 
-    @Test("permissionRequest sets pendingPermission and moves activity to .waitingPermission")
+    @Test("permissionRequest sets activePendingPermission and moves activity to .waitingPermission")
     func permissionRequestSetsState() async {
         let (vm, bus) = makeModel()
         vm.subscribe()
@@ -982,7 +982,7 @@ struct EngineViewModelTests {
         await bus.publish(.permissionRequest(prompt: prompt))
         await drain()
 
-        #expect(vm.pendingPermission?.id == prompt.id)
+        #expect(vm.activePendingPermission?.id == prompt.id)
         #expect(vm.activePendingPermission?.id == prompt.id)
         #expect(vm.pendingPermissionsBySession[EngineViewModel.unscopedPermissionSessionKey]?.id == prompt.id)
         #expect(vm.activity == .waitingPermission)
@@ -1069,7 +1069,7 @@ struct EngineViewModelTests {
         await bus.shutdown()
     }
 
-    @Test("permissionAlreadyResolved clears pendingPermission")
+    @Test("permissionAlreadyResolved clears activePendingPermission")
     func permissionAlreadyResolvedClearsPrompt() async {
         let (vm, bus) = makeModel()
         vm.subscribe()
@@ -1081,12 +1081,12 @@ struct EngineViewModelTests {
                                        requestedAt: Date())
         await bus.publish(.permissionRequest(prompt: prompt))
         await drain()
-        #expect(vm.pendingPermission != nil)
+        #expect(vm.activePendingPermission != nil)
 
         await bus.publish(.permissionAlreadyResolved(id: prompt.id, byDevice: "timeout"))
         await drain()
 
-        #expect(vm.pendingPermission == nil)
+        #expect(vm.activePendingPermission == nil)
         #expect(vm.pendingPermissionsBySession.isEmpty)
 
         await bus.shutdown()
@@ -1320,7 +1320,7 @@ struct EngineViewModelTests {
         vm.workspace = workspace
         vm.sessionID = "file:Orders.cs"
         vm.dashboardURL = URL(string: "http://127.0.0.1:9/")
-        vm.showsOverviewDashboard = true
+        vm.detailPane = .dashboard
         vm.projectCapabilities[workspace.path] = .init(
             supportsResumableSessions: true,
             requiresSessionHandshakeGate: false,
@@ -1353,7 +1353,7 @@ struct EngineViewModelTests {
         vm.sessionID = "file:Orders.cs"
         vm.dashboardURL = overviewURL
         vm.dashboardLoadGeneration = 3
-        vm.showsOverviewDashboard = true
+        vm.detailPane = .dashboard
         vm.projectCapabilities[workspace.path] = .init(
             supportsResumableSessions: true,
             requiresSessionHandshakeGate: false,
@@ -1403,7 +1403,6 @@ struct EngineViewModelTests {
         vm.workspace = workspace
         vm.sessionID = "file:Orders.cs"
         vm.dashboardURL = nil
-        vm.showsOverviewDashboard = false
         vm.projectCapabilities[workspace.path] = .init(
             supportsResumableSessions: true,
             requiresSessionHandshakeGate: false,
@@ -1436,7 +1435,7 @@ struct EngineViewModelTests {
         let workspace = TestPaths.underTemporary("proj")
         vm.workspace = workspace
         vm.sessionID = nil
-        vm.showsOverviewDashboard = true
+        vm.detailPane = .dashboard
         vm.subscribe()
         defer { vm.unsubscribe() }
 
@@ -1459,7 +1458,6 @@ struct EngineViewModelTests {
         vm.workspace = workspace
         vm.sessionID = "file:Orders.cs"
         vm.dashboardURL = overviewURL
-        vm.showsOverviewDashboard = false
         vm.projectCapabilities[workspace.path] = .init(
             supportsResumableSessions: true,
             requiresSessionHandshakeGate: false,

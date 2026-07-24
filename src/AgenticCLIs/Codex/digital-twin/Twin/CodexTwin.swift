@@ -102,7 +102,7 @@ public final class CodexTwin: AgentAdapter {
             state: state,
             clientVersion: "twin"
         )
-        state.setThreadID(configuration.threadID)
+        state.activateThread(id: configuration.threadID)
         return bytes
     }
 
@@ -118,16 +118,11 @@ public final class CodexTwin: AgentAdapter {
                 state.selectModel(code: id, thinkingEffort: nil)
             }
             return Data()
-        case .toggleReviewMode(let enabled):
-            return enabled ? CodexInputEncoding.review(state: state) : nil
-        case .runSlashCommand(let name, let args):
+        case .setAgentMode(let id):
+            return id == AgentModeCommandID.review ? CodexInputEncoding.review(state: state) : nil
+        case .runSlashCommand(let target, let args):
             return CodexInputEncoding.userPrompt(
-                ([name] + args).joined(separator: " "),
-                state: state
-            )
-        case .runCustomCommand(let path, let args):
-            return CodexInputEncoding.userPrompt(
-                ([path] + args).joined(separator: " "),
+                ([target.commandText] + args).joined(separator: " "),
                 state: state
             )
         default:
@@ -189,7 +184,7 @@ public final class CodexTwin: AgentAdapter {
 
     private func ensureThread() {
         if state.threadID() == nil {
-            state.setThreadID(configuration.threadID)
+            state.activateThread(id: configuration.threadID)
         }
     }
 }

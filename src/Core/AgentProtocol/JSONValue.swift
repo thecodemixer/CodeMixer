@@ -1,6 +1,6 @@
 import Foundation
 
-/// Codable representation of arbitrary JSON carried by ACP JSON-RPC.
+/// Codable representation of arbitrary JSON carried by agent-side JSON-RPC.
 ///
 /// Protocol boundaries decode into this value type instead of using
 /// `JSONSerialization` or `[String: Any]`, preserving strict concurrency and

@@ -1,7 +1,9 @@
 import Foundation
+import AgentCore
 
 /// Scans a workspace tree for relative file paths used by the composer @-file picker.
 struct WorkspaceFileIndexer: Sendable {
+    private let fileSystem: any FileSystem
 
     static let defaultLimit = 200
 
@@ -12,23 +14,27 @@ struct WorkspaceFileIndexer: Sendable {
         "photoslibrary", "photolibrary", "aplibrary",
     ]
 
+    init(fileSystem: any FileSystem = SystemFileSystem()) {
+        self.fileSystem = fileSystem
+    }
+
     func files(in workspace: URL, limit: Int = Self.defaultLimit) -> [String] {
         var results: [String] = []
         let workspacePrefix = workspace.standardizedFileURL.path + "/"
-        guard let enumerator = FileManager.default.enumerator(
-            at: workspace,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        ) else { return [] }
-        for case let url as URL in enumerator {
-            if results.count >= limit { break }
-            let name = url.lastPathComponent
-            if Self.skipDirectories.contains(name)
-                || Self.photoLibraryExtensions.contains(url.pathExtension.lowercased()) {
-                enumerator.skipDescendants()
-                continue
-            }
-            if (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true {
+        var pending = [workspace]
+
+        while let directory = pending.popLast(), results.count < limit {
+            let children = (try? fileSystem.contentsOfDirectory(at: directory)) ?? []
+            for url in children where results.count < limit {
+                let name = url.lastPathComponent
+                if Self.skipDirectories.contains(name)
+                    || Self.photoLibraryExtensions.contains(url.pathExtension.lowercased()) {
+                    continue
+                }
+                if fileSystem.isDirectory(at: url) {
+                    pending.append(url)
+                    continue
+                }
                 let path = url.standardizedFileURL.path
                 let relativePath = path.hasPrefix(workspacePrefix)
                     ? String(path.dropFirst(workspacePrefix.count))

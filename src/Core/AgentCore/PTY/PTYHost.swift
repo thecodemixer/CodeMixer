@@ -14,27 +14,6 @@ import OSLog
 /// child's exit and forwards the status via `exitStatus`.
 public actor PTYHost {
 
-    /// Description of the child to spawn under the new pty.
-    public struct ChildSpec: Sendable {
-        public let executable: URL
-        public let arguments: [String]
-        public let environment: [String: String]
-        public let workingDirectory: URL?
-        public let windowSize: WindowSize
-
-        public init(executable: URL,
-                    arguments: [String],
-                    environment: [String: String],
-                    workingDirectory: URL?,
-                    windowSize: WindowSize = .default) {
-            self.executable = executable
-            self.arguments = arguments
-            self.environment = environment
-            self.workingDirectory = workingDirectory
-            self.windowSize = windowSize
-        }
-    }
-
     /// How the child finished.
     public enum ExitStatus: Sendable, Equatable {
         case exited(code: Int32)
@@ -61,7 +40,7 @@ public actor PTYHost {
 
     // MARK: - Init
 
-    public init(spec: ChildSpec) throws {
+    public init(launch: AgentTransportLaunchSpec) throws {
         var continuation: AsyncStream<Data>.Continuation!
         self.outboundBytes = AsyncStream(bufferingPolicy: .bufferingOldest(StreamBufferDefaults.ptyChunks)) { c in
             continuation = c
@@ -79,22 +58,22 @@ public actor PTYHost {
 
         // Set the window size on the slave so curses-style apps see it at startup.
         if cpx_set_winsize(slave,
-                           spec.windowSize.rows,
-                           spec.windowSize.cols) != 0 {
+                           launch.windowSize.rows,
+                           launch.windowSize.cols) != 0 {
             let saved = errno
             Darwin.close(master); Darwin.close(slave)
             throw PTYError.setWinsizeFailed(errno: saved)
         }
 
-        let exePath = spec.executable.path
-        let cwdPath = spec.workingDirectory?.path
+        let exePath = launch.executable.path
+        let cwdPath = launch.workingDirectory?.path
 
         // Build argv / envp as NULL-terminated C-string arrays. We own the
         // strdup'd memory and free it at function exit.
         var argv: [UnsafeMutablePointer<CChar>?] =
-            ([exePath] + spec.arguments).map { strdup($0) } + [nil]
+            ([exePath] + launch.arguments).map { strdup($0) } + [nil]
         var envp: [UnsafeMutablePointer<CChar>?] =
-            spec.environment.map { strdup("\($0.key)=\($0.value)") } + [nil]
+            launch.environment.map { strdup("\($0.key)=\($0.value)") } + [nil]
         defer {
             for p in argv where p != nil { free(p) }
             for p in envp where p != nil { free(p) }

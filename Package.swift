@@ -202,7 +202,13 @@ let package = Package(
         ),
         .testTarget(
             name: "AgentUITests",
-            dependencies: ["AgentUI", "AgentTestSupport"],
+            dependencies: [
+                "AgentUI",
+                "AgentTestSupport",
+                "ClaudeCode",
+                "Codex",
+                "ACPCLIs",
+            ],
             path: "tests/AgentUITests",
             swiftSettings: swiftSettings
         ),

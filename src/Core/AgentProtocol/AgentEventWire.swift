@@ -20,11 +20,11 @@ public enum AgentEventWire: Sendable, Codable, Hashable {
     case thinkingChunk(blockID: UUID, delta: String)
     case thinkingComplete(blockID: UUID, durationMS: Int)
 
-    case toolStart(id: String, name: String, input: WireToolInput, startedAt: Date)
-    case toolProgress(callID: UUID, progress: WireToolProgress)
-    case toolEnd(id: String, success: Bool, output: WireToolOutput, durationMS: Int)
+    case toolStart(id: String, name: String, input: ToolInput, startedAt: Date)
+    case toolProgress(callID: UUID, progress: ToolProgress)
+    case toolEnd(id: String, success: Bool, output: ToolOutput, durationMS: Int)
 
-    case permissionRequest(prompt: WirePermissionPrompt)
+    case permissionRequest(prompt: PermissionPrompt)
     case permissionAlreadyResolved(id: UUID, byDevice: String)
 
     case statusPhraseChanged(source: StatusPhraseSource, phrase: String)
@@ -42,7 +42,7 @@ public enum AgentEventWire: Sendable, Codable, Hashable {
 
     // MARK: - Out-of-band
 
-    case speakBubbleRequested(id: String)
+    case speakBubbleRequested(eventID: UUID, action: TTSAction)
     case fileReverted(path: String)
     case prefsChanged(rulesCount: Int)
     case appearancePrefChanged(key: AppearancePrefKey, value: AppearancePrefValue)
@@ -57,72 +57,10 @@ public enum AgentEventWire: Sendable, Codable, Hashable {
 
 // MARK: - Wire payload types
 
-/// Wire-side description of a tool's input — small JSON-shaped sum type so we
-/// don't need to transport raw schemas.
-public struct WireToolInput: Sendable, Codable, Hashable {
-    public var summary: String
-    public var jsonPayload: String?
-
-    public init(summary: String, jsonPayload: String? = nil) {
-        self.summary = summary
-        self.jsonPayload = jsonPayload
-    }
-}
-
-public struct WireToolOutput: Sendable, Codable, Hashable {
-    public var summary: String
-    public var jsonPayload: String?
-    public var errorMessage: String?
-
-    public init(summary: String, jsonPayload: String? = nil, errorMessage: String? = nil) {
-        self.summary = summary
-        self.jsonPayload = jsonPayload
-        self.errorMessage = errorMessage
-    }
-}
-
-/// Typed live progress for a tool call.
-public enum WireToolProgress: Sendable, Codable, Hashable {
-    case bashLine(String)
-    case fileBytes(written: Int, total: Int?)
-    case generic(message: String)
-}
-
-public struct WirePermissionOption: Sendable, Codable, Hashable, Identifiable {
-    public let optionId: String
-    public let label: String
-
-    public var id: String { optionId }
-
-    public init(optionId: String, label: String) {
-        self.optionId = optionId
-        self.label = label
-    }
-}
-
-public struct WirePermissionPrompt: Sendable, Codable, Hashable, Identifiable {
-    public let id: UUID
-    public let toolName: String
-    public let summary: String
-    public let argumentsSummary: String
-    public let requestedAt: Date
-    public let options: [WirePermissionOption]?
-
-    public init(id: UUID,
-                toolName: String,
-                summary: String,
-                argumentsSummary: String,
-                requestedAt: Date,
-                options: [WirePermissionOption]? = nil) {
-        self.id = id
-        self.toolName = toolName
-        self.summary = summary
-        self.argumentsSummary = argumentsSummary
-        self.requestedAt = requestedAt
-        self.options = options
-    }
-}
-
+/// Wire error DTO — domain `AgentError` carries richer typed context that is
+/// flattened to string maps here. Tool / permission payloads are shared with
+/// the domain (`ToolInput`, `ToolOutput`, `ToolProgress`, `PermissionPrompt`)
+/// because those shapes are already portable; see `ToolPayloads.swift`.
 public struct WireAgentError: Sendable, Codable, Hashable, Error {
     public let code: String
     public let message: String

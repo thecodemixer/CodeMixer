@@ -102,7 +102,7 @@ Coalescing a burst of events into one delivery after a quiet window. Critical fo
 
 ### Dependency-injection seam
 
-A protocol with both a "live" implementation (production) and a deterministic fake implementation (tests). Common seams: `Clock`, `RandomSource`, `Environment`, `FileSystem`. See [dependency-injection-seams](patterns/dependency-injection-seams.md).
+A protocol with both a "live" implementation (production) and a deterministic fake implementation (tests). Common seams: `AgentClock`, `RandomSource`, `AgentEnvironment`, `FileSystem`. See [dependency-injection-seams](patterns/dependency-injection-seams.md).
 
 ### DispatchIO
 
@@ -441,7 +441,7 @@ A POSIX process that has exited but whose parent hasn't called `waitpid` to reap
 | engine / event / command port / fold | [event-sourced-typed-port-core](patterns/event-sourced-typed-port-core.md) |
 | multicast / backpressure | [event-sourced-typed-port-core](patterns/event-sourced-typed-port-core.md) |
 | adapter / capability / plugin | [plugin-adapter-protocol](patterns/plugin-adapter-protocol.md) |
-| Clock / RandomSource / Environment / FileSystem | [dependency-injection-seams](patterns/dependency-injection-seams.md) |
+| AgentClock / RandomSource / AgentEnvironment / FileSystem | [dependency-injection-seams](patterns/dependency-injection-seams.md) |
 | headless / daemon / LaunchAgent / WSS | [headless-remote-duality](patterns/headless-remote-duality.md) |
 | pairing / bearer token / Keychain / Bonjour | [lan-pairing-and-auth](patterns/lan-pairing-and-auth.md) |
 | heartbeat / activity / still-working | [coherent-activity-heartbeat](patterns/coherent-activity-heartbeat.md) |

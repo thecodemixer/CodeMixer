@@ -120,6 +120,9 @@ public final class ACPAdapter: AgentAdapter {
         let data = ACPInputEncoding.userPrompt(text, state: state)
         if let sessionID = state.sessionID(),
            let context = state.currentContext() {
+            // Persist user turns on a detached task is fine for title/index
+            // freshness, but assistant caching in `finalizePromptTurn` must
+            // await — see ACPEventDecoder+Session.
             Task {
                 await sessionIndex.recordTurn(
                     sessionID: sessionID,
@@ -155,14 +158,9 @@ public final class ACPAdapter: AgentAdapter {
         case .newSession:
             state.prepareNewSession()
             return ACPInputEncoding.sessionNew(state: state)
-        case .runSlashCommand(let name, let args):
+        case .runSlashCommand(let target, let args):
             return ACPInputEncoding.userPrompt(
-                ([name] + args).joined(separator: " "),
-                state: state
-            )
-        case .runCustomCommand(let path, let args):
-            return ACPInputEncoding.userPrompt(
-                ([path] + args).joined(separator: " "),
+                ([target.commandText] + args).joined(separator: " "),
                 state: state
             )
         case .selectModel(let id):
@@ -227,14 +225,4 @@ public final class ACPAdapter: AgentAdapter {
     }
 
     public func resumeArgvAddition(sessionID: String) -> [String] { [] }
-}
-
-/// Registers ACP adapters for custom projects that select Agent Client Protocol.
-public struct ACPCustomAgentAdapterFactory: CustomAgentAdapterFactory {
-    public init() {}
-
-    public func makeAdapter(for ref: CustomAgentRef) -> (any AgentAdapter)? {
-        guard ref.transport.kind == .agentClientProtocol else { return nil }
-        return ACPAdapter(ref: ref)
-    }
 }

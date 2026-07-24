@@ -2,12 +2,28 @@ import Foundation
 import AgentCore
 import AgentProtocol
 
-// Mutable flag shared between the hook task and TUI-fallback task inside
-// `makeEventStream`. Declared @unchecked Sendable because both accesses are
-// best-effort (a single concurrent write is benign — the worst outcome is one
-// extra TUI event, which ClaudeTUIFallback.seen deduplicates).
+/// Mutable flag shared between the hook task and TUI-fallback task inside
+/// `makeEventStream`: monotonic false→true once any hook fires, after which
+/// the TUI scraper stops running. Lock-backed rather than
+/// `nonisolated(unsafe)` so both accesses are memory-safe under strict
+/// concurrency; the TUI task can still observe the old value for one more
+/// poll right as a hook fires — that race is tolerated, not eliminated, and
+/// harmless because `ClaudeTUIFallback.seen` dedupes any resulting overlap.
 private final class HooksActiveFlag: @unchecked Sendable {
-    nonisolated(unsafe) var active = false
+    private let lock = NSLock()
+    private var isActive = false
+
+    var active: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return isActive
+    }
+
+    func activate() {
+        lock.lock()
+        defer { lock.unlock() }
+        isActive = true
+    }
 }
 
 /// The Claude Code adapter — v1's only adapter, the reference implementation
@@ -32,7 +48,7 @@ public final class ClaudeAdapter: AgentAdapter, @unchecked Sendable {
     private let clock: any AgentClock
     private let random: any RandomSource
     private let processRunner: ProcessRunner
-    private let modelCache: ClaudeModelCache
+    private let modelCache: AgentModelCatalogCache
 
     public init(environment: any AgentEnvironment = SystemEnvironment(),
                 fileSystem: any FileSystem = SystemFileSystem(),
@@ -47,7 +63,7 @@ public final class ClaudeAdapter: AgentAdapter, @unchecked Sendable {
         self.processRunner = processRunner
         self.binaryLocator = ClaudeBinaryLocator(fileSystem: fileSystem)
         self.hookDecoder = ClaudeHookDecoder(clock: clock, random: random)
-        self.modelCache = ClaudeModelCache(models: initialModels)
+        self.modelCache = AgentModelCatalogCache(models: initialModels)
     }
 
     // MARK: - Discovery & launch
@@ -110,89 +126,133 @@ public final class ClaudeAdapter: AgentAdapter, @unchecked Sendable {
                                                 fileSystem: fileSystem,
                                                 clock: clock,
                                                 random: random)
-            let hookDecoder = self.hookDecoder
             let tuiFallback = ClaudeTUIFallback()
             // Tracks whether at least one hook has fired this session. When true,
             // the TUI scraper is suppressed — hooks are the authoritative source.
             let hooksFlag = HooksActiveFlag()
 
+            // `tailer.start()` is the one dependency both the hook task (needs the
+            // tailer ready before binding session/transcript) and the transcript
+            // bridge task (forwards its stream) wait on — kept here rather than
+            // inside either builder since both share the same `Task` handle.
             let transcriptStream = Task<AsyncStream<AgentEvent>, Never> {
                 await tailer.start()
             }
 
-            let hookTask = Task {
-                guard let hookHandle = inputs.hookSocket else { return }
-                for await request in hookHandle.incoming {
-                    _ = await transcriptStream.value
-                    hooksFlag.active = true
-                    if let sessionID = Self.sessionID(fromHookPayload: request.jsonPayload) {
-                        await tailer.bind(sessionID: sessionID)
-                    }
-                    if let transcriptURL = Self.transcriptURL(fromHookPayload: request.jsonPayload) {
-                        await tailer.bind(transcriptURL: transcriptURL)
-                    }
-                    if request.eventName == "Stop" || request.eventName == "SubagentStop" {
-                        await tailer.drain()
-                    }
-                    var events = hookDecoder.events(from: request)
-                    if request.eventName == "Stop" || request.eventName == "SubagentStop",
-                       await tailer.hasEmittedAssistantText() {
-                        events.removeAll { if case .assistantText = $0 { return true }; return false }
-                    }
-                    for event in events {
-                        if case .sessionStarted(let id, _, _) = event {
-                            await tailer.bind(sessionID: id)
-                        }
-                        continuation.yield(event)
-                        // Hook protocol requires a JSON acknowledgement; an
-                        // empty object is always valid for non-permission events.
-                        if case .permissionRequest = event {
-                            // Caller will respond via the engine's permission-port.
-                        } else {
-                            await hookHandle.respond(request.id, Data("{}".utf8))
-                        }
-                    }
-                }
-            }
-
-            let sessionTask = Task {
-                for await sid in inputs.sessionID {
-                    await tailer.bind(sessionID: sid)
-                }
-            }
-
-            let bridgeTask = Task {
-                let stream = await transcriptStream.value
-                for await event in stream {
-                    continuation.yield(event)
-                }
-            }
-
-            // TUI fallback: poll the headless terminal framebuffer on the same
-            // cadence as the engine heartbeat poll. Runs only when hooks haven't
-            // been confirmed active — once the hook channel fires, `hooksFlag.active`
-            // suppresses this path so we never double-emit the same information
-            // from two sources.
-            let tuiTask = Task {
-                while !Task.isCancelled {
-                    try? await Task.sleep(for: ActivityTiming.noEventPollInterval)
-                    guard shouldScrapeTUI(hooksActive: hooksFlag.active) else { continue }
-                    let rows = await inputs.terminal?.snapshotRows() ?? []
-                    let snapshot = TerminalSnapshot(
-                        lines: rows.enumerated().map { TerminalLine(text: $0.element, row: $0.offset) }
-                    )
-                    let tuiEvents = await tuiFallback.ingest(snapshot: snapshot)
-                    for event in tuiEvents { continuation.yield(event) }
-                }
-            }
+            let hookTask = makeHookTask(inputs: inputs,
+                                        tailer: tailer,
+                                        transcriptStream: transcriptStream,
+                                        hooksFlag: hooksFlag,
+                                        continuation: continuation)
+            let sessionIDTask = makeSessionIDTask(inputs: inputs, tailer: tailer)
+            let transcriptBridgeTask = makeTranscriptBridgeTask(transcriptStream: transcriptStream,
+                                                                continuation: continuation)
+            let tuiTask = makeTUITask(inputs: inputs,
+                                      tuiFallback: tuiFallback,
+                                      hooksFlag: hooksFlag,
+                                      continuation: continuation)
 
             continuation.onTermination = { _ in
                 hookTask.cancel()
-                sessionTask.cancel()
-                bridgeTask.cancel()
+                sessionIDTask.cancel()
+                transcriptBridgeTask.cancel()
                 tuiTask.cancel()
                 Task { await tailer.stop() }
                 Task { await tuiFallback.reset() }
+            }
+        }
+    }
+
+    /// Consumes hook-socket requests: binds the transcript tailer to the
+    /// session/transcript path each hook advertises, drains the tailer on
+    /// `Stop`/`SubagentStop` and strips any `assistantText` the transcript
+    /// already emitted (so the hook's Stop summary doesn't duplicate it),
+    /// yields every decoded event, and acks the hook (except permission
+    /// requests, which the engine's permission-port answers instead).
+    private func makeHookTask(inputs: AgentInputs,
+                              tailer: ClaudeTranscriptTailer,
+                              transcriptStream: Task<AsyncStream<AgentEvent>, Never>,
+                              hooksFlag: HooksActiveFlag,
+                              continuation: AsyncStream<AgentEvent>.Continuation) -> Task<Void, Never> {
+        let hookDecoder = self.hookDecoder
+        return Task {
+            guard let hookHandle = inputs.hookSocket else { return }
+            for await request in hookHandle.incoming {
+                _ = await transcriptStream.value
+                hooksFlag.activate()
+                if let sessionID = Self.sessionID(fromHookPayload: request.jsonPayload) {
+                    await tailer.bind(sessionID: sessionID)
+                }
+                if let transcriptURL = Self.transcriptURL(fromHookPayload: request.jsonPayload) {
+                    await tailer.bind(transcriptURL: transcriptURL)
+                }
+                if request.eventName == "Stop" || request.eventName == "SubagentStop" {
+                    await tailer.drain()
+                }
+                var events = hookDecoder.events(from: request)
+                if request.eventName == "Stop" || request.eventName == "SubagentStop",
+                   await tailer.hasEmittedAssistantText() {
+                    events.removeAll { if case .assistantText = $0 { return true }; return false }
+                }
+                for event in events {
+                    if case .sessionStarted(let id, _, _) = event {
+                        await tailer.bind(sessionID: id)
+                    }
+                    continuation.yield(event)
+                    // Hook protocol requires a JSON acknowledgement; an
+                    // empty object is always valid for non-permission events.
+                    if case .permissionRequest = event {
+                        // Caller will respond via the engine's permission-port.
+                    } else {
+                        await hookHandle.respond(request.id, Data("{}".utf8))
+                    }
+                }
+            }
+        }
+    }
+
+    /// Rebinds the transcript tailer whenever the engine assigns a new
+    /// session id (e.g. on first turn, before any hook has fired).
+    private func makeSessionIDTask(inputs: AgentInputs,
+                                   tailer: ClaudeTranscriptTailer) -> Task<Void, Never> {
+        Task {
+            for await sid in inputs.sessionID {
+                await tailer.bind(sessionID: sid)
+            }
+        }
+    }
+
+    /// Forwards every event the transcript tailer produces to the adapter's
+    /// output stream once the tailer has started.
+    private func makeTranscriptBridgeTask(transcriptStream: Task<AsyncStream<AgentEvent>, Never>,
+                                          continuation: AsyncStream<AgentEvent>.Continuation) -> Task<Void, Never> {
+        Task {
+            let stream = await transcriptStream.value
+            for await event in stream {
+                continuation.yield(event)
+            }
+        }
+    }
+
+    /// Polls the headless terminal framebuffer on the same cadence as the
+    /// engine heartbeat poll. Runs only when hooks haven't been confirmed
+    /// active — once the hook channel fires, `hooksFlag.active` suppresses
+    /// this path so we never double-emit the same information from two
+    /// sources.
+    private func makeTUITask(inputs: AgentInputs,
+                             tuiFallback: ClaudeTUIFallback,
+                             hooksFlag: HooksActiveFlag,
+                             continuation: AsyncStream<AgentEvent>.Continuation) -> Task<Void, Never> {
+        Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: ActivityTiming.noEventPollInterval)
+                guard shouldScrapeTUI(hooksActive: hooksFlag.active) else { continue }
+                let rows = await inputs.terminal?.snapshotRows() ?? []
+                let snapshot = TerminalSnapshot(
+                    lines: rows.enumerated().map { TerminalLine(text: $0.element, row: $0.offset) }
+                )
+                let tuiEvents = await tuiFallback.ingest(snapshot: snapshot)
+                for event in tuiEvents { continuation.yield(event) }
             }
         }
     }
@@ -251,6 +311,10 @@ public final class ClaudeAdapter: AgentAdapter, @unchecked Sendable {
     }
 
     // MARK: - Input encoding
+
+    public func classifyTerminalInput(rows: [String]) -> TerminalInputState {
+        ClaudeTerminalInputClassification.classify(rows)
+    }
 
     public func encodeUserPrompt(_ text: String) -> Data {
         ClaudeInputEncoding.userPrompt(text)
@@ -312,24 +376,24 @@ public final class ClaudeAdapter: AgentAdapter, @unchecked Sendable {
                 label: "Agent",
                 selectCommands: [
                     .setPermissionMode(.default),
-                    .toggleThinkMode(enabled: false),
-                    .toggleReviewMode(enabled: false),
+                    .setAgentMode(id: AgentModeCommandID.thinkOff),
+                    .setAgentMode(id: AgentModeCommandID.reviewOff),
                 ]
             ),
             AgentModeOption(
                 id: "think",
                 label: "Think",
                 selectCommands: [
-                    .toggleThinkMode(enabled: true),
-                    .toggleReviewMode(enabled: false),
+                    .setAgentMode(id: AgentModeCommandID.think),
+                    .setAgentMode(id: AgentModeCommandID.reviewOff),
                 ]
             ),
             AgentModeOption(
                 id: "review",
                 label: "Review",
                 selectCommands: [
-                    .toggleThinkMode(enabled: false),
-                    .toggleReviewMode(enabled: true),
+                    .setAgentMode(id: AgentModeCommandID.thinkOff),
+                    .setAgentMode(id: AgentModeCommandID.review),
                 ]
             ),
         ]
@@ -363,26 +427,4 @@ public final class ClaudeAdapter: AgentAdapter, @unchecked Sendable {
 
 func shouldScrapeTUI(hooksActive: Bool) -> Bool {
     !hooksActive
-}
-
-/// Thread-safe snapshot of Claude models loaded from workspace cache or `-p`.
-private final class ClaudeModelCache: @unchecked Sendable {
-    private let lock = NSLock()
-    private var models: [AgentModelOption]
-
-    init(models: [AgentModelOption]) {
-        self.models = models
-    }
-
-    func snapshot() -> [AgentModelOption] {
-        lock.lock()
-        defer { lock.unlock() }
-        return models
-    }
-
-    func replace(with models: [AgentModelOption]) {
-        lock.lock()
-        defer { lock.unlock() }
-        self.models = models
-    }
 }

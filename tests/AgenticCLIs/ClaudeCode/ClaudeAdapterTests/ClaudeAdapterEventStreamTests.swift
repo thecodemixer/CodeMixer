@@ -133,12 +133,88 @@ struct ClaudeAdapterEventStreamTests {
         #expect(text == "transcript reply")
         hookContinuation.finish()
     }
+
+    @Test("TUI fallback scrapes before hooks fire, then is suppressed once a hook arrives")
+    func tuiScrapesUntilHooksBecomeActiveThenSuppressed() async throws {
+        let fileSystem = InMemoryFileSystem()
+        let environment = FakeEnvironment(home: TestPaths.underTemporary("codemixer-adapter-fusion"))
+        let workspace = TestPaths.underTemporary("codemixer-workspace")
+
+        var hookContinuation: AsyncStream<HookRequest>.Continuation!
+        let hookStream = AsyncStream<HookRequest> { hookContinuation = $0 }
+        let hookHandle = HookSocketHandle(incoming: hookStream, respond: { _, _ in })
+        let screen = MutableScreen(rows: ["Thinking…"])
+        let adapter = ClaudeAdapter(environment: environment, fileSystem: fileSystem)
+        let stream = adapter.makeEventStream(inputs: AgentInputs(
+            outputBytes: AsyncStream { $0.finish() },
+            terminal: screen,
+            hookSocket: hookHandle,
+            workspace: workspace,
+            sessionID: AsyncStream { $0.finish() }
+        ))
+        // Before any hook fires, the TUI scraper is the only source and must
+        // surface the status phrase from the framebuffer.
+        let firstEvent = await nextStatusPhrase(from: stream)
+        guard case .statusPhraseChanged(.tuiScrape, "Thinking…")? = firstEvent else {
+            Issue.record("expected a TUI-scraped status phrase, got \(String(describing: firstEvent))")
+            hookContinuation.finish()
+            return
+        }
+
+        // A hook firing marks hooks active; the TUI scraper must stop feeding
+        // new snapshots even though the framebuffer keeps changing.
+        hookContinuation.yield(HookRequest(id: UUID(),
+                                           eventName: "SessionStart",
+                                           jsonPayload: Data(#"{"session_id":"fusion-session"}"#.utf8)))
+        try await Task.sleep(for: .milliseconds(50))
+        await screen.setRows(["Running…"])
+
+        let suppressed = await nextStatusPhrase(from: stream)
+        #expect(suppressed == nil, "TUI scraper should be suppressed once hooks are active, got \(String(describing: suppressed))")
+        hookContinuation.finish()
+    }
 }
 
 private struct EmptyScreen: TerminalSnapshotting {
     func snapshotRows() async -> [String] { [] }
     func snapshotText() async -> String { "" }
-    func cursorRow() async -> Int { 0 }
+}
+
+private actor MutableScreen: TerminalSnapshotting {
+    private var rows: [String]
+
+    init(rows: [String]) {
+        self.rows = rows
+    }
+
+    func setRows(_ rows: [String]) {
+        self.rows = rows
+    }
+
+    func snapshotRows() async -> [String] { rows }
+    func snapshotText() async -> String { rows.joined(separator: "\n") }
+}
+
+/// Waits for the next `.statusPhraseChanged` event, or `nil` if none arrives
+/// within slightly more than one TUI poll cycle (`ActivityTiming.noEventPollInterval`).
+/// Safe to call more than once on the same stream: each call attaches a fresh
+/// iterator over the stream's shared buffer and only one call runs at a time.
+private func nextStatusPhrase(from stream: AsyncStream<AgentEvent>) async -> AgentEvent? {
+    await withTaskGroup(of: AgentEvent?.self) { group in
+        group.addTask {
+            for await event in stream {
+                if case .statusPhraseChanged = event { return event }
+            }
+            return nil
+        }
+        group.addTask {
+            try? await Task.sleep(for: .milliseconds(900))
+            return nil
+        }
+        let event = await group.next() ?? nil
+        group.cancelAll()
+        return event
+    }
 }
 
 private func nextAssistantText(from stream: AsyncStream<AgentEvent>) async -> AgentEvent? {

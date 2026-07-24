@@ -41,6 +41,7 @@ final class FolderProjectBrowserModel {
     let root: URL
     let kind: FolderProjectKind
     let fileSystem: any FileSystem
+    let clock: any AgentClock
 
     var entries: [FolderFileEntry] = []
     var truncated = false
@@ -81,10 +82,12 @@ final class FolderProjectBrowserModel {
     init(root: URL,
          kind: FolderProjectKind,
          fileSystem: any FileSystem = SystemFileSystem(),
+         clock: any AgentClock = SystemClock(),
          initialRelativePath: String? = nil) {
         self.root = root.standardizedFileURL
         self.kind = kind
         self.fileSystem = fileSystem
+        self.clock = clock
         self.selectedRelativePath = initialRelativePath
         if let initialRelativePath {
             self.selectedPaths = [initialRelativePath]
@@ -210,7 +213,7 @@ final class FolderProjectBrowserModel {
                     self.entries = result.entries
                     self.truncated = result.truncated
                     self.isLoading = false
-                    self.lastRefreshedAt = Date()
+                    self.lastRefreshedAt = self.clock.now()
                     self.searchText = preservedSearch
                     self.sortColumn = preservedSort
                     self.sortAscending = preservedAscending
@@ -272,7 +275,7 @@ final class FolderProjectBrowserModel {
                     self.entries = [entry]
                     self.truncated = false
                     self.isLoading = false
-                    self.lastRefreshedAt = Date()
+                    self.lastRefreshedAt = self.clock.now()
                     self.selectedRelativePath = relativePath
                     self.selectedPaths = [relativePath]
                     if entry.isDirectory {

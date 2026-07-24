@@ -1,8 +1,6 @@
 import Foundation
 import OSLog
 
-import AgentProtocol
-
 /// Versioned workspace catalog stored inside the workspace folder.
 ///
 /// Lists the projects belonging to this workspace so the membership travels
@@ -36,28 +34,18 @@ public enum WorkspaceLocalStateStore {
         guard fileSystem.fileExists(at: url) else { return nil }
         do {
             let data = try fileSystem.readData(at: url)
-            let probe = try JSONDecoder().decode(SchemaProbe.self, from: data)
-            guard probe.schemaVersion <= WorkspaceLocalState.currentSchemaVersion else {
+            let schemaVersion = try PersistenceJSON.schemaVersion(in: data)
+            guard schemaVersion <= WorkspaceLocalState.currentSchemaVersion else {
                 log.warning("""
                     \(url.path, privacy: .public) schemaVersion \
-                    \(probe.schemaVersion, privacy: .public) is newer than \
+                    \(schemaVersion, privacy: .public) is newer than \
                     \(WorkspaceLocalState.currentSchemaVersion, privacy: .public); ignoring
                     """)
                 return nil
             }
-            let disk = try JSONDecoder().decode(DiskPayload.self, from: data)
-            let state = WorkspaceLocalState(
-                schemaVersion: WorkspaceLocalState.currentSchemaVersion,
-                projects: disk.projects
-            )
-            if let caches = disk.adapterModelCaches, !caches.isEmpty {
-                try migrateAdapterCaches(
-                    caches,
-                    from: workspaceRoot,
-                    fileSystem: fileSystem
-                )
-                try save(state, to: workspaceRoot, fileSystem: fileSystem)
-            } else if disk.schemaVersion < WorkspaceLocalState.currentSchemaVersion {
+            var state = try PersistenceJSON.decode(WorkspaceLocalState.self, from: data)
+            state.schemaVersion = WorkspaceLocalState.currentSchemaVersion
+            if schemaVersion < WorkspaceLocalState.currentSchemaVersion {
                 try save(state, to: workspaceRoot, fileSystem: fileSystem)
             }
             return state
@@ -74,9 +62,7 @@ public enum WorkspaceLocalStateStore {
         normalized.schemaVersion = WorkspaceLocalState.currentSchemaVersion
         let dir = ProjectPaths.directoryURL(in: workspaceRoot)
         try fileSystem.createDirectory(at: dir, withIntermediates: true)
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-        let data = try encoder.encode(normalized)
+        let data = try PersistenceJSON.encode(normalized, withoutEscapingSlashes: true)
         try fileSystem.writeAtomically(data, to: ProjectPaths.workspaceStateURL(in: workspaceRoot))
     }
 
@@ -89,43 +75,4 @@ public enum WorkspaceLocalStateStore {
         try save(state, to: workspaceRoot, fileSystem: fileSystem)
     }
 
-    private static func migrateAdapterCaches(
-        _ caches: [String: WorkspaceAdapterLocalState.CachedAdapterModels],
-        from workspaceRoot: URL,
-        fileSystem: any FileSystem
-    ) throws {
-        for (key, cached) in caches where !cached.models.isEmpty {
-            guard let agentID = AgentID(rawValue: key) else {
-                log.warning("skipping unknown adapter cache key \(key, privacy: .public)")
-                continue
-            }
-            // Prefer an existing per-adapter file if a newer build already wrote one.
-            if WorkspaceAdapterLocalStateStore.cachedModels(
-                for: agentID,
-                in: workspaceRoot,
-                fileSystem: fileSystem
-            ) != nil {
-                continue
-            }
-            let stamp = cached.refreshedAt ?? Date(timeIntervalSince1970: 0)
-            try WorkspaceAdapterLocalStateStore.saveModels(
-                cached.models,
-                for: agentID,
-                refreshedAt: stamp,
-                in: workspaceRoot,
-                fileSystem: fileSystem
-            )
-        }
-    }
-
-    /// On-disk shape that still accepts schema-v2 `adapterModelCaches` for migration.
-    private struct DiskPayload: Decodable {
-        var schemaVersion: Int
-        var projects: [WorkspaceProjectsStore.ProjectRef]
-        var adapterModelCaches: [String: WorkspaceAdapterLocalState.CachedAdapterModels]?
-    }
-
-    private struct SchemaProbe: Decodable {
-        var schemaVersion: Int
-    }
 }

@@ -26,7 +26,7 @@ public struct ConversationView: View {
                 searchVisible: Binding<Bool> = .constant(false)) {
         self.model = model
         self.tts = tts
-        self._searchVisible = searchVisible
+        _searchVisible = searchVisible
     }
 
     public var body: some View {
@@ -175,19 +175,7 @@ public struct ConversationView: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, Theme.spacing.s12)
-        .padding(.vertical, Theme.spacing.s8)
-        .frame(maxWidth: Theme.layout.messageMaxWidth)
-        .background(Theme.signal.info.opacity(Theme.opacity.faint),
-                    in: RoundedRectangle(cornerRadius: Theme.corner.medium, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.corner.medium, style: .continuous)
-                .stroke(Theme.signal.info.opacity(Theme.opacity.muted),
-                        lineWidth: Theme.stroke.standard)
-        )
-        .padding(.horizontal, Theme.spacing.s16)
-        .padding(.top, Theme.spacing.s12)
-        .padding(.bottom, Theme.spacing.s4)
+        .infoBannerChrome()
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Loaded transcript. Showing Codemixer cached history because the ACP agent no longer has this live session.")
     }
@@ -209,19 +197,7 @@ public struct ConversationView: View {
             .accessibilityLabel("Resume scrolling")
             .accessibilityHint("Jump to the latest message and follow new replies")
         }
-        .padding(.horizontal, Theme.spacing.s12)
-        .padding(.vertical, Theme.spacing.s8)
-        .frame(maxWidth: Theme.layout.messageMaxWidth)
-        .background(Theme.signal.info.opacity(Theme.opacity.faint),
-                    in: RoundedRectangle(cornerRadius: Theme.corner.medium, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.corner.medium, style: .continuous)
-                .stroke(Theme.signal.info.opacity(Theme.opacity.muted),
-                        lineWidth: Theme.stroke.standard)
-        )
-        .padding(.horizontal, Theme.spacing.s16)
-        .padding(.top, Theme.spacing.s12)
-        .padding(.bottom, Theme.spacing.s4)
+        .infoBannerChrome()
         .accessibilityElement(children: .contain)
     }
 
@@ -242,7 +218,7 @@ public struct ConversationView: View {
                               bubbleID: bubbleID,
                               tts: tts,
                               onTTSAction: { id, action in
-                                  model.send(.speakAssistantBubble(eventID: id, action: action))
+                                  model.requestAssistantBubbleSpeech(eventID: id, action: action)
                               })
         case .assistantStreaming(let bubbleID, let text):
             AssistantTextView(text: text,

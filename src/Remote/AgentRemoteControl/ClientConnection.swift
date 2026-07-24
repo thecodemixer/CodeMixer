@@ -25,6 +25,17 @@ final class ClientConnection: @unchecked Sendable {
 
     let id: UUID
 
+    /// Per-connection auth gate. `.notRequired` when the server was started
+    /// without pairing enabled (always authorized); `.anonymous` until a
+    /// successful `pair`/`auth` frame promotes it to `.authenticated`.
+    enum ConnectionAuthState: Sendable, Equatable {
+        case notRequired
+        case anonymous
+        case authenticated
+
+        var isAuthorized: Bool { self != .anonymous }
+    }
+
     private let log = Logger(subsystem: AppIdentity.logSubsystem, category: "Client")
     private let connection: any NetworkConnection
     private let engine: any AgentEngineCommandPort
@@ -34,7 +45,7 @@ final class ClientConnection: @unchecked Sendable {
     private let onDeath: @Sendable (UUID) -> Void
     private let cancelLock = NSLock()
     private var cancelled = false
-    private var authed: Bool
+    private var authState: ConnectionAuthState
     private let decoder: JSONDecoder
     /// Serializes JSON encoding across the receiver and sender tasks.
     /// Foundation's `.iso8601` date strategy has shared mutable formatter
@@ -59,11 +70,8 @@ final class ClientConnection: @unchecked Sendable {
         self.pairing = pairing
         self.requireAuth = requireAuth
         self.onDeath = onDeath
-        self.authed = !requireAuth
-
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        self.decoder = decoder
+        self.authState = requireAuth ? .anonymous : .notRequired
+        self.decoder = makeWireFrameDecoder()
     }
 
     func start() {
@@ -96,7 +104,7 @@ final class ClientConnection: @unchecked Sendable {
 
     private func authenticateFromMetadata() async {
         guard requireAuth, let token = connection.metadata.bearerToken else { return }
-        authed = await pairing.validateToken(token) != nil
+        authState = await pairing.validateToken(token) != nil ? .authenticated : .anonymous
     }
 
     private func runSender(stream: AsyncStream<MulticastEventBus.HistoryEntry>) async {
@@ -171,7 +179,7 @@ final class ClientConnection: @unchecked Sendable {
             let outcome = await pairing.attemptPair(pin: pin, deviceName: name)
             switch outcome {
             case .success(let token, _):
-                authed = true
+                authState = .authenticated
                 await send(.paired(token: token))
             case .invalidPIN:
                 await send(.pairFailed(reason: .invalidPIN))
@@ -185,7 +193,7 @@ final class ClientConnection: @unchecked Sendable {
 
         case .auth(let token):
             if await pairing.validateToken(token) != nil {
-                authed = true
+                authState = .authenticated
                 await send(.paired(token: token))
             } else {
                 await send(.pairFailed(reason: .invalidPIN))
@@ -214,31 +222,31 @@ final class ClientConnection: @unchecked Sendable {
             log.notice("client \(self.id, privacy: .public) subscribed after=\(String(describing: lastSeenEventID), privacy: .public) outcome=\(String(describing: outcome), privacy: .public)")
 
         case .snapshot(let kind):
-            guard authed else {
+            guard authState.isAuthorized else {
                 await send(.pairFailed(reason: .invalidPIN))
                 return
             }
             await sendSnapshot(kind)
 
         case .command(let id, let command):
-            guard authed else {
+            guard authState.isAuthorized else {
                 let err = WireAgentError(code: "not_paired", message: "Pair before sending commands.")
-                await send(.result(for: id, ok: false, error: err))
+                await send(.commandFailed(for: id, error: err))
                 return
             }
             do {
                 try await engine.send(command)
-                await send(.result(for: id, ok: true, error: nil))
+                await send(.commandSucceeded(for: id))
             } catch let error as AgentError {
-                await send(.result(for: id,
-                                   ok: false,
-                                   error: WireAgentError(code: error.code,
-                                                         message: error.userMessage)))
+                await send(.commandFailed(
+                    for: id,
+                    error: WireAgentError(code: error.code, message: error.userMessage)
+                ))
             } catch {
-                await send(.result(for: id,
-                                   ok: false,
-                                   error: WireAgentError(code: "unknown",
-                                                         message: String(describing: error))))
+                await send(.commandFailed(
+                    for: id,
+                    error: WireAgentError(code: "unknown", message: String(describing: error))
+                ))
             }
         }
     }
@@ -283,8 +291,6 @@ final class ClientConnection: @unchecked Sendable {
 /// concurrent receiver+sender path in `ClientConnection`.
 private actor FrameSendEncoder {
     func encode(_ frame: ServerFrame) -> Data? {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        return try? encoder.encode(frame)
+        try? makeWireFrameEncoder().encode(frame)
     }
 }

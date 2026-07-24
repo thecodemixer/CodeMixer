@@ -276,6 +276,10 @@ public final class ClaudeCodeTwin: AgentAdapter, @unchecked Sendable {
         ClaudeInputEncoding.userPrompt(text)
     }
 
+    public func classifyTerminalInput(rows: [String]) -> TerminalInputState {
+        ClaudeTerminalInputClassification.classify(rows)
+    }
+
     public func cancelSequence() -> Data {
         ClaudeInputEncoding.cancelSequence()
     }

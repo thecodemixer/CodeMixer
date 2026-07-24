@@ -37,7 +37,7 @@ public actor PrefsStore {
                                            withIntermediates: true)
             guard fileSystem.fileExists(at: url) else { return }
             let data = try fileSystem.readData(at: url)
-            cached = try JSONDecoder().decode(State.self, from: data)
+            cached = try PersistenceJSON.decode(State.self, from: data)
         } catch {
             log.warning("prefs load failed: \(String(describing: error), privacy: .public). Using defaults.")
             await SilentDiagnostics.shared.record(kind: .prefsQuietReset,
@@ -49,9 +49,9 @@ public actor PrefsStore {
 
     public func state() -> State { cached }
 
-    public func updateAppearance(_ key: AppearancePrefKey, value: AppearancePrefValue) async throws {
+    public func updateAppearance(_ patch: AppearancePrefPatch) async throws {
         var next = cached
-        next.appearance.update(key, value)
+        next.appearance.update(patch)
         try await persist(next)
     }
 
@@ -71,7 +71,7 @@ public actor PrefsStore {
     // MARK: - Private
 
     private func persist(_ next: State) async throws {
-        let data = try JSONEncoder.pretty.encode(next)
+        let data = try PersistenceJSON.encode(next, dateEncodingStrategy: .iso8601)
         try fileSystem.writeAtomically(data, to: url)
         cached = next
     }
@@ -88,13 +88,4 @@ public actor PrefsStore {
         let range = NSRange(input.startIndex..., in: input)
         return regex.firstMatch(in: input, range: range) != nil
     }
-}
-
-private extension JSONEncoder {
-    static let pretty: JSONEncoder = {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
-        return encoder
-    }()
 }

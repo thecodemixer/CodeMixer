@@ -42,7 +42,7 @@ public enum AgentEvent: Sendable {
 
     // MARK: - Out-of-band (snapshots, prefs, TTS, revert)
 
-    case speakBubbleRequested(id: String)
+    case speakBubbleRequested(eventID: UUID, action: TTSAction)
     case fileReverted(path: String)
     case prefsChanged(rulesCount: Int)
     case appearancePrefChanged(key: AppearancePrefKey, value: AppearancePrefValue)

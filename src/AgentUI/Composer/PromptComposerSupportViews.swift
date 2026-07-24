@@ -1,7 +1,7 @@
-import SwiftUI
-import AppKit
 import AgentCore
 import AgentProtocol
+import AppKit
+import SwiftUI
 
 private enum WorkspaceFilePickerLimits {
     static let maxVisibleMatches = 100
@@ -265,12 +265,12 @@ struct SlashPaletteView: View {
         .focused($isFocused)
         .onKeyPress(.upArrow) {
             guard !filtered.isEmpty else { return .ignored }
-            selectedIndex = (selectedIndex - 1 + filtered.count) % filtered.count
+            selectedIndex = wrappingListIndex(current: selectedIndex, delta: -1, count: filtered.count)
             return .handled
         }
         .onKeyPress(.downArrow) {
             guard !filtered.isEmpty else { return .ignored }
-            selectedIndex = (selectedIndex + 1) % filtered.count
+            selectedIndex = wrappingListIndex(current: selectedIndex, delta: 1, count: filtered.count)
             return .handled
         }
         .onKeyPress(.return) {

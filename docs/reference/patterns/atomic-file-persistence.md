@@ -264,7 +264,7 @@ Codemixer routes all persistence through `SessionStore` (a `public actor`); the 
 
 - `PrefsStore`, `SessionStore`, `WorkspaceProjectsStore` ↔ `Core/AgentCore/Persistence/`.
 - Paths ↔ `Core/AgentCore/Paths/AppSupportPaths.swift`.
-- Atomic write ↔ `Core/AgentCore/Seams/SystemFileSystem.swift`.
+- Atomic write ↔ `Core/AgentCore/Seams/FileSystem.swift`.
 - **Quiet-reset policy:** decode failures reset to defaults and record `SilentDiagnostics` — no migrators, no toasts (see [architecture.md §20](../../architecture.md)).
 
 See [docs/architecture.md §20](../../architecture.md) for the Codemixer narrative on persistence.

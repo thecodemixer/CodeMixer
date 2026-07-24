@@ -9,7 +9,6 @@
 # Spacing
 --commas always
 --semicolons never
---spaces around-operators
 --trimwhitespace always
 
 # Braces
@@ -19,11 +18,10 @@
 
 # Imports
 --importgrouping testable-first
---sortedimports true
 
 # Misc
 --self remove
---redundanttype inferred
+--propertytypes inferred
 --voidtype void
 --stripunusedargs closure-only
 

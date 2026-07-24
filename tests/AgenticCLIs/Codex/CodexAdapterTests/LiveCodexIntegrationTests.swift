@@ -49,4 +49,32 @@ struct LiveCodexIntegrationTests {
             .localizedCaseInsensitiveContains(configuration.expectedFinalSubstring) == true)
         #expect(result.finalAssistantTextCount == 1)
     }
+
+    @Test("App Server thread/resume replays history and answers a follow-up prompt")
+    func appServerResumeHistoryAndFollowUp() async throws {
+        guard LiveCodexHarness.isEnabled() else { return }
+        if let reason = LiveCodexHarness.prerequisiteFailure() {
+            Issue.record("\(reason)")
+            return
+        }
+
+        let harness = LiveCodexHarness()
+        let configuration = LiveCodexHarness.defaultConfiguration()
+
+        let result: LiveCodexHarness.ResumeLoadResult
+        do {
+            result = try await harness.runFreshProcessResume(configuration)
+        } catch {
+            Issue.record("\(error)")
+            return
+        }
+
+        #expect(result.sawPriorUserTurn)
+        #expect(result.sawPriorAssistantFinal)
+        #expect(result.followUpAssistantText?
+            .localizedCaseInsensitiveContains("codemixer-codex-resume-pong") == true)
+        print(
+            "live Codex thread/resume: thread=\(result.priorThreadID) historyUser=\(result.sawPriorUserTurn) historyAssistant=\(result.sawPriorAssistantFinal)"
+        )
+    }
 }

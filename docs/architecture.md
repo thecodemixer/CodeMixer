@@ -260,11 +260,11 @@ tests/
 | --- | --- | --- | --- |
 | `CPosixBridge` | [macOS] (C99) | — | `openpty`, `posix_spawn` file-actions, `set_winsize`, `killpg`. Pure C; zero Swift between fork-equivalent boundary and `execve`. |
 | `AgentProtocol` | [Portable Swift] | Foundation | `AgentCommand`, `AgentEventWire`, `ClientFrame` / `ServerFrame`, `AttachmentRef`, `PermissionDecision`, `StopReason`, prefs DTOs. No platform imports — compiles on macOS, iOS, Linux. |
-| `AgentCore` | [Apple cross-platform] | `CPosixBridge`, `AgentProtocol`, `SwiftTerm` | The engine. PTY, spawner, reaper, env resolver, terminal engine, hook UDS server, FSEvents watcher, git diff, `AgentAdapter` protocol, `AgentEvent`, `AgentEngine`, `MulticastEventBus`, `HeartbeatActivityMonitor`, `StatusPhraseResolver`, `Seams/{Clock,RandomSource,Environment,FileSystem}`. No SwiftUI. |
+| `AgentCore` | [Apple cross-platform] | `CPosixBridge`, `AgentProtocol`, `SwiftTerm` | The engine. PTY, spawner, reaper, env resolver, terminal engine, hook UDS server, FSEvents watcher, git diff, `AgentAdapter` protocol, `AgentEvent`, `AgentEngine`, `MulticastEventBus`, `HeartbeatActivityMonitor`, `StatusPhraseResolver`, `Seams/{AgentClock,RandomSource,AgentEnvironment,FileSystem}`. No SwiftUI. |
 | `ClaudeCode` | [Apple cross-platform] | `AgentCore`, `AgentProtocol` | Claude-specific integration: binary discovery, hooks, transcript JSONL, TUI fallback, shared path/input helpers, and the `ClaudeCodeTwin` digital twin. |
 | `AgentRemoteControl` | [macOS] | `AgentCore`, `AgentProtocol`, Network, CryptoKit | `RemoteControlServer` (TLS NWListener), `PairingService`, `BonjourAdvertiser`, attachment HTTP staging, bearer-token store in Keychain. |
 | `AgentUI` | [Apple cross-platform] | `AgentCore` | SwiftUI views and view-models. Imports `AgentCore` only. The `@MainActor` boundary lives here. |
-| `AgentTestSupport` | [Portable Swift] | `AgentCore`, `AgentProtocol` | `MockAdapter`, deterministic `Clock` / `RandomSource` / `Environment` / `FileSystem` fakes, fixture loaders. Reusable in any test target. |
+| `AgentTestSupport` | [Portable Swift] | `AgentCore`, `AgentProtocol` | `MockAdapter`, deterministic `AgentClock` / `RandomSource` / `AgentEnvironment` / `FileSystem` fakes, fixture loaders. Reusable in any test target. |
 
 ### Test targets
 
@@ -615,6 +615,9 @@ public protocol AgentAdapter: Sendable {
     // 5. Event ingestion
     func makeEventStream(inputs: AgentInputs) -> AsyncStream<AgentEvent>
 
+    // 5b. Optional TUI input-row classification (`.ptyTUIFallback` adapters)
+    func classifyTerminalInput(rows: [String]) -> TerminalInputState
+
     // 6. Sending input
     func encodeUserPrompt(_ text: String) -> Data
     func cancelSequence() -> Data
@@ -721,7 +724,9 @@ Transport is deliberately not a capability. The engine reads
 
 - `.hooksOverUDS` → start `HookServer`, plumb the socket into `AgentInputs`.
 - `.transcriptJSONL` → adapter is responsible for tailing; engine just provides `sessionID` hot stream.
-- `.ptyTUIFallback` → adapter consumes `inputs.terminal` snapshots.
+- `.ptyTUIFallback` → adapter consumes `inputs.terminal` snapshots and may
+  override `classifyTerminalInput(rows:)` so the engine can gate resume writes /
+  recover swallowed first prompts without vendor glyphs in `AgentCore`.
 - `.permissionPrompts` → `PermissionResponseDelivery` is honored.
 - `.resumableSessions` → enables the *Sessions* picker.
 - `.sessionHandshakeGate` → UI keeps the composer locked until a non-empty `sessionStarted` (ACP initialize/auth/session-new); same-project New Chat prefers `.newSession` over respawning. Opening a saved ACP/Cursor session on an already-live process warm-loads via `session/load` (no binary respawn). Conversation history prefers ACP `session/load` wire replay; when the agent streams nothing (Cursor today), Codemixer restores from a local turn cache in `ACPSessionIndex`. Cursor does not implement `session/list`.
@@ -849,11 +854,15 @@ public actor AgentEngine: AgentEngineCommandPort {
     private var adapter: (any AgentAdapter)?
     private var state: EngineState
     private var transport: (any AgentTransport)?
-    private var terminal: (any TerminalSnapshotting)?
     private var hookServer: HookServer?
     private var fsWatcher: FSEventsWatcher?
+    private var fsWatcherTask: Task<Void, Never>?
     private var currentSessionID: String?
-    private var currentTurnID: UUID?
+    private var turnState: TurnState
+    private var promptAcceptance: PromptAcceptanceState
+    private var sessionTeardownState: SessionTeardownState
+    private var resumeStartupState: ResumeStartupState
+    private var startupSubmitRecoveryState: StartupSubmitRecoveryState
     private var pendingPermissions: [UUID: PermissionPrompt]
     private var lastUserBubbleID: UUID?
     private var heartbeat: HeartbeatActivityMonitor?
@@ -988,31 +997,39 @@ public protocol AgentClock: Sendable {
 }
 
 public protocol RandomSource: Sendable {
-    func next<T: FixedWidthInteger>(in range: Range<T>) -> T
     func uuid() -> UUID
+    func bytes(_ count: Int) -> Data
+    func pin(digits: Int) -> String
 }
 
-public protocol Environment: Sendable {
-    func value(for key: String) -> String?
-    func snapshot() -> [String: String]
+public protocol AgentEnvironment: Sendable {
+    func processEnvironment() -> [String: String]
+    var homeDirectory: URL { get }
+    var appSupportDirectory: URL { get }
+    var cachesDirectory: URL { get }
+    var claudeDirectory: URL { get }
+    var deviceName: String { get }
 }
 
 public protocol FileSystem: Sendable {
-    func fileExists(at: URL) -> Bool
-    func isDirectory(at: URL) -> Bool
-    func createDirectory(at: URL, intermediates: Bool) throws
-    func readData(from: URL) throws -> Data
-    func writeAtomically(_ data: Data, to: URL) throws
-    func remove(at: URL) throws
-    func contentsOfDirectory(at: URL) throws -> [URL]
-    func modificationDate(of: URL) throws -> Date
+    func fileExists(at url: URL) -> Bool
+    func isDirectory(at url: URL) -> Bool
+    func createDirectory(at url: URL, withIntermediates: Bool) throws
+    func readData(at url: URL) throws -> Data
+    func readData(at url: URL, fromOffset offset: Int) throws -> Data
+    func byteCount(at url: URL) throws -> Int
+    func writeAtomically(_ data: Data, to url: URL) throws
+    func move(from source: URL, to destination: URL) throws
+    func remove(at url: URL) throws
+    func contentsOfDirectory(at url: URL) throws -> [URL]
+    func modificationDate(at url: URL) throws -> Date
 }
 ```
 
 ### Live vs fake
 
-- `Core/AgentCore/Seams/SystemClock.swift`, `SystemRandom.swift`, `ProcessEnvironment.swift`, `SystemFileSystem.swift` — live implementations.
-- `AgentTestSupport/FakeClock.swift`, `FakeRandom.swift`, `InMemoryEnvironment.swift`, `InMemoryFileSystem.swift` — deterministic doubles with seek / advance / preload APIs.
+- `Core/AgentCore/Seams/{Clock,RandomSource,Environment,FileSystem}.swift` — seam protocols plus live implementations.
+- `AgentTestSupport/FakeClock.swift`, `FakeRandomSource.swift`, `FakeEnvironment.swift`, `InMemoryFileSystem.swift` — deterministic doubles with seek / advance / preload APIs.
 
 ### Wired through `Seams`
 
@@ -1022,14 +1039,18 @@ A single value struct carries all four into the engine:
 public struct Seams: Sendable {
     public var clock: any AgentClock
     public var random: any RandomSource
-    public var environment: any Environment
+    public var environment: any AgentEnvironment
     public var fileSystem: any FileSystem
-    public static let live = Seams(clock: SystemClock(), random: SystemRandom(),
-                                   environment: ProcessEnvironment(), fileSystem: SystemFileSystem())
+    public static var live: Seams {
+        Seams(clock: SystemClock(),
+              random: SystemRandomSource(),
+              environment: SystemEnvironment(),
+              fileSystem: SystemFileSystem())
+    }
 }
 ```
 
-Every actor that needs any of these takes a `Seams` (or the specific seam protocol) at init. **Direct calls to `Date()`, `Int.random`, `ProcessInfo.processInfo.environment`, or `FileManager.default` outside `Seams/Live*.swift` are forbidden by a custom SwiftLint rule.**
+Every actor or model that needs any of these takes a `Seams` (or the specific seam protocol) at init. **Direct calls to `Date()`, `UUID()` / random APIs, `ProcessInfo.processInfo.environment`, or `FileManager.default` are confined to seam implementations and explicit external wrappers.** Domain, engine, adapter, and SwiftUI model code use `AgentClock`, `RandomSource`, `AgentEnvironment`, and `FileSystem` instead.
 
 ### Why this matters
 
@@ -1092,7 +1113,7 @@ The tested contract is:
 - If command encoding succeeds, the engine attempts exactly the adapter-produced
   bytes at the `AgentTransport.write` boundary.
 - If the write throws, `engine.send(_:)` throws the same error. Remote clients
-  receive a failed `ServerFrame.result`; the UI command port rolls back any
+  receive `ServerFrame.commandFailed(for:error:)`; the UI command port rolls back any
   optimistic local state.
 - `.sendPrompt` is the only write command that publishes a user-visible event
   before the write. That ordering is intentional and pinned: all subscribers
@@ -1328,7 +1349,8 @@ public enum ClientFrame: Codable, Sendable {
 
 public enum ServerFrame: Codable, Sendable {
     case event(id: UUID, event: AgentEventWire)
-    case result(for: UUID, ok: Bool, error: WireAgentError?)
+    case commandSucceeded(for: UUID)
+    case commandFailed(for: UUID, error: WireAgentError?)
     case snapshot(kind: SnapshotKind, payload: Data)
     case pong(for: UUID)
     case paired(token: String)
@@ -1338,12 +1360,14 @@ public enum ServerFrame: Codable, Sendable {
 }
 ```
 
-Every frame carries `"v": WireVersion.current` (today `1`). Decoders reject mismatches — there is no dual-speak across versions.
+Every frame carries `"v": WireVersion.current` (today `2`). Decoders reject mismatches — there is no dual-speak across versions.
 
 ### Pairing
 
 - **First-time pairing**: Mac UI shows a 6-digit PIN plus a QR (`codemixer://pair?host=...&port=...&fingerprint=<sha256>`). Phone scans, sends `{type: "pair", pin: "...", deviceName: "..."}`. Service verifies with constant-time compare, issues a bearer token (32 random bytes, base64), persists `{deviceName, tokenHash, createdAt, lastSeen}` in Keychain.
-- **Lockout**: 5 wrong PIN attempts → 60-second timeout, doubled on each subsequent failure (60 → 120 → 240 → …).
+- **Lockout**: 5 wrong PIN attempts → `RemoteAuthTiming.lockoutDuration`
+  (300 seconds today). Attempts faster than `RemoteAuthTiming.minAttemptInterval`
+  (1 second today) are rate-limited and do not count toward lockout.
 - **TLS cert** is self-signed **RSA-2048** (via `openssl`), stored as PKCS#12 in app support and imported through Keychain. Fingerprint pinning on the client.
 
 ### Binding rules
@@ -1610,15 +1634,16 @@ Three canonical walkthroughs. Reading them in order is the fastest way to intern
 1. User types "fix the test failure" in ComposerView, hits Cmd-Return.
 2. `PromptComposerView` / `EngineViewModel` constructs:
      AgentCommand.sendPrompt(text: "fix the test failure", attachments: [])
-3. View model calls: await engine.send(.sendPrompt(...))
+3. View model dispatches through `AgentEngineCommandPort.send(.sendPrompt(...))`
    (where `engine` is either an in-process AgentEngine actor OR a
-    loopback EngineRemoteProxy that wraps a WSS connection — either way,
+    loopback `RemoteEngineClient` that wraps a WSS connection — either way,
     the same AgentEngineCommandPort.)
 4. AgentEngine actor receives the command:
      - lastUserBubbleID = seams.random.uuid()
      - bytes = adapter.encodeUserPrompt("fix the test failure")  // for Claude: text + "\r"
      - await bus.publish(.userTurn(id: ..., text: ...))
-     - currentTurnID = lastUserBubbleID
+     - turnState = .active(id: lastUserBubbleID)
+     - promptAcceptance = .awaiting(prompt: ...)
      - heartbeat.startTurn(...)
      - await pty.write(bytes)
 5. PTYHost writes bytes to the master FD.
@@ -1711,7 +1736,7 @@ The wire protocol is the most rigid part of the system because clients we don't 
 
 ### Version field
 
-Every frame carries `"v": WireVersion.current` (today `1`), declared in `Core/AgentProtocol/WireVersion.swift`. Decoders read `v` first; mismatches produce `ServerFrame.versionMismatch(supported:)` and a `SilentDiagnostics.wireVersionRejected` record. **There is no dual-speak** — servers and clients must agree on the version.
+Every frame carries `"v": WireVersion.current` (today `2`), declared in `Core/AgentProtocol/WireVersion.swift`. Decoders read `v` first; mismatches produce `ServerFrame.versionMismatch(supported:)` and a `SilentDiagnostics.wireVersionRejected` record. **There is no dual-speak** — servers and clients must agree on the version.
 
 ### Compatibility policy
 
@@ -1824,7 +1849,7 @@ Rare. Bumps the wire version unless purely additive. Requires a checklist sign-o
 | **Reaper** | `ChildReaper` — the SIGCHLD handler. |
 | **Remote client** | A WSS-connected consumer of the engine — Mac GUI in Mode B, iOS app, scripts. See §4.1 for the client-role vs connected-peer-count distinction. |
 | **Ring buffer** | Bounded queue of last-N events for replay on reconnect. 500 events in v1. |
-| **Seam** | A protocol-typed dependency injection point. `Clock`, `RandomSource`, `Environment`, `FileSystem`. |
+| **Seam** | A protocol-typed dependency injection point. `AgentClock`, `RandomSource`, `AgentEnvironment`, `FileSystem`. |
 | **TerminalEngine** | Actor wrapping `SwiftTerm.Terminal` headless. |
 | **TUI fallback** | Last-resort signal source — scraping the SwiftTerm headless snapshot when nothing else has the information. |
 | **WireCodec** | The single converter between `AgentEvent` and `AgentEventWire`. |

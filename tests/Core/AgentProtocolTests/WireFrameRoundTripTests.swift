@@ -43,19 +43,19 @@ struct WireFrameRoundTripTests {
 
     @Test("Every ServerFrame case survives encode → decode")
     func serverFrameRoundTrip() throws {
-        let prompt = WirePermissionPrompt(id: UUID(),
-                                          toolName: "Bash",
-                                          summary: "Run: ls",
-                                          argumentsSummary: "{}",
-                                          requestedAt: Date(timeIntervalSince1970: 1_700_000_000))
+        let prompt = PermissionPrompt(id: UUID(),
+                                      toolName: "Bash",
+                                      summary: "Run: ls",
+                                      argumentsSummary: "{}",
+                                      requestedAt: Date(timeIntervalSince1970: 1_700_000_000))
         let cases: [ServerFrame] = [
             .event(id: UUID(), event: .userTurn(id: "u1", text: "hi")),
             .event(id: UUID(), event: .permissionRequest(prompt: prompt)),
             .event(id: UUID(), event: .bell),
-            .result(for: UUID(), ok: true, error: nil),
-            .result(for: UUID(), ok: false,
-                    error: WireAgentError(code: WireAgentErrorCode.spawnFailed.rawValue,
-                                          message: "no binary")),
+            .commandSucceeded(for: UUID()),
+            .commandFailed(for: UUID(),
+                           error: WireAgentError(code: WireAgentErrorCode.spawnFailed.rawValue,
+                                                 message: "no binary")),
             .snapshot(kind: .diff, payload: Data([1, 2, 3])),
             .pong(for: UUID()),
             .paired(token: "abc"),
@@ -63,7 +63,7 @@ struct WireFrameRoundTripTests {
             .pairFailed(reason: .expiredPIN),
             .pairFailed(reason: .rateLimited),
             .pairFailed(reason: .lockedOut),
-            .versionMismatch(supported: [.v1]),
+            .versionMismatch(supported: [.current]),
             .subscribed(latestEventID: nil, outcome: .fresh),
             .subscribed(latestEventID: UUID(), outcome: .resumed),
             .subscribed(latestEventID: UUID(), outcome: .checkpointExpired),
@@ -87,6 +87,26 @@ struct WireFrameRoundTripTests {
         try assertRoundTrip([ServerFrame.subscribed(latestEventID: nil, outcome: .fresh)])
     }
 
+    @Test("Shared wire-frame codec helpers configure .iso8601 date handling")
+    func sharedCodecHelpersUseISO8601Dates() throws {
+        let prompt = PermissionPrompt(id: UUID(),
+                                      toolName: "Bash",
+                                      summary: "Run: ls",
+                                      argumentsSummary: "{}",
+                                      requestedAt: Date(timeIntervalSince1970: 1_700_000_000))
+        let eventID = UUID()
+        let frame = ServerFrame.event(id: eventID, event: .permissionRequest(prompt: prompt))
+        let data = try makeWireFrameEncoder().encode(frame)
+        #expect(String(data: data, encoding: .utf8)?.contains("2023-11-14T22:13:20Z") == true)
+        let decoded = try makeWireFrameDecoder().decode(ServerFrame.self, from: data)
+        guard case .event(let decodedID, .permissionRequest(let decodedPrompt)) = decoded else {
+            Issue.record("expected an event(.permissionRequest) frame, got \(decoded)")
+            return
+        }
+        #expect(decodedID == eventID)
+        #expect(decodedPrompt.requestedAt == prompt.requestedAt)
+    }
+
     @Test("Malformed JSON throws DecodingError")
     func malformedJSONThrows() {
         let decoder = JSONDecoder()
@@ -108,7 +128,8 @@ struct WireFrameRoundTripTests {
     @Test("Wire version constants are stable")
     func wireVersionStable() {
         #expect(WireVersion.v1.rawValue == 1)
-        #expect(WireVersion.current.rawValue == WireVersion.v1.rawValue)
+        #expect(WireVersion.v2.rawValue == 2)
+        #expect(WireVersion.current.rawValue == WireVersion.v2.rawValue)
     }
 
     /// Round-trip via re-encoding: encode → decode → encode, compare bytes.

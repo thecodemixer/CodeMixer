@@ -1,5 +1,5 @@
-import SwiftUI
 import AgentCore
+import SwiftUI
 
 /// Workspace picker shown when no workspace is open, or via File → Open Workspace.
 ///
@@ -16,37 +16,17 @@ public struct WorkspacePickerView: View {
     }
 
     public var body: some View {
-        VStack(spacing: Theme.spacing.s24) {
-            VStack(spacing: Theme.spacing.s8) {
-                Image(systemName: "folder.fill.badge.gearshape")
-                    .accessibilityHidden(true)
-                    .font(Theme.typography.heroIcon)
-                    .foregroundStyle(Theme.text.tertiary)
-                Text("Open a workspace")
-                    .font(Theme.typography.title)
-                Text("Choose a folder from disk.")
-                    .font(Theme.typography.caption)
-                    .foregroundStyle(Theme.text.secondary)
-            }
-            .padding(.top, Theme.spacing.s32)
-
-            Button("Choose Folder…") { chooseFolder() }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .keyboardShortcut(.return)
-                .accessibilityLabel("Choose workspace folder")
-
-            HStack(spacing: Theme.spacing.s12) {
-                Spacer()
-                Button("Cancel", action: onCancel)
-                    .keyboardShortcut(.cancelAction)
-                    .accessibilityLabel("Cancel open workspace")
-            }
-            .padding(.bottom, Theme.spacing.s24)
-        }
-        .frame(width: Theme.layout.projectPickerWidth)
-        .fixedSize(horizontal: true, vertical: true)
-        .background(Theme.surface.canvas)
+        FolderChooserShell(
+            systemImage: "folder.fill.badge.gearshape",
+            title: "Open a workspace",
+            caption: "Choose a folder from disk.",
+            chooseLabel: "Choose Folder…",
+            accessibilityChooseLabel: "Choose workspace folder",
+            accessibilityCancelLabel: "Cancel open workspace",
+            width: Theme.layout.projectPickerWidth,
+            onChoose: chooseFolder,
+            onCancel: onCancel
+        )
     }
 
     private func chooseFolder() {

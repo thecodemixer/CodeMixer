@@ -1,4 +1,5 @@
 import Foundation
+import AgentProtocol
 
 /// One decoded message received from an ACP agent over stdio.
 ///

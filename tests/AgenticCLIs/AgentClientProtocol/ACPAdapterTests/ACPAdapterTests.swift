@@ -69,7 +69,7 @@ struct ACPAdapterTests {
     @Test("factory builds adapter for ACP custom refs only")
     func factory() async {
         await CustomAgentAdapterFactories.shared.resetForTests()
-        await CustomAgentAdapterFactories.shared.register(ACPCustomAgentAdapterFactory())
+        await CustomAgentAdapterFactories.shared.register(TestACPAdapterFactory())
         let acp = CustomAgentRef(
             id: "gemini",
             displayName: "Gemini",
@@ -651,7 +651,7 @@ struct ACPAdapterTests {
         )
         _ = adapter.sessionBootstrapBytes(context: context)
         let text = String(
-            decoding: adapter.encodeCommand(.runSlashCommand(name: "/help", args: []))!,
+            decoding: adapter.encodeCommand(.runSlashCommand(target: .builtin(name: "/help"), args: []))!,
             as: UTF8.self
         )
         #expect(text.isEmpty)
@@ -729,5 +729,12 @@ struct ACPAdapterTests {
             executablePath: SystemPaths.trueBinary.path,
             arguments: ["--acp"]
         ))
+    }
+}
+
+private struct TestACPAdapterFactory: CustomAgentAdapterFactory {
+    func makeAdapter(for ref: CustomAgentRef) -> (any AgentAdapter)? {
+        guard ref.transport.kind == .agentClientProtocol else { return nil }
+        return ACPAdapter(ref: ref)
     }
 }

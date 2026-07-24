@@ -104,7 +104,7 @@ public struct WorkspaceScene: View {
             guard visible != model.sidebarVisible else { return }
             model.sidebarVisible = visible
             // Persist via the shared prefs path (multi-mode safe), not UserDefaults.
-            model.send(.updateAppearancePref(key: .sidebarVisible, value: .bool(visible)))
+            model.updateAppearance(.sidebarVisible(visible))
         }
         // Hidden buttons so Cmd+F / Cmd+\ / Cmd+K work from anywhere in the scene.
         .background {
@@ -249,14 +249,7 @@ private struct UndoToast: View {
                 .controlSize(.small)
                 .accessibilityLabel("Undo project removal")
         }
-        .padding(.horizontal, Theme.spacing.s16)
-        .padding(.vertical, Theme.spacing.s12)
-        .background(Theme.surface.card, in: RoundedRectangle(cornerRadius: Theme.corner.medium))
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.corner.medium)
-                .stroke(Theme.surface.divider, lineWidth: Theme.stroke.hairline)
-        )
-        .shadow(color: .black.opacity(Theme.opacity.faint), radius: 6, y: 3)
+        .toastCardChrome()
         .accessibilityElement(children: .combine)
     }
 }
@@ -278,13 +271,7 @@ private struct StalledToast: View {
                 .controlSize(.small)
                 .accessibilityLabel("Cancel stalled turn")
         }
-        .padding(.horizontal, Theme.spacing.s16)
-        .padding(.vertical, Theme.spacing.s12)
-        .background(Theme.surface.card, in: RoundedRectangle(cornerRadius: Theme.corner.medium))
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.corner.medium)
-                .stroke(Theme.signal.warning.opacity(Theme.opacity.medium), lineWidth: Theme.stroke.standard)
-        )
-        .shadow(color: .black.opacity(Theme.opacity.faint), radius: 6, y: 3)
+        .toastCardChrome(borderTint: Theme.signal.warning.opacity(Theme.opacity.medium),
+                        borderWidth: Theme.stroke.standard)
     }
 }

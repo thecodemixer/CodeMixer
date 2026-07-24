@@ -65,15 +65,44 @@ struct LiveClaudeIntegrationTests {
         let harness = LiveClaudeHarness()
         let configuration = LiveClaudeHarness.defaultConfiguration()
 
-        let result: LiveClaudeHarness.TurnResult
+        let result: LiveClaudeHarness.ResumeLoadResult
         do {
-            result = try await harness.runResumedTurn(configuration)
+            result = try await harness.runFreshProcessResume(configuration)
         } catch {
             Issue.record("\(error)")
             return
         }
 
-        #expect(result.finalAssistantText?.localizedCaseInsensitiveContains("resume-pong") == true)
-        #expect(result.sessionID?.isEmpty == false)
+        #expect(result.sawPriorUserTurn)
+        #expect(result.sawPriorAssistantFinal)
+        #expect(result.followUpAssistantText?.localizedCaseInsensitiveContains("resume-pong") == true)
+        #expect(result.priorSessionID.isEmpty == false)
+        print(
+            "live Claude --resume: session=\(result.priorSessionID) historyUser=\(result.sawPriorUserTurn) historyAssistant=\(result.sawPriorAssistantFinal)"
+        )
+    }
+
+    /// Opt-in TUI dump for resume hangs. Skipped unless
+    /// `CODEMIXER_LIVE_CLAUDE=1` **and** `CODEMIXER_LIVE_CLAUDE_RESUME_DIAG=1`.
+    ///
+    /// ```bash
+    /// CODEMIXER_LIVE_CLAUDE=1 CODEMIXER_LIVE_CLAUDE_RESUME_DIAG=1 \
+    ///   swift test --no-parallel --filter resumeHangDiagnostic
+    /// ```
+    @Test("resume hang diagnostic dumps terminal rows")
+    func resumeHangDiagnostic() async throws {
+        guard LiveClaudeHarness.isResumeDiagnosticEnabled() else { return }
+        if let reason = LiveClaudeHarness.prerequisiteFailure() {
+            Issue.record("\(reason)")
+            return
+        }
+
+        let harness = LiveClaudeHarness()
+        let configuration = LiveClaudeHarness.defaultConfiguration()
+        do {
+            try await harness.runResumeHangDiagnostic(configuration)
+        } catch {
+            Issue.record("\(error)")
+        }
     }
 }

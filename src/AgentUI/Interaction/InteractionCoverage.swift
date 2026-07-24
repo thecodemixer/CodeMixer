@@ -16,10 +16,8 @@ public enum InteractionCoverage {
         case compact
         case selectModel
         case setPermissionMode
-        case toggleThinkMode
-        case toggleReviewMode
+        case setAgentMode
         case runSlashCommand
-        case runCustomCommand
         case respondToPermission
         case openProject
         case closeSession
@@ -40,10 +38,8 @@ public enum InteractionCoverage {
         .compact,
         .selectModel,
         .setPermissionMode,
-        .toggleThinkMode,
-        .toggleReviewMode,
+        .setAgentMode,
         .runSlashCommand,
-        .runCustomCommand,
         .respondToPermission,
         .openProject,
         .closeSession,

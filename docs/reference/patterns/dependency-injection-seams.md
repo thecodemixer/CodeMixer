@@ -1,6 +1,6 @@
 # Pattern: Dependency injection seams
 
-**Scope.** Every non-deterministic dependency the codebase touches — current time, randomness, environment, file system — has a protocol seam, a live implementation, and a deterministic test fake. Direct calls to the system APIs are forbidden outside the live implementations, enforced by a lint rule.
+**Scope.** Every non-deterministic dependency the codebase touches — current time, randomness, environment, file system — has a protocol seam, a live implementation, and a deterministic test fake. Direct calls to the system APIs are confined to approved seams and `*/External/*.swift` wrappers, enforced by repository policy scripts.
 
 **When to use.** Any codebase that needs to be testable and deterministic. The cost is low (four protocols plus mirrored fakes); the payoff compounds — every async test becomes microsecond-fast, every flaky timing-dependent test becomes a strict property test.
 
@@ -12,9 +12,9 @@
 
 | Seam | Production | Test fake | Replaces |
 | --- | --- | --- | --- |
-| `Clock` | `SystemClock` | `FakeClock` | `Date()`, `Task.sleep`, `ContinuousClock.now` |
-| `RandomSource` | `SystemRandom` | `FakeRandom` | `Int.random`, `UUID()`, `SecRandomCopyBytes` |
-| `Environment` | `ProcessEnvironment` | `InMemoryEnvironment` | `ProcessInfo.processInfo.environment` |
+| `AgentClock` | `SystemClock` | `FakeClock` | `Date()`, `Task.sleep`, `ContinuousClock.now` |
+| `RandomSource` | `SystemRandomSource` | `FakeRandomSource` | `Int.random`, `UUID()`, `SecRandomCopyBytes` |
+| `AgentEnvironment` | `SystemEnvironment` | `FakeEnvironment` | `ProcessInfo.processInfo.environment`, app-support/cache path lookup, device name |
 | `FileSystem` | `SystemFileSystem` | `InMemoryFileSystem` | `FileManager.default`, `Data(contentsOf:)`, `Data.write(to:)` |
 
 Four is the empirically-correct number: not so many that the boilerplate dominates, not so few that meaningful non-determinism leaks through. If you need a fifth, candidates are `Logger`, `Locale`, `Calendar`, `Notifications` — add them only when an actual test forces the issue.
@@ -24,32 +24,39 @@ Four is the empirically-correct number: not so many that the boilerplate dominat
 ## The protocols
 
 ```swift
-public protocol Clock: Sendable {
+public protocol AgentClock: Sendable {
     func now() -> Date
     func monotonic() -> ContinuousClock.Instant
     func sleep(for duration: Duration) async throws
 }
 
 public protocol RandomSource: Sendable {
-    func next<T: FixedWidthInteger>(in range: Range<T>) -> T
     func uuid() -> UUID
     func bytes(_ count: Int) -> Data
+    func pin(digits: Int) -> String
 }
 
-public protocol Environment: Sendable {
-    func value(for key: String) -> String?
-    func snapshot() -> [String: String]
+public protocol AgentEnvironment: Sendable {
+    var homeDirectory: URL { get }
+    var appSupportDirectory: URL { get }
+    var cachesDirectory: URL { get }
+    var claudeDirectory: URL { get }
+    var deviceName: String { get }
+    func processEnvironment() -> [String: String]
 }
 
 public protocol FileSystem: Sendable {
-    func fileExists(at: URL) -> Bool
-    func isDirectory(at: URL) -> Bool
-    func createDirectory(at: URL, intermediates: Bool) throws
-    func readData(from: URL) throws -> Data
-    func writeAtomically(_ data: Data, to: URL) throws
-    func remove(at: URL) throws
-    func contentsOfDirectory(at: URL) throws -> [URL]
-    func modificationDate(of: URL) throws -> Date
+    func fileExists(at url: URL) -> Bool
+    func isDirectory(at url: URL) -> Bool
+    func createDirectory(at url: URL, withIntermediates: Bool) throws
+    func readData(at url: URL) throws -> Data
+    func readData(at url: URL, fromOffset offset: Int) throws -> Data
+    func byteCount(at url: URL) throws -> Int
+    func writeAtomically(_ data: Data, to url: URL) throws
+    func move(from source: URL, to destination: URL) throws
+    func remove(at url: URL) throws
+    func contentsOfDirectory(at url: URL) throws -> [URL]
+    func modificationDate(at url: URL) throws -> Date
 }
 ```
 
@@ -64,24 +71,21 @@ public protocol FileSystem: Sendable {
 
 ## Live implementations
 
-Live implementations live in one folder, one file each:
+Live implementations live beside their protocols in one folder:
 
 ```
 Core/
 └── AgentCore/
     └── Seams/
         ├── Clock.swift
-        ├── SystemClock.swift
         ├── RandomSource.swift
-        ├── SystemRandom.swift
         ├── Environment.swift
-        ├── ProcessEnvironment.swift
         ├── FileSystem.swift
-        └── SystemFileSystem.swift
+        └── Seams.swift
 ```
 
 ```swift
-public struct SystemClock: Clock {
+public struct SystemClock: AgentClock {
     public init() {}
     public func now() -> Date { Date() }
     public func monotonic() -> ContinuousClock.Instant { ContinuousClock.now }
@@ -101,7 +105,7 @@ public struct SystemFileSystem: FileSystem {
 }
 ```
 
-These are the *only* places the system APIs are allowed.
+These seams and explicit `*/External/*.swift` wrappers are the only places the system APIs are allowed.
 
 ---
 
@@ -111,25 +115,25 @@ To avoid every initializer threading four protocols, define a single value struc
 
 ```swift
 public struct Seams: Sendable {
-    public var clock: any Clock
+    public var clock: any AgentClock
     public var random: any RandomSource
-    public var environment: any Environment
+    public var environment: any AgentEnvironment
     public var fileSystem: any FileSystem
 
-    public init(clock: any Clock, random: any RandomSource,
-                environment: any Environment, fileSystem: any FileSystem) {
+    public init(clock: any AgentClock, random: any RandomSource,
+                environment: any AgentEnvironment, fileSystem: any FileSystem) {
         self.clock = clock
         self.random = random
         self.environment = environment
         self.fileSystem = fileSystem
     }
 
-    public static let live = Seams(
-        clock: SystemClock(),
-        random: SystemRandom(),
-        environment: ProcessEnvironment(),
-        fileSystem: SystemFileSystem()
-    )
+    public static var live: Seams {
+        Seams(clock: SystemClock(),
+              random: SystemRandomSource(),
+              environment: SystemEnvironment(),
+              fileSystem: SystemFileSystem())
+    }
 }
 ```
 
@@ -149,7 +153,7 @@ public actor Engine {
 Fakes mirror the protocols but expose seek / advance / preload APIs.
 
 ```swift
-public final class FakeClock: Clock, @unchecked Sendable {
+public final class FakeClock: AgentClock, @unchecked Sendable {
 
     private let lock = NSLock()
     private var nowValue: Date
@@ -185,29 +189,24 @@ public final class FakeClock: Clock, @unchecked Sendable {
     }
 }
 
-public final class FakeRandom: RandomSource, @unchecked Sendable {
+public final class FakeRandomSource: RandomSource, @unchecked Sendable {
     private let lock = NSLock()
     private var queuedUUIDs: [UUID]
-    private var queuedInts: [Int]
 
-    public init(uuids: [UUID] = [], ints: [Int] = []) {
+    public init(uuids: [UUID] = []) {
         self.queuedUUIDs = uuids
-        self.queuedInts = ints
     }
 
     public func uuid() -> UUID {
         lock.withLock { queuedUUIDs.isEmpty ? UUID() : queuedUUIDs.removeFirst() }
     }
 
-    public func next<T: FixedWidthInteger>(in range: Range<T>) -> T {
-        lock.withLock {
-            if queuedInts.isEmpty { return T.random(in: range) }
-            return T(queuedInts.removeFirst())
-        }
+    public func bytes(_ count: Int) -> Data {
+        Data(repeating: 0, count: count)
     }
 
-    public func bytes(_ count: Int) -> Data {
-        Data((0..<count).map { _ in UInt8(self.next(in: UInt8(0)..<UInt8(255))) })
+    public func pin(digits: Int) -> String {
+        String(repeating: "0", count: digits)
     }
 }
 
@@ -240,15 +239,15 @@ public final class InMemoryFileSystem: FileSystem, @unchecked Sendable {
 **Properties:**
 
 - `FakeClock.advance(by:)` resumes any sleepers whose deadlines passed. A test that runs a one-second-debounce algorithm advances the clock by one second and asserts the algorithm fired.
-- `FakeRandom(uuids: [u1, u2, u3])` pre-loads UUIDs in order; the engine receives them deterministically.
+- `FakeRandomSource(uuids: [u1, u2, u3])` pre-loads UUIDs in order; the engine receives them deterministically.
 - `InMemoryFileSystem(preload: [...])` preloads a virtual disk; assertions compare the resulting filesystem state to expected.
 - All fakes implement `@unchecked Sendable` because they protect their internals with locks; the unchecked annotation is fine here.
 
 ---
 
-## Enforcement via lint
+## Enforcement via policy scripts
 
-The benefit of seams collapses if a contributor reaches for `Date()` "just this once." Enforce with a custom SwiftLint rule:
+The benefit of seams collapses if a contributor reaches for `Date()` "just this once." Enforce with custom lint or policy scripts:
 
 ```yaml
 # .swiftlint.yml
@@ -260,25 +259,28 @@ custom_rules:
     message: "Use seams.clock.now() instead of Date()."
     severity: error
     excluded:
-      - ".*/Seams/Live.*\\.swift"
+      - ".*/Seams/(Clock|RandomSource|Environment|FileSystem)\\.swift"
+      - ".*/External/.*\\.swift"
       - ".*/tests/.*"
 
   no_direct_random:
     name: "No direct random"
     regex: '\.random\(in:|UUID\(\)'
-    message: "Use seams.random.next(in:) or seams.random.uuid()."
+    message: "Use seams.random.uuid(), seams.random.bytes(_:), or seams.random.pin(digits:)."
     severity: error
     excluded:
-      - ".*/Seams/Live.*\\.swift"
+      - ".*/Seams/RandomSource\\.swift"
+      - ".*/External/.*\\.swift"
       - ".*/tests/.*"
 
   no_direct_environment:
     name: "No direct process environment"
     regex: 'ProcessInfo\.processInfo\.environment'
-    message: "Use seams.environment.value(for:)."
+    message: "Use seams.environment.processEnvironment()."
     severity: error
     excluded:
-      - ".*/Seams/Live.*\\.swift"
+      - ".*/Seams/Environment\\.swift"
+      - ".*/External/.*\\.swift"
 
   no_direct_file_manager:
     name: "No direct FileManager"
@@ -286,11 +288,12 @@ custom_rules:
     message: "Use seams.fileSystem APIs."
     severity: error
     excluded:
-      - ".*/Seams/Live.*\\.swift"
+      - ".*/Seams/FileSystem\\.swift"
+      - ".*/External/.*\\.swift"
       - ".*/tests/.*"
 ```
 
-Tests are excluded so they can construct fakes against the real types if needed; live implementations are excluded because they *are* the bridge. Everything else is held to the seam.
+Tests are excluded so they can construct fakes against the real types if needed; seam implementations and external wrappers are excluded because they *are* the bridge. Everything else is held to the seam.
 
 ---
 
@@ -329,10 +332,10 @@ The test runs in microseconds; it asserts an exact count; it never flakes. Same 
 
 If a codebase isn't currently using seams, adopt in this order:
 
-1. **`Clock`** — biggest test-speed win, biggest determinism win.
+1. **`AgentClock`** — biggest test-speed win, biggest determinism win.
 2. **`RandomSource`** — required as soon as you have UUID-keyed state machines.
 3. **`FileSystem`** — required as soon as you persist anything.
-4. **`Environment`** — required as soon as you read `$HOME`, `$PATH`, etc.
+4. **`AgentEnvironment`** — required as soon as you read `$HOME`, `$PATH`, etc.
 
 Adopt one seam at a time:
 
@@ -347,9 +350,9 @@ A codebase the size of Codemixer (~ 8 modules, ~ 80 source files) adopts cleanly
 
 ## Codemixer instance
 
-- `Clock` ↔ `AgentClock`. Live: `SystemClock`. Fake: `FakeClock` in `AgentTestSupport`.
-- `RandomSource` ↔ `RandomSource`. Live: `SystemRandom`. Fake: `FakeRandom`.
-- `Environment` ↔ `Environment`. Live: `ProcessEnvironment`. Fake: `InMemoryEnvironment`.
+- `AgentClock` ↔ `AgentClock`. Live: `SystemClock`. Fake: `FakeClock` in `AgentTestSupport`.
+- `RandomSource` ↔ `RandomSource`. Live: `SystemRandomSource`. Fake: `FakeRandomSource`.
+- `AgentEnvironment` ↔ `AgentEnvironment`. Live: `SystemEnvironment`. Fake: `FakeEnvironment`.
 - `FileSystem` ↔ `FileSystem`. Live: `SystemFileSystem`. Fake: `InMemoryFileSystem`.
 - `Seams` ↔ `Seams` (in `Core/AgentCore/Seams/Seams.swift`).
 
@@ -362,7 +365,7 @@ See [docs/architecture.md §16](../../architecture.md) for the Codemixer-specifi
 | Anti-pattern | Why it's bad |
 | --- | --- |
 | Threading individual seams through every initializer (10-param init) | Use the `Seams` aggregate. |
-| A "current clock" global with `Clock.current = FakeClock()` in tests | Race-prone; surprises in parallel tests. Always inject. |
+| A "current clock" global with `AgentClock.current = FakeClock()` in tests | Race-prone; surprises in parallel tests. Always inject. |
 | Singleton `SystemClock.shared` | Discoverable but breaks the substitution model — tests can't override. |
 | Fakes that randomise their own behaviour | Defeats determinism. Fakes are predictable; if you want chaos, build a `ChaosClock` that *seeds* a deterministic PRNG. |
 | Adding `Logger` as a seam from day one | YAGNI for most projects. Add it the first time a test wants to assert log output. |

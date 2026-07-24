@@ -72,13 +72,13 @@ struct FakeCustomACPIntegrationTests {
         #expect(modes.first?.id == "migrate")
         #expect(modes.contains { $0.id == "document" && $0.label == "Document" })
 
-        try await engine.send(.runSlashCommand(name: "/document", args: []))
+        try await engine.send(.runSlashCommand(target: .builtin(name: "/document"), args: []))
         let sawDocument = await pollUntil(timeout: .seconds(5)) {
             await sink.hasStatusPhrase(containing: "document")
         }
         #expect(sawDocument)
 
-        try await engine.send(.runSlashCommand(name: "/migrate", args: []))
+        try await engine.send(.runSlashCommand(target: .builtin(name: "/migrate"), args: []))
         let sawMigrate = await pollUntil(timeout: .seconds(5)) {
             await sink.hasStatusPhrase(containing: "migrate")
         }

@@ -26,7 +26,7 @@ public final class CodexAdapter: AgentAdapter {
     private let binaryLocator: CodexBinaryLocator
     private let state: CodexSessionState
     private let threadIndex: CodexThreadIndex
-    private let modelCache: CodexModelCache
+    private let modelCache: AgentModelCatalogCache
 
     private static let clientVersion = "0.1.0"
 
@@ -51,7 +51,7 @@ public final class CodexAdapter: AgentAdapter {
             fileSystem: fileSystem,
             clock: clock
         )
-        self.modelCache = CodexModelCache(models: initialModels)
+        self.modelCache = AgentModelCatalogCache(models: initialModels)
     }
 
     public func locateBinary(env: ResolvedEnvironment) async throws -> URL {
@@ -187,16 +187,11 @@ public final class CodexAdapter: AgentAdapter {
             )
         case .compact:
             return CodexInputEncoding.compact(state: state)
-        case .toggleReviewMode(let enabled):
-            return enabled ? CodexInputEncoding.review(state: state) : nil
-        case .runSlashCommand(let name, let args):
+        case .setAgentMode(let id):
+            return id == AgentModeCommandID.review ? CodexInputEncoding.review(state: state) : nil
+        case .runSlashCommand(let target, let args):
             return CodexInputEncoding.userPrompt(
-                ([name] + args).joined(separator: " "),
-                state: state
-            )
-        case .runCustomCommand(let path, let args):
-            return CodexInputEncoding.userPrompt(
-                ([path] + args).joined(separator: " "),
+                ([target.commandText] + args).joined(separator: " "),
                 state: state
             )
         case .selectModel(let id):
@@ -206,7 +201,7 @@ public final class CodexAdapter: AgentAdapter {
                 state.selectModel(code: id, thinkingEffort: nil)
             }
             return Data()
-        case .setPermissionMode, .toggleThinkMode:
+        case .setPermissionMode:
             return nil
         default:
             return nil
@@ -286,7 +281,7 @@ public final class CodexAdapter: AgentAdapter {
             AgentModeOption(
                 id: "review",
                 label: "Review",
-                selectCommands: [.toggleReviewMode(enabled: true)]
+                selectCommands: [.setAgentMode(id: AgentModeCommandID.review)]
             ),
         ]
     }
@@ -322,24 +317,3 @@ public final class CodexAdapter: AgentAdapter {
     }
 }
 
-/// Thread-safe snapshot of Codex models loaded from `models_cache.json`.
-private final class CodexModelCache: @unchecked Sendable {
-    private let lock = NSLock()
-    private var models: [AgentModelOption]
-
-    init(models: [AgentModelOption]) {
-        self.models = models
-    }
-
-    func snapshot() -> [AgentModelOption] {
-        lock.lock()
-        defer { lock.unlock() }
-        return models
-    }
-
-    func replace(with models: [AgentModelOption]) {
-        lock.lock()
-        defer { lock.unlock() }
-        self.models = models
-    }
-}

@@ -326,7 +326,7 @@ Entries are grouped by domain. Many anti-patterns appear in multiple patterns; t
 
 ### Mocks of seams that are protocols
 
-- **Symptom.** A mocking framework generates a mock of `Clock`.
+- **Symptom.** A mocking framework generates a mock of `AgentClock`.
 - **Why it bites.** Mock semantics rarely match real semantics; tests become tautological.
 - **Fix.** Hand-rolled `FakeClock` that you can reason about. See [dependency-injection-seams](patterns/dependency-injection-seams.md).
 
@@ -334,7 +334,7 @@ Entries are grouped by domain. Many anti-patterns appear in multiple patterns; t
 
 - **Symptom.** Test asserts `event.timestamp == Date()`.
 - **Why it bites.** Flaky; non-deterministic; debugging requires re-reading the test multiple times.
-- **Fix.** Inject `Clock`, `RandomSource`, `FileSystem` via seams.
+- **Fix.** Inject `AgentClock`, `RandomSource`, `FileSystem` via seams.
 
 ### Single mega-test class
 

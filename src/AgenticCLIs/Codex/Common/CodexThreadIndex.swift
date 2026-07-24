@@ -7,13 +7,29 @@ import AgentCore
 /// Codex owns the conversation transcript; this index stores only lightweight
 /// navigation metadata under Codemixer's Application Support directory.
 public actor CodexThreadIndex {
-    private struct Entry: Sendable, Codable {
+    /// `fileprivate` rather than `private`: the `Codable` shim below needs to
+    /// extend this type from outside `CodexThreadIndex`'s body, in the same file.
+    fileprivate struct Entry: Sendable {
+        /// `.superseded` replaces a bare `Bool` so the moment a thread stopped
+        /// being resumable is a fact the type carries, not something a reader
+        /// has to reconstruct from `lastActivity` (which also changes for other
+        /// reasons while a thread is `.active`).
+        enum Status: Sendable, Hashable {
+            case active
+            case superseded(at: Date)
+        }
+
         let id: String
         let workspacePath: String
         var title: String
         var lastActivity: Date
         var messageCount: Int
-        var superseded: Bool
+        var status: Status
+
+        var isSuperseded: Bool {
+            if case .superseded = status { return true }
+            return false
+        }
     }
 
     private struct Store: Sendable, Codable {
@@ -46,7 +62,7 @@ public actor CodexThreadIndex {
             title: existing?.title ?? id,
             lastActivity: clock.now(),
             messageCount: existing?.messageCount ?? 0,
-            superseded: false
+            status: .active
         )
         await persist()
     }
@@ -66,8 +82,9 @@ public actor CodexThreadIndex {
     public func supersede(threadID: String) async {
         await loadIfNeeded()
         guard var entry = entries[threadID] else { return }
-        entry.superseded = true
-        entry.lastActivity = clock.now()
+        let at = clock.now()
+        entry.status = .superseded(at: at)
+        entry.lastActivity = at
         entries[threadID] = entry
         await persist()
     }
@@ -76,7 +93,7 @@ public actor CodexThreadIndex {
         await loadIfNeeded()
         let path = workspace.standardizedFileURL.path
         return entries.values
-            .filter { $0.workspacePath == path && !$0.superseded }
+            .filter { $0.workspacePath == path && !$0.isSuperseded }
             .map {
                 SessionSummary(
                     id: $0.id,
@@ -150,4 +167,37 @@ public actor CodexThreadIndex {
         decoder.dateDecodingStrategy = .iso8601
         return decoder
     }()
+}
+
+/// Disk shim: the on-disk shape stays `superseded: Bool` so older Codemixer
+/// builds can still read this file; only the in-memory representation gained
+/// a timestamp. A `superseded` record with no separately-recorded moment
+/// decodes `at:` as `lastActivity`, which is exactly what
+/// `CodexThreadIndex.supersede(threadID:)` sets it to in the same write.
+extension CodexThreadIndex.Entry: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case id, workspacePath, title, lastActivity, messageCount, superseded
+    }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        workspacePath = try container.decode(String.self, forKey: .workspacePath)
+        title = try container.decode(String.self, forKey: .title)
+        lastActivity = try container.decode(Date.self, forKey: .lastActivity)
+        messageCount = try container.decode(Int.self, forKey: .messageCount)
+        status = try container.decode(Bool.self, forKey: .superseded)
+            ? .superseded(at: lastActivity)
+            : .active
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(workspacePath, forKey: .workspacePath)
+        try container.encode(title, forKey: .title)
+        try container.encode(lastActivity, forKey: .lastActivity)
+        try container.encode(messageCount, forKey: .messageCount)
+        try container.encode(isSuperseded, forKey: .superseded)
+    }
 }

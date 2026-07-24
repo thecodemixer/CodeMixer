@@ -54,19 +54,38 @@ public actor RemoteEngineClient: AgentEngineCommandPort {
 
     public nonisolated let bus: MulticastEventBus
 
+    /// Collapses what used to be four independently-mutated fields
+    /// (`connection?`, `subscribed`, `receiverTask?`, `reconnectTask?`) into
+    /// one value, so "subscribed with no connection" or "reconnecting while
+    /// still holding a connection" are unrepresentable rather than merely
+    /// avoided by convention.
+    private enum ConnectionState {
+        case idle
+        case connecting
+        case connected(connection: any NetworkConnection, receiverTask: Task<Void, Never>, subscribed: Bool)
+        case reconnecting(attempt: Int, task: Task<Void, Never>)
+    }
+
     private let transport: any NetworkTransport
     private let configuration: Configuration
     private let random: any RandomSource
     private let clock: any AgentClock
-    private let encoder: JSONEncoder
-    private let decoder: JSONDecoder
-    private var connection: (any NetworkConnection)?
-    private var receiverTask: Task<Void, Never>?
-    private var reconnectTask: Task<Void, Never>?
+    private let encoder = makeWireFrameEncoder()
+    private let decoder = makeWireFrameDecoder()
+    private var state: ConnectionState = .idle
     private var pendingCommands: [UUID: CheckedContinuation<Void, any Error>] = [:]
     private var pendingSnapshots: [SnapshotKind: CheckedContinuation<Data, any Error>] = [:]
     private var lastSeenEventID: UUID?
-    private var subscribed = false
+
+    private var currentConnection: (any NetworkConnection)? {
+        if case .connected(let connection, _, _) = state { return connection }
+        return nil
+    }
+
+    private var isSubscribed: Bool {
+        if case .connected(_, _, let subscribed) = state { return subscribed }
+        return false
+    }
 
     public init(configuration: Configuration = Configuration(),
                 transport: any NetworkTransport = LiveNetworkTransport(),
@@ -78,13 +97,6 @@ public actor RemoteEngineClient: AgentEngineCommandPort {
         self.bus = bus
         self.random = random
         self.clock = clock
-
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        self.encoder = encoder
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        self.decoder = decoder
     }
 
     public func connect() async throws {
@@ -92,13 +104,16 @@ public actor RemoteEngineClient: AgentEngineCommandPort {
     }
 
     public func disconnect() async {
-        reconnectTask?.cancel()
-        reconnectTask = nil
-        receiverTask?.cancel()
-        receiverTask = nil
-        await connection?.close()
-        connection = nil
-        subscribed = false
+        switch state {
+        case .idle, .connecting:
+            break
+        case .connected(let connection, let receiverTask, _):
+            receiverTask.cancel()
+            await connection.close()
+        case .reconnecting(_, let task):
+            task.cancel()
+        }
+        state = .idle
         failPending(ClientError.disconnected)
     }
 
@@ -122,18 +137,19 @@ public actor RemoteEngineClient: AgentEngineCommandPort {
     // MARK: - Connection lifecycle
 
     private func openConnection(subscribe: Bool) async throws {
-        guard connection == nil else {
-            if subscribe, !subscribed {
+        guard currentConnection == nil else {
+            if subscribe, !isSubscribed {
                 try await sendSubscribe()
             }
             return
         }
+        state = .connecting
         let connection = try await transport.connect(to: configuration.address,
                                                      options: configuration.options)
-        self.connection = connection
-        receiverTask = Task { [weak self, connection] in
+        let receiverTask: Task<Void, Never> = Task { [weak self, connection] in
             await self?.receiveLoop(connection: connection)
         }
+        state = .connected(connection: connection, receiverTask: receiverTask, subscribed: false)
         if subscribe {
             try await sendSubscribe()
         }
@@ -141,12 +157,14 @@ public actor RemoteEngineClient: AgentEngineCommandPort {
 
     private func sendSubscribe() async throws {
         try await sendFrame(.subscribe(lastSeenEventID: lastSeenEventID))
-        subscribed = true
+        if case .connected(let connection, let receiverTask, _) = state {
+            state = .connected(connection: connection, receiverTask: receiverTask, subscribed: true)
+        }
     }
 
     private func sendFrame(_ frame: ClientFrame) async throws {
-        guard let connection else { throw ClientError.disconnected }
-        try await connection.send(encoder.encode(frame))
+        guard let currentConnection else { throw ClientError.disconnected }
+        try await currentConnection.send(encoder.encode(frame))
     }
 
     private func receiveLoop(connection: any NetworkConnection) async {
@@ -170,9 +188,12 @@ public actor RemoteEngineClient: AgentEngineCommandPort {
         case .event(let id, let wire):
             lastSeenEventID = id
             _ = await bus.publish(WireCodec.decode(wire))
-        case .result(let id, let ok, let error):
+        case .commandSucceeded(let id):
             guard let continuation = pendingCommands.removeValue(forKey: id) else { return }
-            ok ? continuation.resume() : continuation.resume(throwing: ClientError.commandRejected(error))
+            continuation.resume()
+        case .commandFailed(let id, let error):
+            guard let continuation = pendingCommands.removeValue(forKey: id) else { return }
+            continuation.resume(throwing: ClientError.commandRejected(error))
         case .versionMismatch(let supported):
             await SilentDiagnostics.shared.record(
                 kind: .wireVersionRejected,
@@ -223,29 +244,31 @@ public actor RemoteEngineClient: AgentEngineCommandPort {
     }
 
     private func handleDisconnect() async {
-        await connection?.close()
-        connection = nil
-        receiverTask?.cancel()
-        receiverTask = nil
-        subscribed = false
+        if case .connected(let connection, let receiverTask, _) = state {
+            await connection.close()
+            receiverTask.cancel()
+        }
+        state = .idle
         failPending(ClientError.disconnected)
         scheduleReconnectIfNeeded()
     }
 
     private func scheduleReconnectIfNeeded() {
         guard let policy = configuration.reconnect else { return }
-        reconnectTask?.cancel()
-        reconnectTask = Task { [weak self] in
+        if case .reconnecting(_, let existing) = state { existing.cancel() }
+        let task: Task<Void, Never> = Task { [weak self] in
             await self?.reconnectLoop(policy: policy)
         }
+        state = .reconnecting(attempt: 0, task: task)
     }
 
     private func reconnectLoop(policy: ReconnectPolicy) async {
         var delay = policy.initialDelay
-        for _ in 0..<policy.maxAttempts {
+        for attempt in 1...policy.maxAttempts {
             guard !Task.isCancelled else { return }
             try? await clock.sleep(for: delay)
             guard !Task.isCancelled else { return }
+            recordReconnectAttempt(attempt)
             do {
                 try await openConnection(subscribe: true)
                 return
@@ -253,6 +276,11 @@ public actor RemoteEngineClient: AgentEngineCommandPort {
                 delay = min(delay * 2, policy.maxDelay)
             }
         }
+    }
+
+    private func recordReconnectAttempt(_ attempt: Int) {
+        guard case .reconnecting(_, let task) = state else { return }
+        state = .reconnecting(attempt: attempt, task: task)
     }
 
     private func cancelPending(_ id: UUID) {

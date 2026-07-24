@@ -1,4 +1,5 @@
 import Foundation
+import AgentProtocol
 
 /// User input variants accepted by `turn/start`.
 ///

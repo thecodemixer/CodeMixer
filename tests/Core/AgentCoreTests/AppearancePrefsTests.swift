@@ -3,21 +3,23 @@ import Testing
 @testable import AgentCore
 import AgentProtocol
 
-@Suite("AppearancePrefs — keyed updates")
+@Suite("AppearancePrefs — patch updates")
 struct AppearancePrefsTests {
 
-    @Test("Every AppearancePrefKey updates the matching stored field")
-    func everyKeyUpdatesMatchingField() {
+    @Test("Every AppearancePrefPatch updates the matching stored field")
+    func everyPatchUpdatesMatchingField() {
         var prefs = AppearancePrefs()
 
-        prefs.update(.theme, .string("dark"))
-        prefs.update(.codeTheme, .string("solarized"))
-        prefs.update(.fontFamily, .string("serif"))
-        prefs.update(.floatingCornerStyle, .string("sharp"))
-        prefs.update(.fontSizeScale, .double(1.25))
-        prefs.update(.showUsageChip, .bool(true))
-        prefs.update(.reduceMotion, .bool(true))
-        prefs.update(.densityMode, .string("compact"))
+        prefs.update(.theme("dark"))
+        prefs.update(.codeTheme("solarized"))
+        prefs.update(.fontFamily("serif"))
+        prefs.update(.floatingCornerStyle("sharp"))
+        prefs.update(.fontSizeScale(1.25))
+        prefs.update(.showUsageChip(true))
+        prefs.update(.reduceMotion(true))
+        prefs.update(.densityMode("compact"))
+        prefs.update(.sidebarVisible(false))
+        prefs.update(.showSilentRecoveryLog(true))
 
         #expect(prefs.theme == .dark)
         #expect(prefs.codeTheme == "solarized")
@@ -27,44 +29,22 @@ struct AppearancePrefsTests {
         #expect(prefs.showUsageChip == true)
         #expect(prefs.reduceMotion == true)
         #expect(prefs.densityMode == .compact)
+        #expect(prefs.sidebarVisible == false)
+        #expect(prefs.showSilentRecoveryLog == true)
     }
 
     @Test("Unknown enum raw values are ignored")
     func unknownEnumRawValuesAreIgnored() {
         var prefs = AppearancePrefs()
-        prefs.update(.theme, .string("midnight"))
-        prefs.update(.fontFamily, .string("comic"))
-        prefs.update(.floatingCornerStyle, .string("blobby"))
-        prefs.update(.densityMode, .string("spacious"))
+        prefs.update(.theme("midnight"))
+        prefs.update(.fontFamily("comic"))
+        prefs.update(.floatingCornerStyle("blobby"))
+        prefs.update(.densityMode("spacious"))
 
         #expect(prefs.theme == .system)
         #expect(prefs.fontFamily == .rounded)
         #expect(prefs.floatingCornerStyle == .standard)
         #expect(prefs.densityMode == .comfortable)
-    }
-
-    @Test("Wrong value arm for a key is ignored")
-    func wrongValueArmIsIgnored() {
-        let original = AppearancePrefs(theme: .system,
-                                       codeTheme: "default",
-                                       fontFamily: .rounded,
-                                       floatingCornerStyle: .standard,
-                                       fontSizeScale: 1.0,
-                                       showUsageChip: false,
-                                       reduceMotion: false,
-                                       densityMode: .comfortable)
-        var prefs = original
-
-        prefs.update(.theme, .bool(true))
-        prefs.update(.codeTheme, .double(2.0))
-        prefs.update(.fontFamily, .double(3.0))
-        prefs.update(.floatingCornerStyle, .bool(true))
-        prefs.update(.fontSizeScale, .string("large"))
-        prefs.update(.showUsageChip, .string("yes"))
-        prefs.update(.reduceMotion, .double(1.0))
-        prefs.update(.densityMode, .bool(true))
-
-        #expect(prefs == original)
     }
 
     @Test("Legacy string values decode into typed fields")

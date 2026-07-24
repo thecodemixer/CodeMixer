@@ -82,79 +82,6 @@ public struct SessionSidebarView: View {
         }
     }
 
-    // MARK: - Icon rail (focus mode)
-
-    private var iconRail: some View {
-        VStack(spacing: Theme.spacing.s12) {
-            Button {
-                model.newChatInCurrentProject()
-            } label: {
-                Image(systemName: "square.and.pencil").imageScale(.medium)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(Theme.text.secondary)
-            .help("New chat in current project")
-            .accessibilityLabel("New chat in current project")
-            .disabled(model.workspace == nil || model.showsFolderBrowser)
-
-            Divider().overlay(Theme.surface.divider).padding(.horizontal, Theme.spacing.s8)
-
-            ScrollView {
-                VStack(spacing: Theme.spacing.s8) {
-                    ForEach(model.projects) { project in
-                        railProjectButton(project)
-                    }
-                }
-                .padding(.top, Theme.spacing.s4)
-            }
-            .scrollContentBackground(.hidden)
-
-            Spacer(minLength: 0)
-
-            Button { focusMode = false } label: {
-                Image(systemName: "arrow.left.to.line.compact").imageScale(.medium)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(Theme.text.secondary)
-            .help("Expand navigator")
-            .accessibilityLabel("Expand navigator")
-        }
-        .padding(.vertical, Theme.spacing.s12)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-    }
-
-    private func railProjectButton(_ project: WorkspaceProjectsStore.ProjectRef) -> some View {
-        let isCurrent = model.workspace?.path == project.path
-        let attention = attentionSessionCount(for: project.path)
-        return Button { model.selectProject(path: project.path) } label: {
-            ZStack(alignment: .topTrailing) {
-                Image(systemName: "folder")
-                    .accessibilityHidden(true)
-                    .imageScale(.medium)
-                    .foregroundStyle(isCurrent ? Theme.text.primary : Theme.text.tertiary)
-                    .frame(width: Theme.spacing.s32, height: Theme.spacing.s32)
-                    .background(
-                        RoundedRectangle(cornerRadius: Theme.corner.small, style: .continuous)
-                            .fill(isCurrent ? Theme.surface.bubbleUser : Color.clear)
-                    )
-                if attention > 0 {
-                    Circle()
-                        .fill(Theme.signal.warning)
-                        .frame(width: Theme.spacing.s8, height: Theme.spacing.s8)
-                        .accessibilityHidden(true)
-                }
-            }
-        }
-        .buttonStyle(.plain)
-        .help("Select \(project.displayName)")
-        .accessibilityLabel(
-            attention > 0
-                ? "Select project \(project.displayName), \(attention) sessions need attention"
-                : "Select project \(project.displayName)"
-        )
-        .accessibilityAddTraits(isCurrent ? [.isSelected] : [])
-    }
-
     private var searchField: some View {
         HStack(spacing: Theme.spacing.s8) {
             Image(systemName: "magnifyingglass")
@@ -440,7 +367,8 @@ public struct SessionSidebarView: View {
             .accessibilityLabel("\(count) sessions need attention")
     }
 
-    private func attentionSessionCount(for projectPath: String) -> Int {
+    /// Non-private: shared with the icon-rail badge in `+IconRail.swift`.
+    func attentionSessionCount(for projectPath: String) -> Int {
         (model.sessionsByProject[projectPath] ?? [])
             .filter { $0.needsAttention && !$0.isOverview }
             .count
@@ -618,57 +546,6 @@ public struct SessionSidebarView: View {
 
     private func revealInFinder(_ path: String) {
         DesktopActions.revealInFinder(URL(fileURLWithPath: path))
-    }
-}
-
-private struct RenameProjectSheet: View {
-    @Binding var name: String
-
-    let onCancel: () -> Void
-    let onRename: () -> Void
-
-    private var trimmedName: String {
-        name.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Theme.spacing.s24) {
-            VStack(alignment: .leading, spacing: Theme.spacing.s8) {
-                Text("Rename Project")
-                    .font(Theme.typography.title)
-                Text("Renames the project folder on disk.")
-                    .font(Theme.typography.caption)
-                    .foregroundStyle(Theme.text.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            VStack(alignment: .leading, spacing: Theme.spacing.s4) {
-                Text("Display name")
-                    .font(Theme.typography.caption)
-                    .foregroundStyle(Theme.text.secondary)
-                TextField("Display name", text: $name)
-                    .textFieldStyle(.roundedBorder)
-                    .font(Theme.typography.body)
-                    .accessibilityLabel("Project display name")
-            }
-
-            HStack {
-                Spacer()
-                Button("Cancel", action: onCancel)
-                    .keyboardShortcut(.cancelAction)
-                    .accessibilityLabel("Cancel rename project")
-                Button("Rename", action: onRename)
-                    .buttonStyle(.borderedProminent)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(trimmedName.isEmpty)
-                    .accessibilityLabel("Rename project")
-            }
-        }
-        .padding(Theme.spacing.s24)
-        .frame(minWidth: Theme.layout.agentPickerMinWidth,
-               maxWidth: Theme.layout.agentPickerMaxWidth)
-        .fixedSize(horizontal: false, vertical: true)
-        .background(Theme.surface.canvas)
     }
 }
 

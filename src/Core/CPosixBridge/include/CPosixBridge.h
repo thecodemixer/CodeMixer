@@ -54,12 +54,6 @@ int cpx_spawn_under_pty(const char *executable,
                         int slave_fd,
                         pid_t *out_pid);
 
-/// Set FD_CLOEXEC on a file descriptor. Returns 0 on success, -1 on failure.
-int cpx_set_cloexec(int fd);
-
-/// Make a file descriptor non-blocking. Returns 0 on success, -1 on failure.
-int cpx_set_nonblock(int fd);
-
 #ifdef __cplusplus
 }
 #endif

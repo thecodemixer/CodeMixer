@@ -63,7 +63,7 @@ Architectural building blocks, ordered roughly from foundational to peripheral.
 | # | File | One-line summary |
 | --- | --- | --- |
 | 11 | [`patterns/plugin-adapter-protocol.md`](patterns/plugin-adapter-protocol.md) | A `Sendable` protocol that quarantines per-vendor knowledge into self-contained adapter modules — the core stays agnostic forever. |
-| 12 | [`patterns/dependency-injection-seams.md`](patterns/dependency-injection-seams.md) | `Clock`, `RandomSource`, `Environment`, `FileSystem` as injected protocols, enforced by lint, mirrored by deterministic test fakes. |
+| 12 | [`patterns/dependency-injection-seams.md`](patterns/dependency-injection-seams.md) | `AgentClock`, `RandomSource`, `AgentEnvironment`, `FileSystem` as injected protocols, enforced by lint, mirrored by deterministic test fakes. |
 | 13 | [`patterns/wire-domain-boundary.md`](patterns/wire-domain-boundary.md) | A pure-Foundation wire-protocol target with `Codable` DTOs, separated from richer domain types, with a single converter and a parity test. |
 
 ### Network and security

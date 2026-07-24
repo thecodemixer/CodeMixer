@@ -247,7 +247,7 @@ The engine code is unchanged across these; only the bootstrap script differs.
 ## Codemixer instance
 
 - `Engine` ↔ `AgentEngine` (in `Core/AgentCore/Engine/AgentEngine.swift`).
-- `EngineRemoteProxy` ↔ planned client in `AgentUI` (post-v1.1 when daemon-backed UI is exercised in production).
+- `RemoteEngineClient` ↔ client-role wire driver in `Remote/AgentRemoteControl/RemoteEngineClient.swift`.
 - `RemoteControlServer` ↔ `Remote/AgentRemoteControl/RemoteControlServer.swift`.
 - Daemon binary ↔ `codemixerd` SPM product (`swift build --product codemixerd`).
 - LaunchAgent plist template ↔ `Resources/com.codecave.Codemixer.daemon.plist`.
@@ -260,7 +260,7 @@ See [docs/architecture.md §§4, 22](../../architecture.md) for the Codemixer-sp
 
 1. Make sure your engine is a plain `actor`, not `@MainActor`.
 2. Ship the remote-control server with a loopback bind from day one.
-3. Define `CommandPort` and have both `Engine` and `EngineRemoteProxy` conform.
+3. Define `CommandPort` and have both `Engine` and `RemoteEngineClient` conform.
 4. Have the GUI talk to its engine through `CommandPort`, not directly.
 5. Add a daemon executable target. Wire engine + server. CI-grep for UI frameworks.
 6. Add idle-exit when the daemon is built. Default 10 min.

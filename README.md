@@ -246,7 +246,7 @@ src/
 ├── CodemixerApp/    # GUI app — sources + Project.swift + generated Codemixer.xcodeproj
 tests/
 ├── TestSupport/
-│   ├── AgentTestSupport/    # FakeClock, FakeRandom, FakeEnvironment,
+│   ├── AgentTestSupport/    # FakeClock, FakeRandomSource, FakeEnvironment,
 │   │                        # InMemoryFileSystem, (Recording)MockAdapter
 │   └── AgentTestSupportTests/
 ├── Core/
@@ -501,7 +501,7 @@ Full per-suite index: [`AGENTS.md`](AGENTS.md) (Inside `tests/` → suites).
 ### Test conventions
 
 - One **suite per behaviour**, not per file. Names are sentences (`"Late subscribers receive the replay history first"`).
-- Production code never reads `Date()` or `getenv` directly — it asks one of the four DI seams (`Clock`, `RandomSource`, `Environment`, `FileSystem`). Tests inject the fakes from `AgentTestSupport`.
+- Production code never reads `Date()` or `getenv` directly — it asks one of the four DI seams (`AgentClock`, `RandomSource`, `AgentEnvironment`, `FileSystem`). Tests inject the fakes from `AgentTestSupport`.
 - Transport command failures use the internal `AgentTransport` seam, not timing-sensitive real-process crashes, so exact bytes and thrown errors are deterministic.
 - Anything that needs a real binary (`/bin/echo`, `/bin/cat`) uses the system tool; we don't ship test fixtures for shell utilities.
 
@@ -534,7 +534,7 @@ If you only remember five things:
 2. **One typed input alphabet (`AgentCommand`), one typed output alphabet (`AgentEvent`).** Both the in-process UI and the remote WebSocket speak them. There is no second code path that can drift.
 3. **The core is agent-agnostic; adapters carry per-vendor knowledge.** `AgentCore` and `AgentUI` never import any specific adapter; a new agent is a new module that conforms to `AgentAdapter`.
 4. **Strict concurrency, deliberate isolation.** Engines are `actor`s. The bus is an `actor`. `@MainActor` is reserved for the UI seam. `@unchecked Sendable` is quarantined to two places (the SwiftTerm delegate bridge and the `NWConnection` callback box) and explicitly justified in a comment.
-5. **Every behaviour is testable because every dependency is injected.** Four seams (`Clock`, `RandomSource`, `Environment`, `FileSystem`) plus the adapter protocol and internal `AgentTransport` seam mean the full engine runs in a unit test in milliseconds with no network, no filesystem, no real clock, and no flaky child-process failure timing.
+5. **Every behaviour is testable because every dependency is injected.** Four seams (`AgentClock`, `RandomSource`, `AgentEnvironment`, `FileSystem`) plus the adapter protocol and internal `AgentTransport` seam mean the full engine runs in a unit test in milliseconds with no network, no filesystem, no real clock, and no flaky child-process failure timing.
 
 The first file you should read to *feel* this aesthetic is [`PTYHost.swift`](src/Core/AgentCore/PTY/PTYHost.swift) — the reference exemplar. When something feels wrong, open `PTYHost` side-by-side; the contrast usually surfaces the answer.
 

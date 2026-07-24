@@ -13,7 +13,7 @@ public enum CustomACPModeMapping {
             AgentModeOption(
                 id: mode.id,
                 label: mode.name,
-                selectCommands: [.runSlashCommand(name: "/\(mode.id)", args: [])]
+                selectCommands: [.setAgentMode(id: mode.id)]
             )
         }
         guard let currentModeID,

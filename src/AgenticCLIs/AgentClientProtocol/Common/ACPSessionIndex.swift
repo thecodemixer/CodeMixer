@@ -40,10 +40,7 @@ public actor ACPSessionIndex: ACPSessionIndexing {
             lastActivity: clock.now(),
             messageCount: existing?.messageCount ?? 0,
             turns: existing?.turns ?? [],
-            archived: existing?.archived,
-            needsAttention: existing?.needsAttention,
-            isOverview: existing?.isOverview,
-            overviewURL: existing?.overviewURL
+            flags: existing?.flags ?? ACPSessionStoreCodec.SessionRecordFlags()
         )
         await persist()
     }
@@ -115,7 +112,7 @@ public actor ACPSessionIndex: ACPSessionIndexing {
             .filter {
                 $0.workspacePath == path
                     && $0.customAgentID == customAgentID
-                    && $0.archived != true
+                    && !$0.flags.archived
             }
             .map {
                 SessionSummary(
@@ -125,9 +122,9 @@ public actor ACPSessionIndex: ACPSessionIndexing {
                     title: $0.title,
                     lastActivity: $0.lastActivity,
                     messageCount: $0.messageCount,
-                    needsAttention: $0.needsAttention == true,
-                    isOverview: $0.isOverview == true,
-                    overviewURL: $0.overviewURL.flatMap(URL.init(string:))
+                    needsAttention: $0.flags.needsAttention,
+                    isOverview: $0.flags.isOverview,
+                    overviewURL: $0.flags.overviewURL
                 )
             }
             .sorted { $0.lastActivity > $1.lastActivity }
@@ -136,21 +133,14 @@ public actor ACPSessionIndex: ACPSessionIndexing {
     public func setArchived(sessionID: String, customAgentID: String, archived: Bool) async {
         await loadIfNeeded()
         let key = ACPSessionStoreCodec.key(customAgentID: customAgentID, sessionID: sessionID)
-        guard var entry = entries[key] else { return }
-        entry.archived = archived
-        if archived {
-            entry.needsAttention = false
-        }
-        entries[key] = entry
+        ACPSessionStoreCodec.setArchived(archived, key: key, in: &entries)
         await persist()
     }
 
     public func setNeedsAttention(sessionID: String, customAgentID: String, needsAttention: Bool) async {
         await loadIfNeeded()
         let key = ACPSessionStoreCodec.key(customAgentID: customAgentID, sessionID: sessionID)
-        guard var entry = entries[key] else { return }
-        entry.needsAttention = needsAttention
-        entries[key] = entry
+        ACPSessionStoreCodec.setNeedsAttention(needsAttention, key: key, in: &entries)
         await persist()
     }
 
@@ -160,31 +150,7 @@ public actor ACPSessionIndex: ACPSessionIndexing {
                               overviewURL: URL?) async {
         await loadIfNeeded()
         let key = ACPSessionStoreCodec.key(customAgentID: customAgentID, sessionID: sessionID)
-        guard var entry = entries[key] else { return }
-        if isOverview {
-            for (otherKey, var other) in entries where otherKey != key {
-                guard other.customAgentID == customAgentID,
-                      other.workspacePath == entry.workspacePath else { continue }
-                var changed = false
-                if other.isOverview == true {
-                    other.isOverview = false
-                    other.overviewURL = nil
-                    changed = true
-                }
-                if other.title == entry.title {
-                    other.archived = true
-                    changed = true
-                }
-                if changed {
-                    entries[otherKey] = other
-                }
-            }
-        }
-        entry.isOverview = isOverview
-        if let overviewURL {
-            entry.overviewURL = overviewURL.absoluteString
-        }
-        entries[key] = entry
+        ACPSessionStoreCodec.setIsOverview(isOverview, overviewURL: overviewURL, key: key, in: &entries)
         await persist()
     }
 

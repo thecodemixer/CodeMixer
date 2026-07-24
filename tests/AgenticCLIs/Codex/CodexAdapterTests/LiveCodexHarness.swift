@@ -49,6 +49,16 @@ struct LiveCodexHarness {
         let finalAssistantTextCount: Int
     }
 
+    /// Seed → shutdown → `thread/resume` — mirrors opening an existing Codex
+    /// session in the sidebar (history replay + follow-up prompt).
+    struct ResumeLoadResult: Sendable {
+        let priorThreadID: String
+        let reloadedEvents: [AgentEvent]
+        let sawPriorUserTurn: Bool
+        let sawPriorAssistantFinal: Bool
+        let followUpAssistantText: String?
+    }
+
     private let environment: any AgentEnvironment
     private let fileSystem: any FileSystem
 
@@ -160,6 +170,87 @@ struct LiveCodexHarness {
                           finalAssistantTextCount: await sink.finalAssistantTextCount())
     }
 
+    /// Fresh turn, then resume the same thread and send again.
+    func runFreshProcessResume(_ configuration: Configuration,
+                               followUpPrompt: String = "Reply with exactly: codemixer-codex-resume-pong",
+                               expectedFollowUpSubstring: String = "codemixer-codex-resume-pong") async throws -> ResumeLoadResult {
+        let seed = try await runTurn(configuration)
+        guard let threadID = seed.threadID, !threadID.isEmpty else {
+            throw LiveCodexHarnessError.threadStartTimedOut
+        }
+
+        let engine = AgentEngine(seams: .live)
+        await engine.bootstrap()
+        let adapter = CodexAdapter(environment: environment, fileSystem: fileSystem)
+        let sink = LiveCodexEventSink()
+        let sub = await engine.bus.subscribe()
+        let ingest = Task { await sink.ingest(sub.stream) }
+        var respondedPermissions: Set<UUID> = []
+        let approver = Task {
+            while !Task.isCancelled {
+                if let permissionID = await sink.pendingPermissionID(excluding: respondedPermissions) {
+                    respondedPermissions.insert(permissionID)
+                    try? await engine.send(.respondToPermission(id: permissionID, decision: .allow))
+                }
+                try? await Task.sleep(for: .milliseconds(400))
+            }
+        }
+        defer {
+            approver.cancel()
+            ingest.cancel()
+            Task { await engine.bus.unsubscribe(sub.id) }
+        }
+
+        try await engine.start(adapter: adapter,
+                               workspace: configuration.workspace,
+                               resumeSessionID: threadID)
+
+        let sawThread = await liveCodexPollUntil(timeout: configuration.threadReadyTimeout) {
+            await sink.hasCodexThreadStarted()
+        }
+        guard sawThread else {
+            await engine.shutdown(reason: .naturalExit)
+            throw LiveCodexHarnessError.threadStartTimedOut
+        }
+
+        let historyReady = await liveCodexPollUntil(timeout: configuration.assistantTextTimeout) {
+            let user = await sink.containsUserTurn(matching: configuration.prompt)
+            let assistant = await sink.containsFinalAssistantText(matching: configuration.expectedFinalSubstring)
+            return user && assistant
+        }
+        let sawUser = await sink.containsUserTurn(matching: configuration.prompt)
+        let sawAssistant = await sink.containsFinalAssistantText(matching: configuration.expectedFinalSubstring)
+        guard historyReady else {
+            let events = await sink.snapshot()
+            await engine.shutdown(reason: .naturalExit)
+            throw LiveCodexHarnessError.historyLoadTimedOut(
+                events: events,
+                threadID: threadID,
+                detail: "missing replayed user/assistant (user=\(sawUser), assistant=\(sawAssistant))"
+            )
+        }
+
+        try await engine.send(.sendPrompt(text: followUpPrompt, attachments: []))
+        let sawFollowUp = await liveCodexPollUntil(timeout: configuration.assistantTextTimeout) {
+            await sink.containsFinalAssistantText(matching: expectedFollowUpSubstring)
+        }
+        let events = await sink.snapshot()
+        let followUpText = await sink.latestFinalAssistantText()
+        await engine.shutdown(reason: .naturalExit)
+
+        guard sawFollowUp else {
+            throw LiveCodexHarnessError.assistantTextTimedOut(events: events, threadID: threadID)
+        }
+
+        return ResumeLoadResult(
+            priorThreadID: threadID,
+            reloadedEvents: events,
+            sawPriorUserTurn: sawUser,
+            sawPriorAssistantFinal: sawAssistant,
+            followUpAssistantText: followUpText
+        )
+    }
+
     private static func envVariable(_ name: String, environment: any AgentEnvironment) -> String? {
         environment.processEnvironment()[name]
     }
@@ -175,6 +266,7 @@ struct LiveCodexHarness {
 enum LiveCodexHarnessError: Error, Sendable, CustomStringConvertible {
     case threadStartTimedOut
     case assistantTextTimedOut(events: [AgentEvent], threadID: String?)
+    case historyLoadTimedOut(events: [AgentEvent], threadID: String?, detail: String)
 
     var description: String {
         switch self {
@@ -184,6 +276,10 @@ enum LiveCodexHarnessError: Error, Sendable, CustomStringConvertible {
             let tail = events.suffix(8).map { String(describing: $0) }.joined(separator: " | ")
             let thread = threadID ?? "n/a"
             return "timed out waiting for final assistantText (thread=\(thread); tail=\(tail))"
+        case .historyLoadTimedOut(let events, let threadID, let detail):
+            let tail = events.suffix(8).map { String(describing: $0) }.joined(separator: " | ")
+            let thread = threadID ?? "n/a"
+            return "timed out waiting for thread/resume history (thread=\(thread); \(detail); tail=\(tail))"
         }
     }
 }
@@ -227,6 +323,15 @@ actor LiveCodexEventSink {
             }
         }
         return nil
+    }
+
+    func containsUserTurn(matching substring: String) -> Bool {
+        events.contains {
+            if case .userTurn(_, let text) = $0 {
+                return text.localizedCaseInsensitiveContains(substring)
+            }
+            return false
+        }
     }
 
     func containsFinalAssistantText(matching substring: String) -> Bool {

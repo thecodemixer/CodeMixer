@@ -51,7 +51,6 @@ public actor RemoteControlServer {
     private let random: any RandomSource
     private var listener: NetworkListenerHandle?
     private var connections: [UUID: ClientConnection] = [:]
-    private var configuration: Configuration?
     private var lastFingerprint: String?
     private var acceptTask: Task<Void, Never>?
     private var clientCountObserver: (@Sendable (Int) -> Void)?
@@ -84,7 +83,6 @@ public actor RemoteControlServer {
             throw ServerError.listenerFailed(error.localizedDescription)
         }
         self.listener = handle
-        self.configuration = configuration
 
         acceptTask = Task { [weak self] in
             for await connection in handle.connections {
@@ -109,7 +107,6 @@ public actor RemoteControlServer {
         notifyClientCount()
     }
 
-    public var clientCount: Int { connections.count }
     public var certificateFingerprint: String? { lastFingerprint }
 
     /// Registers an observer notified whenever the connected-peer count
@@ -128,7 +125,6 @@ public actor RemoteControlServer {
     /// Number of WebSocket peers currently attached (server-side count).
     /// Mode B: includes the loopback Mac GUI. Daemon idle-exit uses this.
     public var connectedClientCount: Int { connections.count }
-    public var currentConfiguration: Configuration? { configuration }
     public var boundPort: UInt16? { listener?.port }
 
     public func reconfigure(_ configuration: Configuration) async throws {

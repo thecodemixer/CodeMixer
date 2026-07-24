@@ -40,7 +40,7 @@ struct CommandDispatchParityTests {
             let id = UUID()
             try await client.send(try encoder.encode(ClientFrame.command(id: id, command: command)))
             let data = try #require(try await client.receive())
-            guard case .result(let resultID, true, nil) = try decoder.decode(ServerFrame.self, from: data) else {
+            guard case .commandSucceeded(let resultID) = try decoder.decode(ServerFrame.self, from: data) else {
                 Issue.record("expected success result for \(command)")
                 return
             }
