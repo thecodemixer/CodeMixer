@@ -302,7 +302,9 @@ func wrappingListIndex(current: Int, delta: Int, count: Int) -> Int {
 
 /// Shared chrome for the Open Project / Open Workspace folder-chooser sheets:
 /// hero icon, title, caption, primary "Choose Folder…" button, cancel row.
-struct FolderChooserShell: View {
+///
+/// `footerLeading` sits on the same row as Cancel (e.g. Advanced disclosure).
+struct FolderChooserShell<FooterLeading: View>: View {
     let systemImage: String
     let title: String
     let caption: String
@@ -312,6 +314,29 @@ struct FolderChooserShell: View {
     let width: CGFloat
     let onChoose: () -> Void
     let onCancel: () -> Void
+    @ViewBuilder let footerLeading: () -> FooterLeading
+
+    init(systemImage: String,
+         title: String,
+         caption: String,
+         chooseLabel: String,
+         accessibilityChooseLabel: String,
+         accessibilityCancelLabel: String,
+         width: CGFloat,
+         onChoose: @escaping () -> Void,
+         onCancel: @escaping () -> Void,
+         @ViewBuilder footerLeading: @escaping () -> FooterLeading) {
+        self.systemImage = systemImage
+        self.title = title
+        self.caption = caption
+        self.chooseLabel = chooseLabel
+        self.accessibilityChooseLabel = accessibilityChooseLabel
+        self.accessibilityCancelLabel = accessibilityCancelLabel
+        self.width = width
+        self.onChoose = onChoose
+        self.onCancel = onCancel
+        self.footerLeading = footerLeading
+    }
 
     var body: some View {
         VStack(spacing: Theme.spacing.s24) {
@@ -335,17 +360,44 @@ struct FolderChooserShell: View {
                 .keyboardShortcut(.return)
                 .accessibilityLabel(accessibilityChooseLabel)
 
-            HStack(spacing: Theme.spacing.s12) {
-                Spacer()
+            HStack(alignment: .top, spacing: Theme.spacing.s12) {
+                footerLeading()
+                Spacer(minLength: Theme.spacing.s12)
                 Button("Cancel", action: onCancel)
                     .keyboardShortcut(.cancelAction)
                     .accessibilityLabel(accessibilityCancelLabel)
             }
+            .padding(.horizontal, Theme.spacing.s24)
             .padding(.bottom, Theme.spacing.s24)
         }
         .frame(width: width)
         .fixedSize(horizontal: true, vertical: true)
         .background(Theme.surface.canvas)
+    }
+}
+
+extension FolderChooserShell where FooterLeading == EmptyView {
+    init(systemImage: String,
+         title: String,
+         caption: String,
+         chooseLabel: String,
+         accessibilityChooseLabel: String,
+         accessibilityCancelLabel: String,
+         width: CGFloat,
+         onChoose: @escaping () -> Void,
+         onCancel: @escaping () -> Void) {
+        self.init(
+            systemImage: systemImage,
+            title: title,
+            caption: caption,
+            chooseLabel: chooseLabel,
+            accessibilityChooseLabel: accessibilityChooseLabel,
+            accessibilityCancelLabel: accessibilityCancelLabel,
+            width: width,
+            onChoose: onChoose,
+            onCancel: onCancel,
+            footerLeading: { EmptyView() }
+        )
     }
 }
 

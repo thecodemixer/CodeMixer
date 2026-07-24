@@ -8,6 +8,7 @@ extension WorkspaceProjectsStore {
     @discardableResult
     public func createProject(name: String,
                               projectType: ProjectType,
+                              preferFreshAgentProcess: Bool = false,
                               in workspace: URL) async throws -> ProjectRef {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard Self.isValidProjectName(trimmed) else {
@@ -24,7 +25,14 @@ extension WorkspaceProjectsStore {
         }
 
         try fileSystem.createDirectory(at: folder, withIntermediates: true)
-        let ref = ProjectRef(path: folder.path, displayName: trimmed, projectType: projectType)
+        let identity: AgentInstanceIdentity = preferFreshAgentProcess
+            ? .dedicated(UUID())
+            : .shared
+        let ref = ProjectRef(path: folder.path,
+                             displayName: trimmed,
+                             projectType: projectType,
+                             preferFreshAgentProcess: preferFreshAgentProcess,
+                             agentInstanceIdentity: identity)
         try await register(ref, in: workspace, rootProjectType: projectType)
         try ProjectLocalStateStore.save(ref: ref, fileSystem: fileSystem)
         return ref
@@ -35,6 +43,7 @@ extension WorkspaceProjectsStore {
     public func addExistingProject(url projectURL: URL,
                                    projectType: ProjectType,
                                    displayName: String? = nil,
+                                   preferFreshAgentProcess: Bool = false,
                                    in workspace: URL) async throws -> ProjectRef {
         let key = Self.key(for: workspace)
         let trimmedName = displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -43,17 +52,24 @@ extension WorkspaceProjectsStore {
             return ProjectLocalStateStore.load(from: projectURL, fileSystem: fileSystem)?.displayName
                 ?? projectURL.lastPathComponent
         }()
+        let identity: AgentInstanceIdentity = preferFreshAgentProcess
+            ? .dedicated(UUID())
+            : .shared
         if let existing = workspaces[key]?.first(where: { $0.path == projectURL.path }) {
             let updated = ProjectRef(path: existing.path,
                                      displayName: resolvedName,
-                                     projectType: projectType)
+                                     projectType: projectType,
+                                     preferFreshAgentProcess: preferFreshAgentProcess,
+                                     agentInstanceIdentity: identity)
             try await register(updated, in: workspace, rootProjectType: projectType)
             try ProjectLocalStateStore.save(ref: updated, fileSystem: fileSystem)
             return updated
         }
         let ref = ProjectRef(path: projectURL.path,
                              displayName: resolvedName,
-                             projectType: projectType)
+                             projectType: projectType,
+                             preferFreshAgentProcess: preferFreshAgentProcess,
+                             agentInstanceIdentity: identity)
         try await register(ref, in: workspace, rootProjectType: projectType)
         try ProjectLocalStateStore.save(ref: ref, fileSystem: fileSystem)
         return ref
@@ -84,6 +100,43 @@ extension WorkspaceProjectsStore {
         try await register(ref, in: workspace, rootProjectType: projectType)
         try ProjectLocalStateStore.save(ref: ref, fileSystem: fileSystem)
         return ref
+    }
+
+    /// Persist Advanced → Launch new agent instance for an existing project.
+    @discardableResult
+    public func setAgentLaunchPreference(path: String,
+                                         preferFreshAgentProcess: Bool,
+                                         agentInstanceIdentity: AgentInstanceIdentity = .shared,
+                                         in workspace: URL) async throws -> ProjectRef {
+        let key = Self.key(for: workspace)
+        var list: [ProjectRef]
+        if let existing = workspaces[key] {
+            list = existing
+        } else {
+            list = await projects(for: workspace)
+        }
+        guard let idx = list.firstIndex(where: { $0.path == path }) else {
+            throw StoreError.undecodableProject(path: path, detail: "project not in workspace index")
+        }
+        let identity: AgentInstanceIdentity
+        if preferFreshAgentProcess {
+            if case .dedicated = agentInstanceIdentity {
+                identity = agentInstanceIdentity
+            } else if case .dedicated = list[idx].agentInstanceIdentity {
+                identity = list[idx].agentInstanceIdentity
+            } else {
+                identity = .dedicated(UUID())
+            }
+        } else {
+            identity = .shared
+        }
+        list[idx].preferFreshAgentProcess = preferFreshAgentProcess
+        list[idx].agentInstanceIdentity = identity
+        workspaces[key] = list
+        try await persist()
+        try ProjectLocalStateStore.save(ref: list[idx], fileSystem: fileSystem)
+        try await persistWorkspaceLocal(projects: list, for: workspace)
+        return list[idx]
     }
 
     @discardableResult

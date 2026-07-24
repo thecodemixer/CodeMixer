@@ -209,6 +209,27 @@ struct WorkspaceProjectsStoreTests {
         #expect(loaded?.displayName == "api")
     }
 
+    @Test("createProject with preferFreshAgentProcess persists dedicated identity")
+    func writesPreferFreshIdentity() async throws {
+        let fs = InMemoryFileSystem()
+        let store = makeStore(fs: fs)
+        let ref = try await store.createProject(
+            name: "fresh",
+            projectType: .claudeCode,
+            preferFreshAgentProcess: true,
+            in: workspace
+        )
+        #expect(ref.preferFreshAgentProcess)
+        if case .dedicated = ref.agentInstanceIdentity {
+            // ok
+        } else {
+            Issue.record("expected dedicated identity")
+        }
+        let loaded = ProjectLocalStateStore.load(from: URL(fileURLWithPath: ref.path), fileSystem: fs)
+        #expect(loaded?.preferFreshAgentProcess == true)
+        #expect(loaded?.agentInstanceIdentity == ref.agentInstanceIdentity)
+    }
+
     @Test("resolveProjectType prefers project-local state over the workspace index")
     func resolvePrefersLocalFile() async throws {
         let fs = InMemoryFileSystem()

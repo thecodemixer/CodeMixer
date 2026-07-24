@@ -92,12 +92,19 @@ extension AgentEngine {
                 resumeSessionID = sid
             }
 
-            // Step 3: shut down the current session.
-            await shutdown(reason: .userCancel)
+            // Step 3: shut down the current session slot only.
+            let key = activeKey
+            await shutdownActiveSlot(reason: .userCancel)
 
             // Step 4: respawn — with --resume if we truncated cleanly, else fresh.
             do {
-                try await start(adapter: savedAdapter, workspace: ws, resumeSessionID: resumeSessionID)
+                let resumeKey = key ?? AgentRuntimeKey(projectPath: ws.path,
+                                                       agentID: savedAdapter.id,
+                                                       instance: .shared)
+                try await start(adapter: savedAdapter,
+                                workspace: ws,
+                                resumeSessionID: resumeSessionID,
+                                runtimeKey: resumeKey)
             } catch {
                 // Respawn failed; surface the error and leave the engine stopped.
                 log.error("editAndResubmit respawn failed: \(error, privacy: .public)")
@@ -133,7 +140,7 @@ extension AgentEngine {
             try await writePromptBytes(bytes)
 
         case .closeSession:
-            await shutdown(reason: .userCancel)
+            await shutdownActiveSlot(reason: .userCancel)
 
         case .openProject,
              .speakAssistantBubble, .revertFile, .revertHunk,
@@ -210,8 +217,8 @@ extension AgentEngine {
         let sessionAgentID = await sessionAgentID(for: resumeSessionID,
                                                   workspace: projectURL,
                                                   mode: project.projectType)
-        guard let nextAdapter = await ProjectAgentRouter.resolveAdapter(projectType: project.projectType,
-                                                                        sessionAgentID: sessionAgentID) else {
+        guard let agentID = ProjectAgentRouter.resolveAdapterID(projectType: project.projectType,
+                                                                sessionAgentID: sessionAgentID) else {
             if project.projectType.isFolderBacked {
                 throw AgentError.unsupportedOperation(
                     detail: "Folder project \(path) is opened in the folder browser, not as an agent session."
@@ -222,8 +229,82 @@ extension AgentEngine {
             )
         }
 
-        // Warm ACP/Cursor path: same workspace + live process → `session/load`
-        // (~1–3s) instead of respawning the binary (~20s initialize/auth).
+        // Prefer a fresh adapter instance for the spawn path; custom ACP uses factories.
+        let nextAdapter: any AgentAdapter
+        if case .custom(let ref) = project.projectType,
+           let custom = await CustomAgentAdapterFactories.shared.makeAdapter(for: ref) {
+            nextAdapter = custom
+        } else if let made = await AdapterRegistry.shared.makeAdapter(for: agentID) {
+            nextAdapter = made
+        } else if let resolved = await ProjectAgentRouter.resolveAdapter(projectType: project.projectType,
+                                                                         sessionAgentID: sessionAgentID) {
+            nextAdapter = resolved
+        } else {
+            throw AgentError.unsupportedOperation(
+                detail: "Project \(path) needs a concrete registered agent before it can be opened."
+            )
+        }
+
+        var key = runtimeKey(for: project, agentID: nextAdapter.id)
+        if project.preferFreshAgentProcess {
+            // Always replace slots for this project+agent. Mint + persist a
+            // dedicated identity when the stored ref still says `.shared`.
+            if case .dedicated = key.instance {
+                // Keep persisted dedicated id so reopen stays stable until toggled again.
+            } else {
+                key = AgentRuntimeKey(projectPath: project.path,
+                                      agentID: nextAdapter.id,
+                                      instance: .dedicated(seams.random.uuid()))
+                _ = try? await store.setAgentLaunchPreference(
+                    path: project.path,
+                    preferFreshAgentProcess: true,
+                    agentInstanceIdentity: key.instance,
+                    in: projectURL
+                )
+            }
+            for existing in runtimes.keys where existing.projectPath == key.projectPath
+                && existing.agentID == key.agentID {
+                await shutdownSlot(existing, publishStopped: false)
+            }
+            try await start(adapter: nextAdapter,
+                            workspace: projectURL,
+                            resumeSessionID: resumeSessionID,
+                            permissionMode: .default,
+                            runtimeKey: key)
+            return
+        }
+
+        // Pool hit for this project+agent — park/activate; warm session switch
+        // via encodeResumeSession (/resume) or new chat via encodeCommand(.newSession)
+        // (/clear for Claude, thread/start for Codex). No Claude-only respawn.
+        if let existingKey = findRuntime(projectPath: project.path, agentID: nextAdapter.id),
+           let runtime = runtimes[existingKey] {
+            if await activate(key: existingKey, resumeSessionID: resumeSessionID) {
+                if resumeSessionID == nil,
+                   let bytes = runtime.adapter.encodeCommand(.newSession),
+                   !bytes.isEmpty {
+                    transcript = []
+                    changedFiles = []
+                    currentTurnID = nil
+                    promptAcceptance = .idle
+                    cancelStartupSubmitRecovery()
+                    currentSessionID = nil
+                    if var updated = runtimes[existingKey] {
+                        updated.boundSessionID = nil
+                        runtimes[existingKey] = updated
+                    }
+                    state = .running(sessionID: nil)
+                    try? await runtimes[existingKey]?.transport.write(bytes)
+                    await bus.publish(.sessionStarted(sessionID: "",
+                                                      model: nil,
+                                                      cwd: projectURL))
+                }
+                return
+            }
+            await shutdownSlot(existingKey, publishStopped: false)
+        }
+
+        // Same-process warm when already active on this project (ACP/Codex).
         if let resumeSessionID,
            await tryWarmResume(
             projectURL: projectURL,
@@ -234,13 +315,13 @@ extension AgentEngine {
         }
 
         if resumeSessionID != nil {
-            log.notice("cold openProject after warm miss session=\(resumeSessionID ?? "", privacy: .public)")
+            log.notice("cold openProject after pool miss session=\(resumeSessionID ?? "", privacy: .public)")
         }
-        await shutdown(reason: .userCancel)
         try await start(adapter: nextAdapter,
                         workspace: projectURL,
                         resumeSessionID: resumeSessionID,
-                        permissionMode: .default)
+                        permissionMode: .default,
+                        runtimeKey: key)
     }
 
     /// Returns `true` when the live agent accepted a same-process session load.
@@ -255,21 +336,9 @@ extension AgentEngine {
             await recordWarmMiss(reason: "no live adapter", sessionID: resumeSessionID)
             return false
         }
-        // Custom ACP adapters all use AgentID.other — prefer instance identity when
-        // both sides are class instances so a cache-miss adapter cannot block warm.
-        let sameAdapter: Bool = {
-            if let liveObj = live as AnyObject?, let nextObj = nextAdapter as AnyObject? {
-                return liveObj === nextObj || live.id == nextAdapter.id
-            }
-            return live.id == nextAdapter.id
-        }()
-        guard sameAdapter else {
+        guard live.id == nextAdapter.id else {
             await recordWarmMiss(reason: "adapter mismatch live=\(live.id.rawValue) next=\(nextAdapter.id.rawValue)",
                                  sessionID: resumeSessionID)
-            return false
-        }
-        guard live.capabilities.contains(.sessionHandshakeGate) else {
-            await recordWarmMiss(reason: "adapter lacks sessionHandshakeGate", sessionID: resumeSessionID)
             return false
         }
         guard let currentWorkspace = workspace,
@@ -277,6 +346,7 @@ extension AgentEngine {
             await recordWarmMiss(reason: "workspace path mismatch", sessionID: resumeSessionID)
             return false
         }
+        // Warm when the adapter can encode an in-process resume (ACP/Codex).
         guard let bytes = live.encodeResumeSession(sessionID: resumeSessionID),
               !bytes.isEmpty else {
             await recordWarmMiss(reason: "encodeResumeSession empty", sessionID: resumeSessionID)
@@ -288,8 +358,11 @@ extension AgentEngine {
         promptAcceptance = .idle
         cancelStartupSubmitRecovery()
         await heartbeat?.endTurn()
-        // Preset so same-id SessionStart still publishes for UI unlock.
         currentSessionID = resumeSessionID
+        if let key = activeKey, var runtime = runtimes[key] {
+            runtime.boundSessionID = resumeSessionID
+            runtimes[key] = runtime
+        }
         state = .running(sessionID: resumeSessionID)
         do {
             try await transport?.write(bytes)

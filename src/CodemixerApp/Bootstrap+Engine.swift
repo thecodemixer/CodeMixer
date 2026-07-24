@@ -16,20 +16,19 @@ extension Bootstrap {
         guard viewModel == nil else { return }
         defer { isStartupComplete = true }
 
-        let adapter = ClaudeAdapter()
-        await AdapterRegistry.shared.register(adapter)
-        await AdapterRegistry.shared.register(CodexAdapter())
-        await AdapterRegistry.shared.register(CursorACPAdapter())
+        await AdapterRegistry.shared.register(id: .claudeCode) { ClaudeAdapter() }
+        await AdapterRegistry.shared.register(id: .codex) { CodexAdapter() }
+        await AdapterRegistry.shared.register(id: .cursorCLI) { CursorACPAdapter() }
         await CustomAgentAdapterFactories.shared.register(CustomACPAdapterFactory())
 
         let env = Seams.live.environment.processEnvironment()
         if env["CODEMIXER_UI_BACKEND"] == "daemon" {
-            if await connectDaemonBackedUI(adapter: adapter) { return }
+            if await connectDaemonBackedUI() { return }
             await SilentDiagnostics.shared.record(kind: .modeBFallback,
                                                   owner: "Bootstrap",
                                                   summary: "CODEMIXER_UI_BACKEND=daemon connect failed; using in-process engine")
         } else if await launchAgentInstaller.isInstalled {
-            if await connectDaemonBackedUI(adapter: adapter) { return }
+            if await connectDaemonBackedUI() { return }
             await SilentDiagnostics.shared.record(kind: .modeBFallback,
                                                   owner: "Bootstrap",
                                                   summary: "LaunchAgent daemon unreachable; using in-process engine")
@@ -71,7 +70,7 @@ extension Bootstrap {
         // intrusive for a local-only chat launch.
     }
 
-    func connectDaemonBackedUI(adapter: ClaudeAdapter) async -> Bool {
+    func connectDaemonBackedUI() async -> Bool {
         // Client role: GUI becomes a WebSocket consumer of codemixerd (Mode B).
         // On success there is no in-process AgentEngine — see architecture.md §4.1.
         let client = RemoteEngineClient(configuration: .init(reconnect: .daemon))
@@ -82,9 +81,11 @@ extension Bootstrap {
         }
         engineBackend = .remote(client)
         let model = EngineViewModel(engine: client, bus: client.bus)
-        model.availableModels = adapter.availableModels()
-        model.availableAgentModes = adapter.availableAgentModes()
-        model.selectedAgentModeID = adapter.availableAgentModes().first?.id ?? ""
+        if let adapter = await AdapterRegistry.shared.adapter(for: .claudeCode) {
+            model.availableModels = adapter.availableModels()
+            model.availableAgentModes = adapter.availableAgentModes()
+            model.selectedAgentModeID = adapter.availableAgentModes().first?.id ?? ""
+        }
         viewModel = model
         startAppEventBridge(bus: client.bus)
         return true

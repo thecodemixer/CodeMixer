@@ -76,6 +76,8 @@ public final class EngineViewModel {
     // MARK: - Public state (read-only)
 
     public internal(set) var sessionID: String?
+    /// Project paths with a live or parked pooled agent process in this workspace.
+    public internal(set) var livePooledProjectPaths: Set<String> = []
     /// Active project cwd from the agent session (conversation / diff / composer).
     public internal(set) var workspace: URL?
     /// Loaded workspace folder (one per window). Owns the projects list in the

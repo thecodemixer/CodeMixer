@@ -79,17 +79,24 @@ extension EngineViewModel {
                                                                                            sessionID: id),
                            isWarmACPSwitch: alreadyLiveOnProject)
         send(.openProject(path: projectPath, resumeSessionID: id))
+        Task { await self.refreshLivePooledProjectPaths() }
     }
 
     /// True when this project already has a live agent process we can warm-switch
-    /// (dashboard up or a session already bound) — not a cold binary spawn.
+    /// (dashboard up, a session already bound, or a parked pooled runtime).
     private func isLiveOnProject(_ projectPath: String) -> Bool {
         let target = URL(fileURLWithPath: projectPath).standardizedFileURL.path
+        if livePooledProjectPaths.contains(target) { return true }
         let current = workspace.map {
             URL(fileURLWithPath: $0.path).standardizedFileURL.path
         }
         guard current == target else { return false }
         return sessionID != nil || dashboardURL != nil
+    }
+
+    /// Sync sidebar warm-hints with the engine process pool (active + parked).
+    func refreshLivePooledProjectPaths() async {
+        livePooledProjectPaths = await engine.liveProjectPaths()
     }
 
     /// Prefer the live `dashboardURL`; fall back to any persisted overview URL

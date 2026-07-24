@@ -1746,6 +1746,7 @@ final class WarmHandshakeAdapter: AgentAdapter, @unchecked Sendable {
 final class ScriptedTransportFactory: @unchecked Sendable {
     private let lock = NSLock()
     private var transports: [ScriptedTransport]
+    private(set) var spawnCount = 0
 
     init(_ transports: [ScriptedTransport]) {
         self.transports = transports
@@ -1755,6 +1756,7 @@ final class ScriptedTransportFactory: @unchecked Sendable {
                        _ launch: AgentTransportLaunchSpec) throws -> any AgentTransport {
         lock.lock()
         defer { lock.unlock() }
+        spawnCount += 1
         guard !transports.isEmpty else {
             throw AgentError.internalInvariant(detail: "scripted transport factory exhausted")
         }
@@ -1824,6 +1826,8 @@ actor ScriptedTransport: AgentTransport {
         closed = true
         outboundContinuation.finish()
     }
+
+    func isClosed() -> Bool { closed }
 
     func emit(_ text: String) async {
         let data = Data(text.utf8)

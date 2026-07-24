@@ -33,16 +33,45 @@ public actor WorkspaceProjectsStore {
 
     /// A project within a workspace. `projectType` is required — set at creation
     /// and never silently defaulted.
+    ///
+    /// This is the persisted index row (`workspaces.json` / `.codemixer/project.json`),
+    /// not the New/Open Project sheet draft. Sheet forms collect a separate
+    /// draft type (optional `projectType`, optional folder URL); store mutations
+    /// here are what produce a `ProjectRef`.
     public struct ProjectRef: Sendable, Codable, Hashable, Identifiable {
         public var id: String { path }
         public let path: String
         public var displayName: String
         public var projectType: ProjectType
+        /// When true, opening this project replaces any parked agent slot.
+        public var preferFreshAgentProcess: Bool
+        /// `.shared` or `.dedicated(uuid)` for the live CLI slot identity.
+        public var agentInstanceIdentity: AgentInstanceIdentity
 
-        public init(path: String, displayName: String, projectType: ProjectType) {
+        public init(path: String,
+                    displayName: String,
+                    projectType: ProjectType,
+                    preferFreshAgentProcess: Bool = false,
+                    agentInstanceIdentity: AgentInstanceIdentity = .shared) {
             self.path = path
             self.displayName = displayName
             self.projectType = projectType
+            self.preferFreshAgentProcess = preferFreshAgentProcess
+            self.agentInstanceIdentity = agentInstanceIdentity
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case path, displayName, projectType, preferFreshAgentProcess, agentInstanceIdentity
+        }
+
+        public init(from decoder: any Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            path = try c.decode(String.self, forKey: .path)
+            displayName = try c.decode(String.self, forKey: .displayName)
+            projectType = try c.decode(ProjectType.self, forKey: .projectType)
+            preferFreshAgentProcess = try c.decodeIfPresent(Bool.self, forKey: .preferFreshAgentProcess) ?? false
+            agentInstanceIdentity = try c.decodeIfPresent(AgentInstanceIdentity.self,
+                                                          forKey: .agentInstanceIdentity) ?? .shared
         }
     }
 
@@ -86,7 +115,8 @@ public actor WorkspaceProjectsStore {
     /// - v2: required `projectType` per project
     /// - v3: adds `activeWorkspacePath` (nil = closed / show picker on launch)
     /// - v4: `ProjectType.folder(...)` non-agent folder browser types
-    public static let currentSchemaVersion = 4
+    /// - v5: `preferFreshAgentProcess` + `agentInstanceIdentity` on projects
+    public static let currentSchemaVersion = 5
 
     struct WorkspaceEntry: Codable, Hashable {
         var workspacePath: String
@@ -211,7 +241,11 @@ public actor WorkspaceProjectsStore {
         guard let local = ProjectLocalStateStore.load(from: url, fileSystem: fileSystem) else {
             return nil
         }
-        return ProjectRef(path: path, displayName: local.displayName, projectType: local.projectType)
+        return ProjectRef(path: path,
+                          displayName: local.displayName,
+                          projectType: local.projectType,
+                          preferFreshAgentProcess: local.preferFreshAgentProcess,
+                          agentInstanceIdentity: local.agentInstanceIdentity)
     }
 
     /// Resolves project type for a folder: project-local file first, then the
@@ -244,6 +278,14 @@ public actor WorkspaceProjectsStore {
             }
             if next.displayName != local.displayName {
                 next.displayName = local.displayName
+                changed = true
+            }
+            if next.preferFreshAgentProcess != local.preferFreshAgentProcess {
+                next.preferFreshAgentProcess = local.preferFreshAgentProcess
+                changed = true
+            }
+            if next.agentInstanceIdentity != local.agentInstanceIdentity {
+                next.agentInstanceIdentity = local.agentInstanceIdentity
                 changed = true
             }
             return next

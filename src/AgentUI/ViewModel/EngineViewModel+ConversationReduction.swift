@@ -41,6 +41,7 @@ extension EngineViewModel {
                     sessionID = id
                 }
             }
+            Task { await self.refreshLivePooledProjectPaths() }
             if sessionChanged {
                 // Re-bind the permission card / waiting state to the new chat.
                 refreshPermissionActivity()
@@ -218,6 +219,7 @@ extension EngineViewModel {
                 endSessionSwitch()
             }
             settleTurnIdle()
+            Task { await self.refreshLivePooledProjectPaths() }
         case .error(let error):
             endSessionSwitch()
             isAwaitingFirstReplyForPrompt = false

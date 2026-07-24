@@ -974,6 +974,86 @@ struct EngineViewModelNavigatorTests {
         await bus.shutdown()
     }
 
+    @Test("createOrAddProject(ProjectDraft) persists preferFresh and opens the project")
+    func createOrAddProjectDraftPreferFresh() async throws {
+        let port = RecordingPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
+        let fileSystem = InMemoryFileSystem()
+        let environment = FakeEnvironment(home: TestPaths.fakeHome)
+        let store = WorkspaceProjectsStore(environment: environment, fileSystem: fileSystem)
+        vm.workspaceProjects = store
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        let workspace = TestPaths.workspace("ws-info-create")
+        try await vm.adoptEmptyWorkspace(workspace)
+        await AdapterRegistry.shared.register(MockAdapter(
+            id: .claudeCode,
+            displayName: "Claude Code",
+            models: [AgentModelOption(id: "sonnet", label: "Sonnet")]
+        ))
+
+        await vm.createOrAddProject(ProjectDraft(
+            name: "freshy",
+            projectType: .claudeCode,
+            preferFreshAgentProcess: true
+        ))
+        try? await Task.sleep(for: .milliseconds(40))
+
+        let project = await store.project(path: workspace.appendingPathComponent("freshy").path)
+        #expect(project?.preferFreshAgentProcess == true)
+        #expect(project?.agentInstanceIdentity != .shared)
+        #expect(port.commands.contains {
+            if case .openProject(let path, let resume) = $0 {
+                return path == project?.path && resume == nil
+            }
+            return false
+        })
+
+        await bus.shutdown()
+    }
+
+    @Test("createOrAddProject(ProjectDraft) with existingFolderURL adopts the folder")
+    func createOrAddProjectDraftExistingFolder() async throws {
+        let port = RecordingPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
+        let fileSystem = InMemoryFileSystem()
+        let environment = FakeEnvironment(home: TestPaths.fakeHome)
+        let store = WorkspaceProjectsStore(environment: environment, fileSystem: fileSystem)
+        vm.workspaceProjects = store
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        let workspace = TestPaths.workspace("ws-info-add")
+        try await vm.adoptEmptyWorkspace(workspace)
+        await AdapterRegistry.shared.register(MockAdapter(
+            id: .claudeCode,
+            displayName: "Claude Code",
+            models: [AgentModelOption(id: "sonnet", label: "Sonnet")]
+        ))
+
+        let external = TestPaths.underTemporary("external-proj")
+        try fileSystem.createDirectory(at: external, withIntermediates: true)
+        let info = ProjectDraft.existingFolder(external, preferFreshAgentProcess: true)
+            .withProjectType(.claudeCode)
+        await vm.createOrAddProject(info)
+        try? await Task.sleep(for: .milliseconds(40))
+
+        let project = await store.project(path: external.path)
+        #expect(project?.preferFreshAgentProcess == true)
+        #expect(project?.displayName == external.lastPathComponent)
+        #expect(port.commands.contains {
+            if case .openProject(let path, let resume) = $0 {
+                return path == external.path && resume == nil
+            }
+            return false
+        })
+
+        await bus.shutdown()
+    }
+
     @Test("createProject for a folder type opens the browser without openProject")
     func createFolderProjectDoesNotOpenAgent() async throws {
         let port = RecordingPort()

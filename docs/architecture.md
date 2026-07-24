@@ -730,6 +730,7 @@ Transport is deliberately not a capability. The engine reads
 - `.permissionPrompts` → `PermissionResponseDelivery` is honored.
 - `.resumableSessions` → enables the *Sessions* picker.
 - `.sessionHandshakeGate` → UI keeps the composer locked until a non-empty `sessionStarted` (ACP initialize/auth/session-new); same-project New Chat prefers `.newSession` over respawning. Opening a saved ACP/Cursor session on an already-live process warm-loads via `session/load` (no binary respawn). Conversation history prefers ACP `session/load` wire replay; when the agent streams nothing (Cursor today), Codemixer restores from a local turn cache in `ACPSessionIndex`. Cursor does not implement `session/list`.
+- **Sticky agent process pool** — `AgentEngine` keeps one live CLI per `(projectPath, agentID, AgentInstanceIdentity)` (`.shared` or `.dedicated(UUID)`). Switching projects parks the prior process instead of killing it; returning activates the parked slot. Claude, Codex, and ACP all warm-switch sessions in-process on that slot (`/resume` + `/clear`, `thread/resume` / `thread/start`, `session/load`). Advanced → “Launch new agent instance” sets `preferFreshAgentProcess` so opens replace the project’s slot. `closeSession` tears down the active slot only; `shutdown()` clears the whole pool.
 
 ### `PermissionResponseDelivery`
 

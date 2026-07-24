@@ -78,4 +78,11 @@ public enum SlashCommandTarget: Sendable, Codable, Hashable {
 /// code path.
 public protocol AgentEngineCommandPort: Sendable {
     func send(_ command: AgentCommand) async throws
+    /// Project paths with a live or parked pooled agent process. Empty on
+    /// remote clients that do not surface pool state over the wire.
+    func liveProjectPaths() async -> Set<String>
+}
+
+public extension AgentEngineCommandPort {
+    func liveProjectPaths() async -> Set<String> { [] }
 }

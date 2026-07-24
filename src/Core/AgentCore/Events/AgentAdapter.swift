@@ -279,22 +279,55 @@ public extension AgentAdapter {
 /// Process-wide registry. UI surfaces resolve adapters through this rather
 /// than importing concrete adapter targets; the engine looks up adapters by id
 /// when resuming a session.
+///
+/// Registration stores a **factory** so each pooled runtime can own a fresh
+/// adapter instance (Codex/ACP client state must not be shared across slots).
+/// `adapter(for:)` / `all()` return catalog instances for listing and
+/// capabilities; `makeAdapter(for:)` always constructs a new runtime instance.
 public actor AdapterRegistry {
     public static let shared = AdapterRegistry()
 
-    private var adapters: [AgentID: any AgentAdapter] = [:]
+    public typealias Factory = @Sendable () -> any AgentAdapter
+
+    private var factories: [AgentID: Factory] = [:]
+    /// Lazily retained catalog adapters for `adapter(for:)` / `all()`.
+    private var catalog: [AgentID: any AgentAdapter] = [:]
 
     public init() {}
 
-    public func register(_ adapter: any AgentAdapter) {
-        adapters[adapter.id] = adapter
+    /// Register a factory that produces a new adapter instance per call.
+    public func register(id: AgentID, factory: @escaping Factory) {
+        factories[id] = factory
+        catalog[id] = nil
     }
 
+    /// Convenience for tests and simple adapters: wraps a single instance as a
+    /// factory that returns that same instance (shared). Prefer `register(id:factory:)`
+    /// in production Bootstrap so pool slots get isolated state.
+    public func register(_ adapter: any AgentAdapter) {
+        let id = adapter.id
+        factories[id] = { adapter }
+        catalog[id] = adapter
+    }
+
+    /// Catalog / capability lookup — may reuse a retained instance.
     public func adapter(for id: AgentID) -> (any AgentAdapter)? {
-        adapters[id]
+        if let existing = catalog[id] { return existing }
+        guard let factory = factories[id] else { return nil }
+        let made = factory()
+        catalog[id] = made
+        return made
+    }
+
+    /// Fresh instance for a pooled runtime spawn.
+    public func makeAdapter(for id: AgentID) -> (any AgentAdapter)? {
+        factories[id]?()
     }
 
     public func all() -> [any AgentAdapter] {
-        Array(adapters.values).sorted { $0.displayName < $1.displayName }
+        for id in factories.keys where catalog[id] == nil {
+            _ = adapter(for: id)
+        }
+        return Array(catalog.values).sorted { $0.displayName < $1.displayName }
     }
 }

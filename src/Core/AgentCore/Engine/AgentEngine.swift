@@ -21,7 +21,7 @@ public actor AgentEngine: AgentEngineCommandPort {
         case stopping
     }
 
-    private enum TeardownMode {
+    enum TeardownMode {
         case shutdown(reason: AgentProtocol.StopReason)
         case rollbackPartialStart
     }
@@ -139,8 +139,13 @@ public actor AgentEngine: AgentEngineCommandPort {
     var state: EngineState = .stopped
     var transport: (any AgentTransport)?
     var hookServer: HookServer?
-    private var sessionIDContinuation: AsyncStream<String>.Continuation?
+    var sessionIDContinuation: AsyncStream<String>.Continuation?
     var currentSessionID: String?
+
+    /// Sticky per-project agent process pool. `adapter`/`transport`/… mirror the
+    /// active runtime; parked entries keep their own forwarding tasks alive.
+    var runtimes: [AgentRuntimeKey: AgentRuntime] = [:]
+    var activeKey: AgentRuntimeKey?
     private var turnState: TurnState = .idle
     var currentTurnID: UUID? {
         get { turnState.id }
@@ -152,9 +157,9 @@ public actor AgentEngine: AgentEngineCommandPort {
     var lastUserBubbleID: UUID?
     var heartbeat: HeartbeatActivityMonitor?
     private var phraseResolver: StatusPhraseResolver
-    private var eventForwardingTask: Task<Void, Never>?
-    private var bellTask: Task<Void, Never>?
-    private var sessionTeardownState: SessionTeardownState = .idle
+    var eventForwardingTask: Task<Void, Never>?
+    var bellTask: Task<Void, Never>?
+    var sessionTeardownState: SessionTeardownState = .idle
     var workspace: URL?
     var transcript: [SnapshotService.SnapshotMessage] = []
     var changedFiles: [String] = []
@@ -164,11 +169,11 @@ public actor AgentEngine: AgentEngineCommandPort {
     private var resumePromptReadyTask: Task<Void, Never>?
     private var resumePromptReadySampleCount = 0
     private var resumePromptReadyEarliest: ContinuousClock.Instant?
-    private var resumeStartupState: ResumeStartupState = .inactive
+    var resumeStartupState: ResumeStartupState = .inactive
     private var resumeStartupWaiters: [CheckedContinuation<Void, Never>] = []
     var startupSubmitRecoveryArmed = false
     private var startupSubmitRecoveryTask: Task<Void, Never>?
-    private var startupSubmitRecoveryState: StartupSubmitRecoveryState = .disarmed
+    var startupSubmitRecoveryState: StartupSubmitRecoveryState = .disarmed
     /// Separates a queued prompt from one waiting for the live `UserPromptSubmit`
     /// echo so historical transcript replay cannot cancel recovery.
     var promptAcceptance: PromptAcceptanceState = .idle
@@ -251,7 +256,33 @@ public actor AgentEngine: AgentEngineCommandPort {
                       workspace: URL,
                       resumeSessionID: String? = nil,
                       permissionMode: PermissionMode = .default) async throws {
-        guard state == .stopped else { throw AgentError.internalInvariant(detail: "engine not idle") }
+        let key = AgentRuntimeKey(projectPath: workspace.path,
+                                  agentID: adapter.id,
+                                  instance: .shared)
+        try await start(adapter: adapter,
+                        workspace: workspace,
+                        resumeSessionID: resumeSessionID,
+                        permissionMode: permissionMode,
+                        runtimeKey: key)
+    }
+
+    /// Start (or replace) a pooled runtime for `runtimeKey` and make it active.
+    func start(adapter: any AgentAdapter,
+               workspace: URL,
+               resumeSessionID: String? = nil,
+               permissionMode: PermissionMode = .default,
+               runtimeKey: AgentRuntimeKey) async throws {
+        // Park any other active slot; replace this key if it already exists.
+        if let active = activeKey, active != runtimeKey {
+            await parkActive()
+        }
+        if runtimes[runtimeKey] != nil {
+            await shutdownSlot(runtimeKey, publishStopped: false)
+        } else if state != .stopped, activeKey == nil, runtimes.isEmpty {
+            // Legacy single-slot: engine claimed running without pool entry.
+            await teardownActiveMirror(.rollbackPartialStart)
+        }
+
         state = .starting
         self.adapter = adapter
         // Always standardize so UI cwd filtering matches ACP `sessionStarted`.
@@ -259,6 +290,7 @@ public actor AgentEngine: AgentEngineCommandPort {
         self.workspace = workspace
         self.transcript = []
         self.changedFiles = []
+        activeKey = runtimeKey
         let usesTerminal = adapter.transportDescriptor.requiresTerminalEmulation
             && adapter.capabilities.contains(.ptyTUIFallback)
         let handshakeGate = adapter.capabilities.contains(.sessionHandshakeGate)
@@ -287,7 +319,7 @@ public actor AgentEngine: AgentEngineCommandPort {
 
         let resolvedEnv = await ShellEnvironmentResolver(environment: seams.environment).resolve()
 
-        // Optional hook server.
+        // Optional hook server — one UDS per Claude (hooks) project slot.
         var hookSocketPath: String?
         var hookHandle: HookSocketHandle?
         if adapter.capabilities.contains(.hooksOverUDS) {
@@ -311,7 +343,7 @@ public actor AgentEngine: AgentEngineCommandPort {
         do {
             binary = try await adapter.locateBinary(env: resolvedEnv)
         } catch {
-            await rollbackPartialStart()
+            await rollbackPartialStart(key: runtimeKey)
             throw AgentError.binaryNotFound(agentID: adapter.id,
                                             hint: error.localizedDescription)
         }
@@ -335,7 +367,7 @@ public actor AgentEngine: AgentEngineCommandPort {
         do {
             transport = try transportFactory(adapter.transportDescriptor, launch)
         } catch {
-            await rollbackPartialStart()
+            await rollbackPartialStart(key: runtimeKey)
             throw AgentError.spawnFailed(errno: Self.errno(from: error),
                                          detail: String(describing: error))
         }
@@ -369,7 +401,7 @@ public actor AgentEngine: AgentEngineCommandPort {
         self.heartbeat = monitor
 
         state = .running(sessionID: resumeSessionID)
-        log.notice("engine started workspace=\(workspace.path, privacy: .public)")
+        log.notice("engine started workspace=\(workspace.path, privacy: .public) key=\(runtimeKey.projectPath, privacy: .public)")
         // Handshake-gated adapters (Cursor / ACP) publish the real SessionStart
         // after protocol open. Emitting the resume id here would unlock the
         // composer before `session/load` / `session/new` completes.
@@ -379,26 +411,42 @@ public actor AgentEngine: AgentEngineCommandPort {
                                           cwd: workspace))
 
         // Forward adapter events onto the bus, with bookkeeping side-effects.
-        eventForwardingTask = Task { [weak self] in
+        let forwarding = Task { [weak self] in
             for await event in adapterStream {
-                await self?.ingest(event)
+                await self?.ingest(event, from: runtimeKey)
             }
         }
+        eventForwardingTask = forwarding
 
         // Bell fan-out — empty stream for non-terminal transports finishes immediately.
         let bells = transport.bellEvents
-        bellTask = Task { [weak self] in
+        let bellsTask = Task { [weak self] in
             for await _ in bells {
-                await self?.bus.publish(.bell)
+                guard let self, await self.activeKey == runtimeKey else { continue }
+                await self.bus.publish(.bell)
             }
         }
+        bellTask = bellsTask
+
+        runtimes[runtimeKey] = AgentRuntime(
+            key: runtimeKey,
+            adapter: adapter,
+            transport: transport,
+            hookServer: hookServer,
+            workspace: workspace,
+            boundSessionID: resumeSessionID,
+            forwardingTask: forwarding,
+            bellTask: bellsTask,
+            sessionIDContinuation: sessionIDContinuation,
+            lastActivatedAt: seams.clock.now()
+        )
 
         let bootstrap = adapter.sessionBootstrapBytes(context: context)
         if !bootstrap.isEmpty {
             do {
                 try await transport.write(bootstrap)
             } catch {
-                await rollbackPartialStart()
+                await rollbackPartialStart(key: runtimeKey)
                 throw AgentError.spawnFailed(errno: Self.errno(from: error),
                                              detail: "bootstrap write failed: \(error)")
             }
@@ -419,22 +467,28 @@ public actor AgentEngine: AgentEngineCommandPort {
         }
 
         await startFSWatcher(workspace: workspace)
+        await publishRuntimePoolChanged()
     }
 
-    /// Shut everything down: cancel the read pipeline, kill the child, close
-    /// the hook server and FS watcher, drain the bus. Idempotent.
+    /// Shut down every pooled runtime. Idempotent. Used for workspace close /
+    /// daemon idle / public `shutdown`.
     public func shutdown(reason: AgentProtocol.StopReason = .userCancel) async {
-        guard state != .stopped else { return }
-        state = .stopping
-        await teardown(.shutdown(reason: reason))
+        await shutdownAll(reason: reason)
     }
 
     /// Tear down a partially started session without publishing `.stopped`.
-    private func rollbackPartialStart() async {
-        await teardown(.rollbackPartialStart)
+    private func rollbackPartialStart(key: AgentRuntimeKey) async {
+        await shutdownSlot(key, publishStopped: false)
+        await SilentDiagnostics.shared.record(kind: .enginePartialStartRollback,
+                                              owner: "AgentEngine",
+                                              summary: "Rolled back partial engine start")
+        if runtimes.isEmpty {
+            state = .stopped
+            activeKey = nil
+        }
     }
 
-    private func teardown(_ mode: TeardownMode) async {
+    func teardownActiveMirror(_ mode: TeardownMode) async {
         eventForwardingTask?.cancel()
         eventForwardingTask = nil
         bellTask?.cancel()
@@ -466,7 +520,6 @@ public actor AgentEngine: AgentEngineCommandPort {
         for task in permissionTimeouts.values { task.cancel() }
         permissionTimeouts.removeAll()
         if case .rollbackPartialStart = mode {
-            workspace = nil
             transcript = []
             changedFiles = []
         }
@@ -479,25 +532,34 @@ public actor AgentEngine: AgentEngineCommandPort {
             log.notice("engine stopped reason=\(String(describing: reason), privacy: .public)")
         case .rollbackPartialStart:
             state = .stopped
-            await SilentDiagnostics.shared.record(kind: .enginePartialStartRollback,
-                                                  owner: "AgentEngine",
-                                                  summary: "Rolled back partial engine start")
         }
     }
 
     /// Serialize adapter-driven shutdown so nested ingest/shutdown races cannot
     /// double-stop or cancel the forwarding task mid-flight.
-    private func requestShutdown(reason: StopReason) {
-        guard sessionTeardownState == .idle else { return }
-        sessionTeardownState = .inFlight
+    private func requestShutdown(reason: StopReason, for key: AgentRuntimeKey) {
         Task { [weak self] in
-            await self?.shutdown(reason: reason)
+            await self?.shutdownSlot(key, publishStopped: true, reason: reason)
         }
     }
 
     // MARK: - Internal — adapter event ingestion
 
-    private func ingest(_ event: AgentEvent) async {
+    func ingest(_ event: AgentEvent, from key: AgentRuntimeKey) async {
+        let isActive = activeKey == key
+        // Parked runtimes: only attention + permission reach the bus.
+        if !isActive {
+            switch event {
+            case .sessionAttentionChanged, .permissionRequest, .permissionAlreadyResolved:
+                break
+            case .stopped(let reason):
+                requestShutdown(reason: reason, for: key)
+                return
+            default:
+                return
+            }
+        }
+
         var publishIdleAfterEvent = false
         // Update bookkeeping before broadcasting.
         switch event {
@@ -526,6 +588,10 @@ public actor AgentEngine: AgentEngineCommandPort {
                 currentSessionID = id
                 sessionIDContinuation?.yield(id)
                 state = .running(sessionID: id)
+            }
+            if var runtime = runtimes[key] {
+                runtime.boundSessionID = id
+                runtimes[key] = runtime
             }
             // Same-id SessionStart (ACP resume after engine preset the id) must
             // still reach the bus so the UI can unlock and refresh catalogs.
@@ -566,7 +632,7 @@ public actor AgentEngine: AgentEngineCommandPort {
             pendingPermissions.removeValue(forKey: id)
             resumePollingAfterPermissionIfNeeded()
         case .stopped(let reason):
-            requestShutdown(reason: reason)
+            requestShutdown(reason: reason, for: key)
             return
         case .toolEnd:
             if !promptAcceptance.isAwaiting {
@@ -642,7 +708,7 @@ public actor AgentEngine: AgentEngineCommandPort {
         }
     }
 
-    private func onHeartbeat(_ tick: HeartbeatActivityMonitor.Tick) async {
+    func onHeartbeat(_ tick: HeartbeatActivityMonitor.Tick) async {
         guard let turn = currentTurnID else { return }
         await bus.publish(.noEventGap(turnID: turn, elapsed: tick.elapsed))
         await bus.publish(.activityStateChanged(tick.substate))
@@ -663,7 +729,7 @@ public actor AgentEngine: AgentEngineCommandPort {
         }
     }
 
-    private func cancelResumeStartupWatchdog() {
+    func cancelResumeStartupWatchdog() {
         resumeStartupWatchdogTask?.cancel()
         resumeStartupWatchdogTask = nil
         resumeStartupWatchdogTurnID = nil
@@ -738,7 +804,7 @@ public actor AgentEngine: AgentEngineCommandPort {
         }
     }
 
-    private func cancelResumePromptReadyWait() {
+    func cancelResumePromptReadyWait() {
         resumePromptReadyTask?.cancel()
         resumePromptReadyTask = nil
         resumePromptReadySampleCount = 0
@@ -932,7 +998,7 @@ public actor AgentEngine: AgentEngineCommandPort {
         }
     }
 
-    private func finishResumeStartupGate() {
+    func finishResumeStartupGate() {
         resumeStartupState = .inactive
         let waiters = resumeStartupWaiters
         resumeStartupWaiters.removeAll()
@@ -987,7 +1053,7 @@ public actor AgentEngine: AgentEngineCommandPort {
 
     // MARK: - Filesystem diff monitor
 
-    private func startFSWatcher(workspace: URL) async {
+    func startFSWatcher(workspace: URL) async {
         let watcher = FSEventsWatcher(workspace: workspace)
         do {
             try await watcher.start()
@@ -1007,7 +1073,7 @@ public actor AgentEngine: AgentEngineCommandPort {
         await refreshChangedFilesFromGit()
     }
 
-    private func stopFSWatcher() async {
+    func stopFSWatcher() async {
         diffRefreshTask?.cancel()
         diffRefreshTask = nil
         fsWatcherTask?.cancel()

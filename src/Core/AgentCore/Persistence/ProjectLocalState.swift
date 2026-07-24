@@ -12,7 +12,7 @@ import OSLog
 /// Schema v2 adds optional `folderView` for pinned sidebar paths on folder
 /// projects (`files` / `docs` / `modelhike`).
 public struct ProjectLocalState: Sendable, Codable, Hashable {
-    public static let currentSchemaVersion = 2
+    public static let currentSchemaVersion = 3
 
     public var schemaVersion: Int
     public var displayName: String
@@ -20,27 +20,47 @@ public struct ProjectLocalState: Sendable, Codable, Hashable {
     /// Pinned sidebar shortcuts for pin-capable folder kinds. Ignored for
     /// agent projects and `logs` (automatic shortcuts).
     public var folderView: FolderViewState?
+    public var preferFreshAgentProcess: Bool
+    public var agentInstanceIdentity: AgentInstanceIdentity
 
     public init(schemaVersion: Int = Self.currentSchemaVersion,
                 displayName: String,
                 projectType: ProjectType,
-                folderView: FolderViewState? = nil) {
+                folderView: FolderViewState? = nil,
+                preferFreshAgentProcess: Bool = false,
+                agentInstanceIdentity: AgentInstanceIdentity = .shared) {
         self.schemaVersion = schemaVersion
         self.displayName = displayName
         self.projectType = projectType
         self.folderView = Self.normalizedFolderView(folderView, for: projectType)
+        self.preferFreshAgentProcess = preferFreshAgentProcess
+        self.agentInstanceIdentity = agentInstanceIdentity
     }
 
     public init(ref: WorkspaceProjectsStore.ProjectRef,
                 folderView: FolderViewState? = nil) {
         self.init(displayName: ref.displayName,
                   projectType: ref.projectType,
-                  folderView: folderView)
+                  folderView: folderView,
+                  preferFreshAgentProcess: ref.preferFreshAgentProcess,
+                  agentInstanceIdentity: ref.agentInstanceIdentity)
     }
 
     enum CodingKeys: String, CodingKey {
         case schemaVersion, displayName, folderView
         case projectType = "agentMode"
+        case preferFreshAgentProcess, agentInstanceIdentity
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try c.decode(Int.self, forKey: .schemaVersion)
+        displayName = try c.decode(String.self, forKey: .displayName)
+        projectType = try c.decode(ProjectType.self, forKey: .projectType)
+        folderView = try c.decodeIfPresent(FolderViewState.self, forKey: .folderView)
+        preferFreshAgentProcess = try c.decodeIfPresent(Bool.self, forKey: .preferFreshAgentProcess) ?? false
+        agentInstanceIdentity = try c.decodeIfPresent(AgentInstanceIdentity.self,
+                                                      forKey: .agentInstanceIdentity) ?? .shared
     }
 
     public static func normalizedFolderView(_ state: FolderViewState?,

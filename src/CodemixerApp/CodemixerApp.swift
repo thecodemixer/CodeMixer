@@ -128,9 +128,9 @@ struct CodemixerApp: App {
         Window("Open Project", id: UtilityWindowID.openProject) {
             OpenProjectView(
                 onCancel: { bootstrap.showOpenProject = false }
-            ) { url in
+            ) { info in
                 bootstrap.showOpenProject = false
-                Task { await bootstrap.openWorkspace(url, resumeSessionID: nil) }
+                Task { await bootstrap.openProject(info) }
             }
             .codemixerAppearance(bootstrap.viewModel?.appearancePrefs ?? AppearancePrefs())
             .movablePanelTitle("Open Project")
@@ -143,16 +143,8 @@ struct CodemixerApp: App {
                 if let model = bootstrap.viewModel {
                     NewProjectSheet(
                         onCancel: { bootstrap.showNewProjectSheet = false },
-                        onCreate: { name, mode, folderURL in
-                            if let folderURL {
-                                await model.addExistingProject(
-                                    url: folderURL,
-                                    projectType: mode,
-                                    displayName: name
-                                )
-                            } else {
-                                await model.createProject(name: name, projectType: mode)
-                            }
+                        onCreate: { info in
+                            await model.createOrAddProject(info)
                             bootstrap.showNewProjectSheet = false
                         }
                     )
@@ -189,8 +181,8 @@ struct CodemixerApp: App {
                     ConfigureProjectSheet(
                         projectURL: url,
                         onCancel: { bootstrap.cancelPendingProjectConfiguration() },
-                        onConfirm: { mode in
-                            Task { await bootstrap.confirmPendingProjectConfiguration(mode: mode) }
+                        onConfirm: { info in
+                            Task { await bootstrap.confirmPendingProjectConfiguration(info) }
                         }
                     )
                 } else {

@@ -97,10 +97,20 @@ extension Bootstrap {
         viewModel?.resetForClosedWorkspace()
     }
 
+    /// File → Add Existing Project / Open Project sheet result.
+    func openProject(_ info: ProjectDraft, resumeSessionID: String? = nil) async {
+        guard let url = info.existingFolderURL else { return }
+        await openWorkspace(url,
+                            resumeSessionID: resumeSessionID,
+                            preferFreshAgentProcess: info.preferFreshAgentProcess)
+    }
+
     /// Opens a folder after resolving its project type from project-local state
     /// or the workspace index. If neither knows the mode, presents the
     /// configure sheet instead of guessing.
-    func openWorkspace(_ url: URL, resumeSessionID: String?) async {
+    func openWorkspace(_ url: URL,
+                       resumeSessionID: String?,
+                       preferFreshAgentProcess: Bool = false) async {
         showProjectPicker = false
         let resolved: ProjectType?
         if let store = viewModel?.workspaceProjects {
@@ -109,7 +119,10 @@ extension Bootstrap {
             resolved = ProjectLocalStateStore.load(from: url, fileSystem: Seams.live.fileSystem)?.projectType
         }
         if let mode = resolved {
-            await openWorkspace(url, resumeSessionID: resumeSessionID, projectType: mode)
+            await openWorkspace(url,
+                                resumeSessionID: resumeSessionID,
+                                projectType: mode,
+                                preferFreshAgentProcess: preferFreshAgentProcess)
             return
         }
         // Empty workspace shell: adopted via New Workspace with no projects yet.
@@ -133,22 +146,43 @@ extension Bootstrap {
         }
         pendingConfigureURL = url
         pendingConfigureResumeSessionID = resumeSessionID
+        pendingConfigurePreferFreshAgentProcess = preferFreshAgentProcess
     }
 
-    func confirmPendingProjectConfiguration(mode: ProjectType) async {
-        guard let url = pendingConfigureURL else { return }
+    func confirmPendingProjectConfiguration(_ info: ProjectDraft) async {
+        guard let url = pendingConfigureURL ?? info.existingFolderURL else { return }
         let resume = pendingConfigureResumeSessionID
+        let preferFresh = info.preferFreshAgentProcess || pendingConfigurePreferFreshAgentProcess
+        guard let mode = info.projectType else { return }
         pendingConfigureURL = nil
         pendingConfigureResumeSessionID = nil
-        await openWorkspace(url, resumeSessionID: resume, projectType: mode)
+        pendingConfigurePreferFreshAgentProcess = false
+        await openWorkspace(url,
+                            resumeSessionID: resume,
+                            projectType: mode,
+                            preferFreshAgentProcess: preferFresh)
+    }
+
+    func confirmPendingProjectConfiguration(mode: ProjectType,
+                                            preferFreshAgentProcess: Bool = false) async {
+        await confirmPendingProjectConfiguration(ProjectDraft(
+            name: pendingConfigureURL?.lastPathComponent ?? "",
+            projectType: mode,
+            preferFreshAgentProcess: preferFreshAgentProcess,
+            existingFolderURL: pendingConfigureURL
+        ))
     }
 
     func cancelPendingProjectConfiguration() {
         pendingConfigureURL = nil
         pendingConfigureResumeSessionID = nil
+        pendingConfigurePreferFreshAgentProcess = false
     }
 
-    func openWorkspace(_ url: URL, resumeSessionID: String?, projectType: ProjectType) async {
+    func openWorkspace(_ url: URL,
+                       resumeSessionID: String?,
+                       projectType: ProjectType,
+                       preferFreshAgentProcess: Bool = false) async {
         showProjectPicker = false
         pendingConfigureURL = nil
         pendingConfigureResumeSessionID = nil
@@ -216,6 +250,13 @@ extension Bootstrap {
         if let store = projectsStore {
             _ = await store.projects(for: url, rootProjectType: projectType)
             _ = try? await store.setProjectType(path: url.path, projectType: projectType, in: url)
+            if preferFreshAgentProcess {
+                _ = try? await store.setAgentLaunchPreference(
+                    path: url.path,
+                    preferFreshAgentProcess: true,
+                    in: url
+                )
+            }
         }
 
         guard let adapter = await Self.adapter(for: projectType) else {

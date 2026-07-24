@@ -44,23 +44,28 @@ extension EngineViewModel {
         }
     }
 
+    /// Create or adopt a project from sheet-collected `ProjectDraft`.
+    public func createOrAddProject(_ info: ProjectDraft) async {
+        guard let projectType = info.projectType else { return }
+        if let folderURL = info.existingFolderURL {
+            await addExistingProject(info, url: folderURL, projectType: projectType)
+        } else {
+            await createProject(info, projectType: projectType)
+        }
+    }
+
     /// Create a new project (subfolder of the workspace) and switch to it.
     /// Blocks until the project is registered and its model catalog is ready.
-    public func createProject(name: String, projectType: ProjectType) async {
+    public func createProject(_ info: ProjectDraft, projectType: ProjectType) async {
         guard let workspaceRoot, let store = workspaceProjects else { return }
         do {
-            let ref = try await store.createProject(name: name, projectType: projectType, in: workspaceRoot)
-            if !projectType.isFolderBacked {
-                try await WorkspaceLifecycle(model: self).ensureModels(for: projectType)
-            }
-            let refs = await store.projects(for: workspaceRoot, rootProjectType: projectType)
-            await applyProjectList(refs)
-            if projectType.isFolderBacked {
-                openFolderProject(ref, relativePath: nil)
-            } else {
-                applyAdapterCapabilities(for: projectType, projectURL: URL(fileURLWithPath: ref.path))
-                newChat(in: ref.path)
-            }
+            let ref = try await store.createProject(
+                name: info.name,
+                projectType: projectType,
+                preferFreshAgentProcess: info.preferFreshAgentProcess,
+                in: workspaceRoot
+            )
+            await finishProjectRegistration(ref, projectType: projectType)
         } catch {
             recordProjectError(error)
         }
@@ -68,17 +73,61 @@ extension EngineViewModel {
 
     /// Register an existing folder as a project of the workspace.
     /// Blocks until the project is registered and its model catalog is ready.
-    public func addExistingProject(url: URL,
-                                   projectType: ProjectType,
-                                   displayName: String? = nil) async {
+    public func addExistingProject(_ info: ProjectDraft,
+                                   url: URL,
+                                   projectType: ProjectType) async {
         guard let workspaceRoot, let store = workspaceProjects else { return }
         do {
             let ref = try await store.addExistingProject(
                 url: url,
                 projectType: projectType,
-                displayName: displayName,
+                displayName: info.name,
+                preferFreshAgentProcess: info.preferFreshAgentProcess,
                 in: workspaceRoot
             )
+            await finishProjectRegistration(ref, projectType: projectType)
+        } catch {
+            recordProjectError(error)
+        }
+    }
+
+    /// Create a new project (subfolder of the workspace) and switch to it.
+    /// Blocks until the project is registered and its model catalog is ready.
+    public func createProject(name: String,
+                              projectType: ProjectType,
+                              preferFreshAgentProcess: Bool = false) async {
+        await createProject(
+            ProjectDraft(
+                name: name,
+                projectType: projectType,
+                preferFreshAgentProcess: preferFreshAgentProcess
+            ),
+            projectType: projectType
+        )
+    }
+
+    /// Register an existing folder as a project of the workspace.
+    /// Blocks until the project is registered and its model catalog is ready.
+    public func addExistingProject(url: URL,
+                                   projectType: ProjectType,
+                                   displayName: String? = nil,
+                                   preferFreshAgentProcess: Bool = false) async {
+        await addExistingProject(
+            ProjectDraft(
+                name: displayName ?? url.lastPathComponent,
+                projectType: projectType,
+                preferFreshAgentProcess: preferFreshAgentProcess,
+                existingFolderURL: url
+            ),
+            url: url,
+            projectType: projectType
+        )
+    }
+
+    private func finishProjectRegistration(_ ref: WorkspaceProjectsStore.ProjectRef,
+                                           projectType: ProjectType) async {
+        guard let workspaceRoot, let store = workspaceProjects else { return }
+        do {
             if !projectType.isFolderBacked {
                 try await WorkspaceLifecycle(model: self).ensureModels(for: projectType)
             }
@@ -255,6 +304,7 @@ extension EngineViewModel {
         selectedAgentModeID = ""
         workspaceModelCatalogRows = []
         slashCommands = []
+        livePooledProjectPaths = []
     }
 
     func applyProjectList(_ refs: [WorkspaceProjectsStore.ProjectRef]) async {

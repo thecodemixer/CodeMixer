@@ -134,8 +134,8 @@ public enum CodexInputEncoding {
         return CodexRPCCodec.concatenate(frames)
     }
 
-    private static func resumeThread(id threadID: String,
-                                     state: CodexSessionState) -> Data {
+    public static func resumeThread(id threadID: String,
+                                    state: CodexSessionState) -> Data {
         let id = state.nextRequestID(for: .threadResume)
         return CodexRPCCodec.request(
             id: id,

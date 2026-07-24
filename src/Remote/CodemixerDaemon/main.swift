@@ -24,10 +24,9 @@ struct CodemixerDaemon {
         let seams = Seams.live
         let engine = AgentEngine(seams: seams)
         await engine.bootstrap()
-        let adapter = ClaudeAdapter()
-        await AdapterRegistry.shared.register(adapter)
-        await AdapterRegistry.shared.register(CodexAdapter())
-        await AdapterRegistry.shared.register(CursorACPAdapter())
+        await AdapterRegistry.shared.register(id: .claudeCode) { ClaudeAdapter() }
+        await AdapterRegistry.shared.register(id: .codex) { CodexAdapter() }
+        await AdapterRegistry.shared.register(id: .cursorCLI) { CursorACPAdapter() }
         await CustomAgentAdapterFactories.shared.register(CustomACPAdapterFactory())
 
         let pairing = await RemoteRuntimeCoordinator.makePairing(seams: seams)

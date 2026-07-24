@@ -51,6 +51,7 @@ final class Bootstrap {
     /// Folder chosen via Open Project that has no stored project type yet.
     var pendingConfigureURL: URL?
     var pendingConfigureResumeSessionID: String?
+    var pendingConfigurePreferFreshAgentProcess: Bool = false
 
     let voice = VoiceInputService()
     let tts = TTSService()

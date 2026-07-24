@@ -208,6 +208,10 @@ public final class CodexAdapter: AgentAdapter {
         }
     }
 
+    public func encodeResumeSession(sessionID: String) -> Data? {
+        CodexInputEncoding.resumeThread(id: sessionID, state: state)
+    }
+
     public func encodePermissionResponse(_ decision: PermissionDecision,
                                          for prompt: PermissionPrompt) -> PermissionResponseDelivery {
         let remember = decision == .allowAlways

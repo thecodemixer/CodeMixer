@@ -323,8 +323,7 @@ public struct NewProjectSheet: View {
     }
 
     public let onCancel: () -> Void
-    /// `folderURL` is set only when registering an existing directory for a folder type.
-    public let onCreate: (_ name: String, _ projectType: ProjectType, _ folderURL: URL?) async -> Void
+    public let onCreate: (_ info: ProjectDraft) async -> Void
     private let random: any RandomSource
 
     @State private var name: String = ""
@@ -338,11 +337,12 @@ public struct NewProjectSheet: View {
     @State private var customExecutable: String = ""
     @State private var customArguments: String = ""
     @State private var customTransport: AgentTransportKind = .agentClientProtocol
+    @State private var preferFreshAgentProcess = false
     @State private var isCreating = false
 
     public init(onCancel: @escaping () -> Void,
                 random: any RandomSource = SystemRandomSource(),
-                onCreate: @escaping (_ name: String, _ projectType: ProjectType, _ folderURL: URL?) async -> Void) {
+                onCreate: @escaping (_ info: ProjectDraft) async -> Void) {
         self.onCancel = onCancel
         self.random = random
         self.onCreate = onCreate
@@ -427,6 +427,11 @@ public struct NewProjectSheet: View {
                 }
             }
 
+            if category != .folder {
+                ProjectAdvancedOptions(preferFreshAgentProcess: $preferFreshAgentProcess)
+                    .disabled(isCreating)
+            }
+
             sheetFooter(
                 primaryTitle: isCreating ? "Creating…" : "Create",
                 primaryEnabled: canCreate,
@@ -439,7 +444,12 @@ public struct NewProjectSheet: View {
                 let folderURL: URL? = (category == .folder && folderLocationMode == .chooseExisting)
                     ? folderLocation
                     : nil
-                await onCreate(trimmedName, projectType, folderURL)
+                await onCreate(ProjectDraft(
+                    name: trimmedName,
+                    projectType: projectType,
+                    preferFreshAgentProcess: preferFreshAgentProcess,
+                    existingFolderURL: folderURL
+                ))
             }
         }
         .padding(Theme.spacing.s24)
@@ -502,7 +512,7 @@ public struct NewProjectSheet: View {
 public struct ConfigureProjectSheet: View {
     public let projectURL: URL
     public let onCancel: () -> Void
-    public let onConfirm: (ProjectType) -> Void
+    public let onConfirm: (_ info: ProjectDraft) -> Void
     private let random: any RandomSource
 
     @State private var category: ProjectTypeCategory = .singleAgent
@@ -513,11 +523,12 @@ public struct ConfigureProjectSheet: View {
     @State private var customExecutable: String = ""
     @State private var customArguments: String = ""
     @State private var customTransport: AgentTransportKind = .agentClientProtocol
+    @State private var preferFreshAgentProcess = false
 
     public init(projectURL: URL,
                 random: any RandomSource = SystemRandomSource(),
                 onCancel: @escaping () -> Void,
-                onConfirm: @escaping (ProjectType) -> Void) {
+                onConfirm: @escaping (_ info: ProjectDraft) -> Void) {
         self.projectURL = projectURL
         self.random = random
         self.onCancel = onCancel
@@ -554,9 +565,18 @@ public struct ConfigureProjectSheet: View {
                 folderKind: $folderKind
             )
 
+            if category != .folder {
+                ProjectAdvancedOptions(preferFreshAgentProcess: $preferFreshAgentProcess)
+            }
+
             sheetFooter(primaryTitle: "Open", primaryEnabled: resolvedProjectType != nil, onCancel: onCancel) {
                 guard let projectType = resolvedProjectType else { return }
-                onConfirm(projectType)
+                onConfirm(ProjectDraft(
+                    name: projectURL.lastPathComponent,
+                    projectType: projectType,
+                    preferFreshAgentProcess: preferFreshAgentProcess,
+                    existingFolderURL: projectURL
+                ))
             }
         }
         .padding(Theme.spacing.s24)
@@ -564,6 +584,25 @@ public struct ConfigureProjectSheet: View {
                maxWidth: Theme.layout.openProjectMaxWidth)
         .fixedSize(horizontal: false, vertical: true)
         .background(Theme.surface.canvas)
+    }
+}
+
+/// Collapsible Advanced options shared by New / Configure Project sheets.
+struct ProjectAdvancedOptions: View {
+    @Binding var preferFreshAgentProcess: Bool
+
+    var body: some View {
+        DisclosureGroup("Advanced") {
+            VStack(alignment: .leading, spacing: Theme.spacing.s8) {
+                Toggle("Launch new agent instance", isOn: $preferFreshAgentProcess)
+                    .accessibilityLabel("Launch new agent instance")
+                Text("When off, Codemixer keeps one agent CLI running per project and reuses it when you return — including New Chat and session switches in that project. When on, opening this project always starts a fresh CLI.")
+                    .font(Theme.typography.caption)
+                    .foregroundStyle(Theme.text.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.top, Theme.spacing.s8)
+        }
     }
 }
 

@@ -320,6 +320,15 @@ public final class ClaudeAdapter: AgentAdapter, @unchecked Sendable {
         ClaudeInputEncoding.userPrompt(text)
     }
 
+    /// Warm session switch inside a live Claude PTY (`/resume <id>`), matching
+    /// Codex/ACP in-process resume so the sticky pool does not respawn Claude
+    /// when the sidebar picks another chat in the same project.
+    public func encodeResumeSession(sessionID: String) -> Data? {
+        let trimmed = sessionID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return ClaudeInputEncoding.userPrompt("/resume \(trimmed)")
+    }
+
     public func cancelSequence() -> Data {
         ClaudeInputEncoding.cancelSequence()
     }
