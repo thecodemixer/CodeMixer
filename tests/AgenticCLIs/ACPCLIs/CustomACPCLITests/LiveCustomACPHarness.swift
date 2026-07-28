@@ -1,7 +1,7 @@
 import Foundation
 import ACPCLIs
 import AgentClientProtocol
-import AgentCore
+@testable import AgentCore
 import AgentProtocol
 
 /// Opt-in driver for a real ACP binary through `CustomACPAdapter` (Codemixer path).
@@ -78,7 +78,8 @@ struct LiveCustomACPHarness {
         let dashboardTitle: String?
         let controlSessionID: String?
         let fileSessionIDs: [String]
-        let sessionIndexChangedCount: Int
+        let phaseSessionIDs: [String]
+        let sessionsListedCount: Int
         let attentionRaisedCount: Int
         let attentionClearedCount: Int
         let permissionResolvedCount: Int
@@ -293,16 +294,21 @@ struct LiveCustomACPHarness {
         let permissionResolvedCount = (try? await permissionLoop.value) ?? 0
 
         let evidence = try Self.readPipelineEvidence(projectRoot: config.workspace)
-        let fileSessionIDs = Self.fileSessionIDsFromStore(
+        try await engine.send(.listSessions(path: config.workspace.path))
+        let fileSessionIDs = await sink.fileSessionIDs()
+        let phaseSessionIDs = try await Self.phaseSessionIDs(
+            fileSessionIDs,
             projectRoot: config.workspace,
-            customAgentID: ref.id
+            namespace: adapter.historyNamespace,
+            fileSystem: fs
         )
         let result = MigrationReflectionResult(
             dashboardURL: dashboardURL,
             dashboardTitle: await sink.dashboardTitle(),
             controlSessionID: await sink.sessionID(),
             fileSessionIDs: fileSessionIDs,
-            sessionIndexChangedCount: await sink.sessionIndexChangedCount(),
+            phaseSessionIDs: phaseSessionIDs,
+            sessionsListedCount: await sink.sessionsListedCount(),
             attentionRaisedCount: await sink.attentionRaisedCount(),
             attentionClearedCount: await sink.attentionClearedCount(),
             permissionResolvedCount: permissionResolvedCount,
@@ -319,11 +325,16 @@ struct LiveCustomACPHarness {
         }
         guard result.fileSessionIDs.count >= config.minFileSessions else {
             throw LiveCustomACPError.assertion(
-                "expected ≥\(config.minFileSessions) reverse file sessions in ACP session index; got \(result.fileSessionIDs)"
+                "expected ≥\(config.minFileSessions) reverse file sessions in local transcript list; got \(result.fileSessionIDs)"
             )
         }
-        guard result.sessionIndexChangedCount > 0 else {
-            throw LiveCustomACPError.assertion("Codemixer never received sessionIndexChanged")
+        guard Set(result.fileSessionIDs).isSubset(of: Set(result.phaseSessionIDs)) else {
+            throw LiveCustomACPError.assertion(
+                "local history did not replay phases for every file session; phases=\(result.phaseSessionIDs)"
+            )
+        }
+        guard result.sessionsListedCount > 0 else {
+            throw LiveCustomACPError.assertion("Codemixer never received sessionsListed")
         }
         guard result.attentionRaisedCount > 0 || permissionResolvedCount > 0 else {
             throw LiveCustomACPError.assertion(
@@ -458,21 +469,6 @@ struct LiveCustomACPHarness {
         )
     }
 
-    private static func fileSessionIDsFromStore(projectRoot: URL, customAgentID: String) -> [String] {
-        // Codemixer reflects reverse session/new via ACPSessionIndex + sessionIndexChanged,
-        // not a fresh sessionStarted event (control session already owns the engine session).
-        let indexURL = projectRoot
-            .appendingPathComponent(".codemixer/acp/\(customAgentID)/sessions-index.json")
-        guard let data = try? Data(contentsOf: indexURL),
-              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let entries = root["entries"] as? [[String: Any]]
-        else { return [] }
-        return entries.compactMap { entry in
-            guard let id = entry["id"] as? String, id.hasPrefix("file:") else { return nil }
-            return id
-        }.sorted()
-    }
-
     private static func runGit(_ args: [String], cwd: URL) throws {
         let proc = Process()
         proc.executableURL = SystemPaths.git
@@ -487,6 +483,32 @@ struct LiveCustomACPHarness {
             let msg = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
             throw LiveCustomACPError.assertion("git \(args.joined(separator: " ")) failed: \(msg)")
         }
+    }
+
+    private static func phaseSessionIDs(_ sessionIDs: [String],
+                                        projectRoot: URL,
+                                        namespace: String,
+                                        fileSystem: any FileSystem) async throws -> [String] {
+        let repository = SessionTranscriptRepository(
+            store: ProjectSessionTranscriptStore(fileSystem: fileSystem),
+            clock: SystemClock()
+        )
+        var result: [String] = []
+        for sessionID in sessionIDs {
+            let key = SessionTranscriptKey(projectRoot: projectRoot,
+                                           namespace: namespace,
+                                           sessionID: sessionID)
+            let events = try await repository.replayEvents(for: key)
+            if events.contains(where: {
+                if case .sessionPhaseChanged(let id, _) = $0 {
+                    return id == sessionID
+                }
+                return false
+            }) {
+                result.append(sessionID)
+            }
+        }
+        return result.sorted()
     }
 
     private static func needsReviewURL(dashboard: URL, filePath: String) throws -> URL {
@@ -629,6 +651,9 @@ private actor LiveCustomEventSink {
             if case .sessionStarted(let id, _, _) = event, id.hasPrefix("file:") {
                 ids.insert(id)
             }
+            if case .sessionsListed(_, let sessions) = event {
+                ids.formUnion(sessions.lazy.map(\.id).filter { $0.hasPrefix("file:") })
+            }
         }
         return ids.sorted()
     }
@@ -651,9 +676,9 @@ private actor LiveCustomEventSink {
         return nil
     }
 
-    func sessionIndexChangedCount() -> Int {
+    func sessionsListedCount() -> Int {
         events.reduce(0) { count, event in
-            if case .sessionIndexChanged = event { return count + 1 }
+            if case .sessionsListed = event { return count + 1 }
             return count
         }
     }

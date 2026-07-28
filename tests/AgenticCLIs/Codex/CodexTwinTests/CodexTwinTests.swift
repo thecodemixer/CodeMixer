@@ -50,20 +50,4 @@ struct CodexTwinTests {
         #expect(isFinal)
     }
 
-    @Test("Twin resumable sessions retain Codex identity")
-    func resumableIdentity() async {
-        let twin = CodexTwin(
-            environment: FakeEnvironment(),
-            fileSystem: InMemoryFileSystem(),
-            clock: FakeClock(),
-            random: FakeRandomSource()
-        )
-
-        let sessions = await twin.listResumableSessions(
-            workspace: TestPaths.underTemporary("project")
-        )
-
-        #expect(sessions.count == 1)
-        #expect(sessions.first?.agentID == .codex)
-    }
 }

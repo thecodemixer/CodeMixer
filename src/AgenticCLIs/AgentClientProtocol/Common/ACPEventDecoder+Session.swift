@@ -8,8 +8,6 @@ import AgentProtocol
 /// turn. Dashboard bootstrap and session-metadata bookkeeping live in
 /// `+Dashboard`; live streaming updates live in `+Streaming`.
 extension ACPEventDecoder {
-    private static let sessionNotFoundCode = -32_004
-
     func response(id: JSONValue,
                   result: JSONValue?,
                   error: ACPIncoming.RPCError?) async -> Batch {
@@ -22,34 +20,12 @@ extension ACPEventDecoder {
                 ])
             }
             if purpose == .sessionLoad {
-                if error.code == Self.sessionNotFoundCode,
-                   let context = state.currentContext(),
-                   let sessionID = context.resumeSessionID,
-                   !sessionID.isEmpty {
-                    state.setSessionID(sessionID)
-                    let local = await sessionIndex.localHistoryEvents(
-                        sessionID: sessionID,
-                        customAgentID: context.customAgentID,
-                        random: random
-                    )
-                    if !local.isEmpty {
-                        return Batch(events: [
-                            .sessionStarted(
-                                sessionID: sessionID,
-                                model: state.currentModelID(),
-                                cwd: context.workspace
-                            ),
-                        ] + local + [
-                            .cachedTranscriptLoaded(sessionID: sessionID),
-                        ])
-                    }
-                }
                 let sessionID = state.currentContext()?.resumeSessionID ?? "unknown"
                 return Batch(events: [
-                    .error(ACPAgentError.sessionLoadFailed(
+                    .error(.sessionReadinessFailed(
                         sessionID: sessionID,
-                        message: error.message
-                    ).agentError),
+                        detail: error.message
+                    )),
                 ])
             }
             return Batch(events: [
@@ -111,44 +87,34 @@ extension ACPEventDecoder {
             currentModelID: modelCatalog.currentModelID,
             available: modelCatalog.available
         )
-        await sessionIndex.recordSession(
-            id: sessionID,
-            customAgentID: context.customAgentID,
-            workspace: context.workspace,
-            title: nil
-        )
-        // SessionStart must lead replay. The view model uses it to bind the
-        // selected session before reducing user/assistant/phase events; putting
-        // replay first made history depend on navigator preselection and could
-        // leave loaded chats empty after races.
-        var events = state.flushHistoryReplay()
+        await updateSessionMetadata(.registered(sessionID: sessionID,
+                                                title: nil))
+        var events: [AgentEvent] = []
         // Background work while the user watched another session (overview) may
         // still sit in the foreign buffer — persist it so local history below
         // includes the latest coalesced turn.
         if let pending = state.flushForeignBuffer(sessionID: sessionID),
            !pending.text.isEmpty {
-            await sessionIndex.appendConversationTurn(
-                sessionID: sessionID,
-                customAgentID: context.customAgentID,
-                role: pending.role,
-                text: pending.text
-            )
-        }
-        let hasWireReplay = events.contains {
-            switch $0 {
-            case .userTurn, .assistantText, .textDelta, .thinkingChunk, .toolStart:
-                return true
+            let bufferedEvents: [AgentEvent]
+            switch pending.role.stored {
+            case .user:
+                bufferedEvents = [.userTurn(id: random.uuid().uuidString,
+                                            text: pending.text)]
+            case .thinking:
+                let id = random.uuid()
+                bufferedEvents = [
+                    .thinkingChunk(blockID: id, delta: pending.text),
+                    .thinkingComplete(blockID: id, duration: .zero),
+                ]
             default:
-                return false
+                let id = random.uuid().uuidString
+                bufferedEvents = [.assistantText(id: id,
+                                                 blockID: id,
+                                                 text: pending.text,
+                                                 isFinal: true)]
             }
-        }
-        if !hasWireReplay, purpose == .sessionLoad || purpose == .sessionResume {
-            let local = await sessionIndex.localHistoryEvents(
-                sessionID: sessionID,
-                customAgentID: context.customAgentID,
-                random: random
-            )
-            events.append(contentsOf: local)
+            await recordBackgroundSessionEvents(.init(sessionID: sessionID,
+                                                      events: bufferedEvents))
         }
         events.insert(.sessionStarted(
             sessionID: sessionID,
@@ -175,51 +141,32 @@ extension ACPEventDecoder {
     }
 
     func mergeListedSessions(_ result: JSONValue?) async {
-        guard let context = state.currentContext(),
+        guard state.currentContext() != nil,
               let sessions = result?["sessions"]?.arrayValue else { return }
-        var didMutateIndex = false
+        // Local transcript index is the only session-list authority. Never
+        // register vendor-only chats from session/list — only refresh metadata
+        // for sessions already present (overview / archived markers).
         for session in sessions {
             guard let id = session["sessionId"]?.stringValue else { continue }
-            let title = session["title"]?.stringValue
-            await sessionIndex.recordSession(
-                id: id,
-                customAgentID: context.customAgentID,
-                workspace: context.workspace,
-                title: title
-            )
             let meta = session["_meta"]?.objectValue
             if let isOverview = meta?["codemixer.dev/overviewSession"]?.boolValue
                 ?? meta?["overviewSession"]?.boolValue {
-                let overviewURL = meta?["codemixer.dev/dashboardUrl"]?.stringValue
-                    .flatMap(URL.init(string:))
-                await sessionIndex.setIsOverview(
-                    sessionID: id,
-                    customAgentID: context.customAgentID,
-                    isOverview: isOverview,
-                    overviewURL: overviewURL
-                )
-                didMutateIndex = true
+                if isOverview {
+                    let overviewURL = meta?["codemixer.dev/dashboardUrl"]?.stringValue
+                        .flatMap(URL.init(string:))
+                    await updateSessionMetadata(.markAsOverview(sessionID: id,
+                                                                url: overviewURL))
+                } else {
+                    await updateSessionMetadata(.unmarkAsOverview(sessionID: id))
+                }
             }
             if let archived = meta?["archived"]?.boolValue {
-                await sessionIndex.setArchived(
-                    sessionID: id,
-                    customAgentID: context.customAgentID,
-                    archived: archived
-                )
-                didMutateIndex = true
+                if archived {
+                    await updateSessionMetadata(.archived(sessionID: id))
+                } else {
+                    await updateSessionMetadata(.unarchived(sessionID: id))
+                }
             }
-            if let needsAttention = meta?["needsAttention"]?.boolValue {
-                await sessionIndex.setNeedsAttention(
-                    sessionID: id,
-                    customAgentID: context.customAgentID,
-                    needsAttention: needsAttention
-                )
-                didMutateIndex = true
-            }
-        }
-        if didMutateIndex {
-            // Caller (handleSessionOpen) already emits sessionIndexChanged when listing.
-            _ = didMutateIndex
         }
     }
 
@@ -228,19 +175,7 @@ extension ACPEventDecoder {
         if let thoughtID = state.takeOpenThinkingBlockID() {
             events.append(.thinkingComplete(blockID: thoughtID, duration: .zero))
         }
-        if let thoughtText = state.takeThoughtText(),
-           let context = state.currentContext(),
-           let sessionID = state.sessionID() {
-            // Await the turn cache write — a detached Task was racing
-            // engine shutdown / the next `session/load`, so Cursor history
-            // often replayed user turns only.
-            await sessionIndex.appendConversationTurn(
-                sessionID: sessionID,
-                customAgentID: context.customAgentID,
-                role: .thinking,
-                text: thoughtText
-            )
-        }
+        _ = state.takeThoughtText()
         if let finalized = state.finalizedAssistantMessage() {
             events.append(.assistantText(
                 id: finalized.id.uuidString,
@@ -248,14 +183,6 @@ extension ACPEventDecoder {
                 text: finalized.text,
                 isFinal: true
             ))
-            if let context = state.currentContext(), let sessionID = state.sessionID() {
-                await sessionIndex.appendConversationTurn(
-                    sessionID: sessionID,
-                    customAgentID: context.customAgentID,
-                    role: .assistant,
-                    text: finalized.text
-                )
-            }
         }
         state.resetTurnScopedIDs()
         events.append(.activityStateChanged(.idle))

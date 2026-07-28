@@ -15,7 +15,8 @@ Agent Client Protocol launch an ACP agent server over stdio JSON-RPC
 | Cancel | `session/cancel` notification |
 | Updates | `session/update` → `AgentEvent`s |
 | Reverse RPCs | `fs/*`, `terminal/*`, `session/request_permission` |
-| Sessions | `ACPSessionIndexing`: app-support `ACPSessionIndex` (Cursor / bare) or project `ACPProjectSessionStore` (Custom under `.codemixer/acp/<id>/`) |
+| Sessions | AgentCore's project-local `SessionTranscriptRepository` owns listing and visible history. `session/load` restores only agent state; replayed history chunks are discarded. Foreign live updates enter the repository through `recordBackgroundSessionEvents`. |
+| Existing-project import | `ACPSessionCatalogImporter` reads the retired Custom ACP `.codemixer/acp/<id>/sessions-index.json` format once; no live ACP turn cache remains. |
 
 Production custom projects register `CustomACPAdapterFactory` from `ACPCLIs`
 (Bootstrap/daemon). `ACPCustomAgentAdapterFactory` still builds a bare
@@ -24,7 +25,7 @@ Production custom projects register `CustomACPAdapterFactory` from `ACPCLIs`
 ## Layout
 
 - `Adapter/ACPAdapter.swift` — production `AgentAdapter`
-- `Common/` — framing, codec, state, decoder, session index, FS/terminal helpers
+- `Common/` — framing, codec, state, decoder, retired-catalog importer, FS/terminal helpers
 - `External/ACPTerminalProcess.swift` — sole `Process()` site for reverse terminals
 - `digital-twin/Twin/ACPTwin.swift` — deterministic test twin
 - `digital-twin/Twin/ACPTwinScenario.swift` — scripted scenarios for `fake-acp`

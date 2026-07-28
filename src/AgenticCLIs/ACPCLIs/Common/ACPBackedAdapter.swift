@@ -8,7 +8,7 @@ import AgentProtocol
 /// ACP-backed adapters (`CursorACPAdapter`, `CustomACPAdapter`) delegate to
 /// their wrapped `ACPAdapter` byte-for-byte. Conformers still implement
 /// identity, launch, and mode-mapping (`encodeCommand`, `availableAgentModes`,
-/// `availableModels`, `listResumableSessions`, …) themselves — those differ
+/// `availableModels`, `importSessionCatalog`, …) themselves — those differ
 /// per vendor and are not pure forwarding.
 protocol ACPBackedAdapter: AgentAdapter {
     var inner: ACPAdapter { get }
@@ -51,4 +51,14 @@ extension ACPBackedAdapter {
     public func enumerateProjectCommands(workspace: URL) async -> [SlashCommand] { [] }
 
     public func resumeArgvAddition(sessionID: String) -> [String] { [] }
+
+    public func importSessionCatalog(
+        workspace: URL,
+        env: ResolvedEnvironment,
+        progress: @escaping @Sendable (Int, Int) async -> Void
+    ) async throws -> [ImportedSession] {
+        try await inner.importSessionCatalog(workspace: workspace,
+                                             env: env,
+                                             progress: progress)
+    }
 }

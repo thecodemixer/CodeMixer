@@ -15,13 +15,13 @@ public final class CursorACPAdapter: AgentAdapter, ACPBackedAdapter {
     public let iconSymbol = "cursorarrow.rays"
     public let capabilities: AgentCapabilities = [
         .permissionPrompts,
-        .resumableSessions,
-        .sessionHandshakeGate,
+        .resumableSessions
     ]
     public var transportDescriptor: AgentTransportDescriptor { .agentClientProtocol }
 
     private let environment: any AgentEnvironment
     private let fileSystem: any FileSystem
+    private let random: any RandomSource
     private let locator: CursorBinaryLocator
     private let processRunner: ProcessRunner
     private let modelCache: AgentModelCatalogCache
@@ -35,6 +35,7 @@ public final class CursorACPAdapter: AgentAdapter, ACPBackedAdapter {
                 initialModels: [AgentModelOption] = []) {
         self.environment = environment
         self.fileSystem = fileSystem
+        self.random = random
         self.locator = CursorBinaryLocator(environment: environment, fileSystem: fileSystem)
         self.processRunner = processRunner
         self.modelCache = AgentModelCatalogCache(models: initialModels)
@@ -137,18 +138,16 @@ public final class CursorACPAdapter: AgentAdapter, ACPBackedAdapter {
         return live.isEmpty ? modelCache.snapshot() : live
     }
 
-    public func listResumableSessions(workspace: URL) async -> [SessionSummary] {
-        let summaries = await inner.listResumableSessions(workspace: workspace)
-        return summaries.map {
-            SessionSummary(
-                id: $0.id,
-                agentID: .cursorCLI,
-                workspace: $0.workspace,
-                title: $0.title,
-                lastActivity: $0.lastActivity,
-                messageCount: $0.messageCount
-            )
-        }
+    public func importSessionCatalog(
+        workspace: URL,
+        env _: ResolvedEnvironment,
+        progress: @escaping @Sendable (Int, Int) async -> Void
+    ) async throws -> [ImportedSession] {
+        try await CursorSessionCatalogImporter(
+            homeDirectory: environment.homeDirectory,
+            fileSystem: fileSystem,
+            random: random
+        ).sessions(workspace: workspace, progress: progress)
     }
 
     private func resolveBinary(env: ResolvedEnvironment) throws -> URL {

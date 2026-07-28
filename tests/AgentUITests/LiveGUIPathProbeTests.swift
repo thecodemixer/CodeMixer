@@ -16,6 +16,9 @@ import ACPCLIs
 ///
 /// ```bash
 /// CODEMIXER_LIVE_GUI_PATH=1 \
+/// CODEMIXER_LIVE_CLAUDE_PROJECT=/path/to/claude-project \
+/// CODEMIXER_LIVE_CODEX_PROJECT=/path/to/codex-project \
+/// CODEMIXER_LIVE_CURSOR_PROJECT=/path/to/cursor-project \
 ///   swift test --no-parallel --filter LiveGUIPathProbeTests
 /// ```
 @Suite("Live GUI path — EngineViewModel openSession + sendPrompt", .serialized)
@@ -26,9 +29,14 @@ struct LiveGUIPathProbeTests {
 
     @Test("Claude Code project: resume shows history and answers a follow-up")
     func claudeResumeHistoryAndReply() async throws {
+        guard ProcessInfo.processInfo.environment[Self.enableVariable] == "1" else { return }
+        guard let projectPath = Self.projectPath(envKey: "CODEMIXER_LIVE_CLAUDE_PROJECT") else {
+            Issue.record("set CODEMIXER_LIVE_CLAUDE_PROJECT to a trusted Claude project directory")
+            return
+        }
         try await runResumeProbe(
             label: "claude",
-            projectPath: "/Users/hari/Documents/codemixer workspace/hiya",
+            projectPath: projectPath,
             adapter: ClaudeAdapter(),
             seedPrompt: "Reply with exactly: gui-claude-pong",
             seedNeedle: "gui-claude-pong",
@@ -39,9 +47,14 @@ struct LiveGUIPathProbeTests {
 
     @Test("Codex project: resume shows history and answers a follow-up")
     func codexResumeHistoryAndReply() async throws {
+        guard ProcessInfo.processInfo.environment[Self.enableVariable] == "1" else { return }
+        guard let projectPath = Self.projectPath(envKey: "CODEMIXER_LIVE_CODEX_PROJECT") else {
+            Issue.record("set CODEMIXER_LIVE_CODEX_PROJECT to a trusted Codex project directory")
+            return
+        }
         try await runResumeProbe(
             label: "codex",
-            projectPath: "/Users/hari/Documents/codemixer workspace/hiya/code",
+            projectPath: projectPath,
             adapter: CodexAdapter(),
             seedPrompt: "Reply with exactly: gui-codex-pong",
             seedNeedle: "gui-codex-pong",
@@ -52,15 +65,27 @@ struct LiveGUIPathProbeTests {
 
     @Test("Cursor CLI project: resume shows history and answers a follow-up")
     func cursorResumeHistoryAndReply() async throws {
+        guard ProcessInfo.processInfo.environment[Self.enableVariable] == "1" else { return }
+        guard let projectPath = Self.projectPath(envKey: "CODEMIXER_LIVE_CURSOR_PROJECT") else {
+            Issue.record("set CODEMIXER_LIVE_CURSOR_PROJECT to a trusted Cursor project directory")
+            return
+        }
         try await runResumeProbe(
             label: "cursor",
-            projectPath: "/Users/hari/Documents/codemixer workspace/hiya/cur",
+            projectPath: projectPath,
             adapter: CursorACPAdapter(),
             seedPrompt: "Reply with exactly: gui-cursor-pong",
             seedNeedle: "gui-cursor-pong",
             followUpPrompt: "Reply with exactly: gui-cursor-resume",
             followUpNeedle: "gui-cursor-resume"
         )
+    }
+
+    private static func projectPath(envKey: String) -> String? {
+        let env = ProcessInfo.processInfo.environment[envKey]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let env, !env.isEmpty else { return nil }
+        return env
     }
 
     // MARK: - Driver
@@ -76,7 +101,16 @@ struct LiveGUIPathProbeTests {
     ) async throws {
         guard ProcessInfo.processInfo.environment[Self.enableVariable] == "1" else { return }
 
-        await AdapterRegistry.shared.register(adapter)
+        await AdapterRegistry.shared.register(id: adapter.id) {
+            // Fresh instance per spawn — shared instances leave Cursor/Claude
+            // event streams dead after the seed engine shuts down.
+            switch adapter.id {
+            case .claudeCode: return ClaudeAdapter()
+            case .codex: return CodexAdapter()
+            case .cursorCLI: return CursorACPAdapter()
+            default: return adapter
+            }
+        }
 
         let projectURL = URL(fileURLWithPath: projectPath, isDirectory: true)
         let projectsStore = WorkspaceProjectsStore(environment: Seams.live.environment,
@@ -88,34 +122,40 @@ struct LiveGUIPathProbeTests {
         let vm = EngineViewModel(engine: engine, bus: engine.bus)
         vm.workspaceProjects = projectsStore
         vm.subscribe()
+        // Let the bus subscription register before open races SessionStart.
+        try? await Task.sleep(for: .milliseconds(100))
         defer {
             vm.unsubscribe()
             Task { await engine.shutdown(reason: .naturalExit) }
         }
 
-        // --- Seed a fresh session via the same openProject(nil) the UI uses ---
-        vm.workspace = projectURL
-        vm.workspaceRoot = projectURL
+        // --- Seed a fresh session via the same open path the sidebar uses ---
+        vm.workspaceRoot = projectURL.deletingLastPathComponent()
         if let projectType = await projectsStore.resolveProjectType(for: projectURL) {
-            vm.applyAdapterCapabilities(for: projectType, projectURL: projectURL)
+            await vm.prepareProjectOpen(url: projectURL, projectType: projectType)
         } else {
-            vm.applyAdapterCapabilities(forProjectPath: projectPath)
+            Issue.record("\(label) seed: missing project type at \(projectPath)")
+            return
         }
         // Give capability Task a beat before openProject.
         try? await Task.sleep(for: .milliseconds(200))
         vm.openProject(path: projectPath, resumeSessionID: nil)
 
-        let seeded = await wait(timeout: .seconds(120)) {
+        // Cold start (first project spawn) can be slow; session resume is short.
+        let unlockedSeed = await wait(timeout: ActivityTiming.sessionHandshakeColdStartTimeout) {
             !vm.isComposerLockedForSessionResume
-                && vm.messages.contains { messageContains($0, needle: seedNeedle) == false }
-                && (vm.sessionID?.isEmpty == false || !vm.isComposerLockedForSessionResume)
         }
-        // Wait until composer unlocks (SessionStart), then send.
-        let unlockedSeed = await wait(timeout: .seconds(90)) { !vm.isComposerLockedForSessionResume }
         guard unlockedSeed else {
-            Issue.record("\(label) seed: composer stayed locked diagnostics=\(vm.diagnostics.map(\.message))")
+            Issue.record("""
+                \(label) seed: composer stayed locked \
+                activation=\(String(describing: vm.sessionActivation)) \
+                session=\(vm.sessionID ?? "nil") \
+                diagnostics=\(vm.diagnostics.map(\.message)) \
+                silent=\(await SilentDiagnostics.shared.snapshot().suffix(8).map(\.summary))
+                """)
             return
         }
+        print("LIVE_GUI \(label) seed unlocked session=\(vm.sessionID ?? "nil")")
         vm.sendPrompt(seedPrompt)
         let seedOK = await wait(timeout: .seconds(120)) {
             messageListContainsAssistant(vm.messages, needle: seedNeedle)
@@ -124,10 +164,11 @@ struct LiveGUIPathProbeTests {
             Issue.record("""
                 \(label) seed: no assistant reply \
                 locked=\(vm.isComposerLockedForSessionResume) \
+                activation=\(String(describing: vm.sessionActivation)) \
                 session=\(vm.sessionID ?? "nil") \
                 messages=\(vm.messages.count) \
                 diagnostics=\(vm.diagnostics.map(\.message)) \
-                silent=\(await SilentDiagnostics.shared.snapshot().suffix(6).map(\.summary))
+                silent=\(await SilentDiagnostics.shared.snapshot().suffix(8).map(\.summary))
                 """)
             return
         }
@@ -137,25 +178,8 @@ struct LiveGUIPathProbeTests {
         }
         print("LIVE_GUI \(label) seed ok session=\(seedSessionID)")
 
-        // --- Cold reopen via openSession (sidebar path) ---
-        await engine.shutdown(reason: .naturalExit)
-        // New engine + VM — mirrors quitting the chat process and clicking the row.
-        let engine2 = AgentEngine(seams: .live)
-        await engine2.bootstrap()
-        let vm2 = EngineViewModel(engine: engine2, bus: engine2.bus)
-        vm2.workspaceProjects = projectsStore
-        vm2.subscribe()
-        defer {
-            vm2.unsubscribe()
-            Task { await engine2.shutdown(reason: .naturalExit) }
-        }
-        vm2.workspaceRoot = projectURL
-        if let projectType = await projectsStore.resolveProjectType(for: projectURL) {
-            vm2.applyAdapterCapabilities(for: projectType, projectURL: projectURL)
-        }
-        try? await Task.sleep(for: .milliseconds(200))
-        // Preload a fake session list so openSession does not treat the id as overview.
-        vm2.sessionsByProject[projectPath] = [
+        // --- Warm resume via openSession on the same live engine ---
+        vm.sessionsByProject[projectPath] = [
             SessionSummary(id: seedSessionID,
                            agentID: adapter.id,
                            workspace: projectURL,
@@ -163,29 +187,35 @@ struct LiveGUIPathProbeTests {
                            lastActivity: Date(),
                            messageCount: 2)
         ]
-        vm2.openSession(projectPath: projectPath, id: seedSessionID)
+        vm.openSession(projectPath: projectPath, id: seedSessionID)
 
         let historyOK = await wait(timeout: .seconds(90)) {
-            messageListContainsUser(vm2.messages, needle: seedPrompt)
-                && messageListContainsAssistant(vm2.messages, needle: seedNeedle)
+            messageListContainsUser(vm.messages, needle: seedPrompt)
+                && messageListContainsAssistant(vm.messages, needle: seedNeedle)
         }
         print(
-            "LIVE_GUI \(label) history user=\(messageListContainsUser(vm2.messages, needle: seedPrompt)) assistant=\(messageListContainsAssistant(vm2.messages, needle: seedNeedle)) locked=\(vm2.isComposerLockedForSessionResume) msgs=\(vm2.messages.count)"
+            "LIVE_GUI \(label) history user=\(messageListContainsUser(vm.messages, needle: seedPrompt)) assistant=\(messageListContainsAssistant(vm.messages, needle: seedNeedle)) locked=\(vm.isComposerLockedForSessionResume) msgs=\(vm.messages.count)"
         )
         #expect(historyOK, "\(label) openSession should replay history")
 
-        let unlocked = await wait(timeout: .seconds(90)) { !vm2.isComposerLockedForSessionResume }
+        let unlocked = await wait(timeout: ActivityTiming.sessionHandshakeResumeTimeout) {
+            !vm.isComposerLockedForSessionResume
+        }
         guard unlocked else {
-            Issue.record("\(label) resume: composer stayed locked diagnostics=\(vm2.diagnostics.map(\.message))")
+            Issue.record("""
+                \(label) warm resume: composer stayed locked \
+                activation=\(String(describing: vm.sessionActivation)) \
+                session=\(vm.sessionID ?? "nil") \
+                diagnostics=\(vm.diagnostics.map(\.message))
+                """)
             return
         }
-        vm2.sendPrompt(followUpPrompt)
+        vm.sendPrompt(followUpPrompt)
         let followOK = await wait(timeout: .seconds(120)) {
-            messageListContainsAssistant(vm2.messages, needle: followUpNeedle)
+            messageListContainsAssistant(vm.messages, needle: followUpNeedle)
         }
-        print("LIVE_GUI \(label) follow-up ok=\(followOK) msgs=\(vm2.messages.count)")
-        #expect(followOK, "\(label) follow-up after openSession should get a reply")
-        _ = seeded
+        print("LIVE_GUI \(label) follow-up ok=\(followOK) msgs=\(vm.messages.count)")
+        #expect(followOK, "\(label) follow-up after warm openSession should get a reply")
     }
 
     private func wait(timeout: Duration, condition: @escaping @MainActor () -> Bool) async -> Bool {

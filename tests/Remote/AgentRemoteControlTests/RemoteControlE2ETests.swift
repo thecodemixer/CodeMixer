@@ -307,8 +307,18 @@ struct RemoteControlE2ETests {
         let seams = Seams.fake()
         let engine = AgentEngine(seams: seams, transportFactory: { _, _ in pty })
         await engine.bootstrap()
-        try await engine.start(adapter: MockAdapter(),
-                               workspace: URL(fileURLWithPath: NSTemporaryDirectory()))
+        let workspace = URL(fileURLWithPath: NSTemporaryDirectory())
+        let adapter = MockAdapter(script: .init(
+            events: [.sessionStarted(sessionID: "remote", model: nil, cwd: workspace)],
+            interEventDelay: .zero
+        ))
+        try await engine.start(adapter: adapter, workspace: workspace)
+        try await waitUntil {
+            await engine.bus.historySnapshot.contains {
+                if case .sessionStarted = $0.event { return true }
+                return false
+            }
+        }
 
         let pairing = PairingService(clock: seams.clock, random: seams.random)
         let server = RemoteControlServer(engine: engine,
@@ -404,8 +414,18 @@ struct RemoteControlE2ETests {
         let seams = seamsWithRunningClock()
         let engine = AgentEngine(seams: seams, transportFactory: { _, _ in pty })
         await engine.bootstrap()
-        try await engine.start(adapter: MockAdapter(),
-                               workspace: URL(fileURLWithPath: NSTemporaryDirectory()))
+        let workspace = URL(fileURLWithPath: NSTemporaryDirectory())
+        let adapter = MockAdapter(script: .init(
+            events: [.sessionStarted(sessionID: "remote", model: nil, cwd: workspace)],
+            interEventDelay: .zero
+        ))
+        try await engine.start(adapter: adapter, workspace: workspace)
+        try await waitUntil {
+            await engine.bus.historySnapshot.contains {
+                if case .sessionStarted = $0.event { return true }
+                return false
+            }
+        }
 
         let pairing = PairingService(clock: seams.clock, random: seams.random)
         let server = RemoteControlServer(engine: engine,
@@ -621,8 +641,15 @@ struct RemoteControlE2ETests {
         let engine = AgentEngine(seams: seams, transportFactory: { _, _ in pty })
         await engine.bootstrap()
         let adapter = RecordingMockAdapter(permissionDelivery: .writePTY(Data("allow\n".utf8)))
-        try await engine.start(adapter: adapter,
-                               workspace: URL(fileURLWithPath: NSTemporaryDirectory()))
+        let workspace = URL(fileURLWithPath: NSTemporaryDirectory())
+        try await engine.start(adapter: adapter, workspace: workspace)
+        adapter.emit(.sessionStarted(sessionID: "remote", model: nil, cwd: workspace))
+        try await waitUntil {
+            await engine.bus.historySnapshot.contains {
+                if case .sessionStarted = $0.event { return true }
+                return false
+            }
+        }
         let server = try await startServer(engine: engine, transport: net.transport, seams: seams)
         let client = try await net.transport.connect(to: .loopback(port: await server.boundPort ?? 0),
                                                      options: .plainWebSocket)
@@ -664,8 +691,16 @@ struct RemoteControlE2ETests {
         let seams = seamsWithRunningClock()
         let engine = AgentEngine(seams: seams, transportFactory: factory.makeTransport)
         await engine.bootstrap()
-        try await engine.start(adapter: RecordingMockAdapter(),
-                               workspace: URL(fileURLWithPath: NSTemporaryDirectory()))
+        let adapter = RecordingMockAdapter()
+        let workspace = URL(fileURLWithPath: NSTemporaryDirectory())
+        try await engine.start(adapter: adapter, workspace: workspace)
+        adapter.emit(.sessionStarted(sessionID: "remote", model: nil, cwd: workspace))
+        try await waitUntil {
+            await engine.bus.historySnapshot.contains {
+                if case .sessionStarted = $0.event { return true }
+                return false
+            }
+        }
         let server = try await startServer(engine: engine, transport: net.transport, seams: seams)
         let client = try await net.transport.connect(to: .loopback(port: await server.boundPort ?? 0),
                                                      options: .plainWebSocket)

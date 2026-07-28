@@ -66,22 +66,48 @@ struct EngineViewModelTests {
         await bus.shutdown()
     }
 
-    @Test("cached transcript marker follows the active session and clears on live start")
-    func cachedTranscriptMarkerLifecycle() async {
+    @Test("history restoration unlocks switching before prompt readiness")
+    func sessionActivationSequence() async {
         let (vm, bus) = makeModel()
         vm.subscribe()
         defer { vm.unsubscribe() }
 
         let cwd = TestPaths.underTemporary("proj")
-        await bus.publish(.sessionStarted(sessionID: "cached", model: nil, cwd: cwd))
-        await bus.publish(.cachedTranscriptLoaded(sessionID: "cached"))
-        await drain()
-        #expect(vm.cachedTranscriptLoadedSessionID == "cached")
+        vm.beginSessionSwitch(projectPath: cwd.path, sessionID: "restored")
+        #expect(vm.sessionActivation == .restoringHistory(sessionID: "restored"))
+        #expect(vm.isSwitchingSession)
 
-        await bus.publish(.sessionStarted(sessionID: "live", model: nil, cwd: cwd))
+        await bus.publish(.sessionHistoryRestored(sessionID: "restored"))
         await drain()
-        #expect(vm.cachedTranscriptLoadedSessionID == nil)
+        #expect(vm.sessionActivation == .awaitingAdapter(sessionID: "restored"))
+        #expect(!vm.isSwitchingSession)
+        #expect(vm.isComposerLockedForSessionResume)
 
+        await bus.publish(.sessionPromptReady(sessionID: "restored"))
+        await drain()
+        #expect(vm.sessionActivation == .ready(sessionID: "restored"))
+        #expect(!vm.isComposerLockedForSessionResume)
+
+        await bus.shutdown()
+    }
+
+    @Test("sessionPromptReady unlocks even when the adapter reports a different session id")
+    func sessionPromptReadyUnlocksAcrossSessionIDMismatch() async {
+        let (vm, bus) = makeModel()
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        let cwd = TestPaths.underTemporary("proj-mismatch")
+        vm.beginSessionSwitch(projectPath: cwd.path, sessionID: "sidebar-id")
+        await bus.publish(.sessionHistoryRestored(sessionID: "sidebar-id"))
+        await drain()
+
+        await bus.publish(.sessionPromptReady(sessionID: "adapter-normalized-id"))
+        await drain()
+
+        #expect(vm.sessionActivation == .ready(sessionID: "adapter-normalized-id"))
+        #expect(vm.sessionID == "adapter-normalized-id")
+        #expect(!vm.isComposerLockedForSessionResume)
         await bus.shutdown()
     }
 
@@ -113,7 +139,6 @@ struct EngineViewModelTests {
         vm.workspace = workspace
         vm.projectCapabilities[workspace.path] = .init(
             supportsResumableSessions: true,
-            requiresSessionHandshakeGate: false,
             supportsOverviewDashboard: true
         )
         vm.subscribe()
@@ -141,7 +166,6 @@ struct EngineViewModelTests {
         vm.detailPane = .dashboard
         vm.projectCapabilities[workspace.path] = .init(
             supportsResumableSessions: true,
-            requiresSessionHandshakeGate: false,
             supportsOverviewDashboard: true
         )
         vm.subscribe()
@@ -370,8 +394,8 @@ struct EngineViewModelTests {
         await bus.shutdown()
     }
 
-    @Test("resume startup gap without a sent prompt does not show stalled toast")
-    func resumeStartupGapDoesNotShowStalledToast() async {
+    @Test("no-event gap without a sent prompt does not show stalled toast")
+    func inactiveGapDoesNotShowStalledToast() async {
         let (vm, bus) = makeModel()
         vm.subscribe()
         defer { vm.unsubscribe() }
@@ -385,8 +409,8 @@ struct EngineViewModelTests {
         await bus.shutdown()
     }
 
-    @Test("resume startup gap for a foreign turn id does not stall a just-sent prompt")
-    func resumeStartupGapDoesNotStallJustSentPrompt() async {
+    @Test("foreign no-event gap does not stall a just-sent prompt")
+    func foreignGapDoesNotStallJustSentPrompt() async {
         let (vm, bus) = makeModel()
         vm.subscribe()
         defer { vm.unsubscribe() }
@@ -406,8 +430,8 @@ struct EngineViewModelTests {
         await bus.shutdown()
     }
 
-    @Test("resume startup gap without a sent prompt does not show still-working status")
-    func resumeStartupGapDoesNotShowStillWorkingStatus() async {
+    @Test("no-event gap without a sent prompt does not show still-working status")
+    func inactiveGapDoesNotShowStillWorkingStatus() async {
         let (vm, bus) = makeModel()
         vm.subscribe()
         defer { vm.unsubscribe() }
@@ -1323,7 +1347,6 @@ struct EngineViewModelTests {
         vm.detailPane = .dashboard
         vm.projectCapabilities[workspace.path] = .init(
             supportsResumableSessions: true,
-            requiresSessionHandshakeGate: false,
             supportsOverviewDashboard: true
         )
         vm.sessionsByProject[workspace.path] = [
@@ -1356,7 +1379,6 @@ struct EngineViewModelTests {
         vm.detailPane = .dashboard
         vm.projectCapabilities[workspace.path] = .init(
             supportsResumableSessions: true,
-            requiresSessionHandshakeGate: false,
             supportsOverviewDashboard: true
         )
         vm.sessionsByProject[workspace.path] = [
@@ -1405,7 +1427,6 @@ struct EngineViewModelTests {
         vm.dashboardURL = nil
         vm.projectCapabilities[workspace.path] = .init(
             supportsResumableSessions: true,
-            requiresSessionHandshakeGate: false,
             supportsOverviewDashboard: true
         )
         vm.sessionsByProject[workspace.path] = [
@@ -1460,7 +1481,6 @@ struct EngineViewModelTests {
         vm.dashboardURL = overviewURL
         vm.projectCapabilities[workspace.path] = .init(
             supportsResumableSessions: true,
-            requiresSessionHandshakeGate: false,
             supportsOverviewDashboard: true
         )
         vm.sessionsByProject[workspace.path] = [

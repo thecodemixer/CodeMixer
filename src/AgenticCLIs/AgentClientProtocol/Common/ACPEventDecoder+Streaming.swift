@@ -4,8 +4,7 @@ import AgentCore
 import AgentProtocol
 
 /// Live `session/update` notifications: assistant message/thought chunks,
-/// the tool-call lifecycle, and caching background (foreign) session
-/// streams into the turn cache so a later `session/load` can restore them.
+/// tool-call lifecycle, and background-session persistence callbacks.
 extension ACPEventDecoder {
     func notification(method: String, params: JSONValue) async -> Batch {
         switch method {
@@ -27,41 +26,25 @@ extension ACPEventDecoder {
         let kind = update["sessionUpdate"]?.stringValue
             ?? update["type"]?.stringValue
         if isForeignStreamingSession(params: params, kind: kind) {
-            // Background file sessions still update the Codemixer turn cache so
-            // a later session/load can restore history if wire replay is empty.
             await cacheForeignStreaming(params: params, update: update, kind: kind)
+            return Batch()
+        }
+        if state.phase() == .awaitingSession,
+           kind != "session_info_update",
+           kind != "current_mode_update",
+           kind != "current_model_update" {
             return Batch()
         }
         switch kind {
         case "agent_message_chunk":
-            if state.phase() == .awaitingSession {
-                return historyChunk(role: .agent, update: update)
-            }
             return agentMessageChunk(update)
         case "agent_thought_chunk":
-            if state.phase() == .awaitingSession {
-                return historyChunk(role: .thinking, update: update)
-            }
             return agentThoughtChunk(update)
         case "tool_call":
-            if state.phase() == .awaitingSession {
-                // Flush open text history so tools stay in transcript order.
-                let flushed = state.flushHistoryReplay()
-                let tool = toolCall(update)
-                return Batch(events: flushed + tool.events, replies: tool.replies)
-            }
             return toolCall(update)
         case "tool_call_update":
-            if state.phase() == .awaitingSession {
-                let flushed = state.flushHistoryReplay()
-                let tool = toolCallUpdate(update)
-                return Batch(events: flushed + tool.events, replies: tool.replies)
-            }
             return toolCallUpdate(update)
         case "user_message_chunk":
-            if state.phase() == .awaitingSession {
-                return historyChunk(role: .user, update: update)
-            }
             // Live user chunks for the foreground session are unusual; ignore.
             // Foreign user chunks are handled above via cacheForeignStreaming.
             return Batch()
@@ -85,13 +68,6 @@ extension ACPEventDecoder {
         case "available_commands_update":
             return Batch()
         case "codemixer.dev/phase_update":
-            // During session/load, flush coalesced history text first so the
-            // phase marker anchors after prior turns instead of before them.
-            if state.phase() == .awaitingSession {
-                let flushed = state.flushHistoryReplay()
-                let phase = phaseUpdate(params: params, update: update)
-                return Batch(events: flushed + phase.events, replies: phase.replies)
-            }
             return phaseUpdate(params: params, update: update)
         default:
             await SilentDiagnostics.shared.record(
@@ -138,20 +114,8 @@ extension ACPEventDecoder {
             state.setForegroundPhaseID(phase.id)
         }
 
-        persistPhaseTurn(sessionID: sessionID, phase: phase)
         events.append(.sessionPhaseChanged(sessionID: sessionID, phase: phase))
         return Batch(events: events)
-    }
-
-    /// Only cache live phase markers — load-time wire replay must not
-    /// rewrite the index (mirrors `persistToolTurn`'s `.ready`-only gate).
-    func persistPhaseTurn(sessionID: String, phase: SessionPhase) {
-        guard state.phase() == .ready, let context = state.currentContext() else { return }
-        let customAgentID = context.customAgentID
-        let index = sessionIndex
-        Task {
-            await index.appendPhaseTurn(sessionID: sessionID, customAgentID: customAgentID, phase: phase)
-        }
     }
 
     func isForeignStreamingSession(params: JSONValue, kind: String?) -> Bool {
@@ -169,24 +133,38 @@ extension ACPEventDecoder {
         return incoming != foreground
     }
 
-    /// Persist background-session stream chunks into the turn cache without UI events.
+    /// Persist background-session stream chunks without foreground UI events.
     func cacheForeignStreaming(params: JSONValue,
                                update: JSONValue,
                                kind: String?) async {
-        guard let context = state.currentContext(),
-              let sessionID = params["sessionId"]?.stringValue,
+        guard let sessionID = params["sessionId"]?.stringValue,
               !sessionID.isEmpty else { return }
-        let customAgentID = context.customAgentID
-        let index = sessionIndex
 
         func persist(_ role: ACPTurnRole, _ text: String) async {
             guard !text.isEmpty else { return }
-            await index.appendConversationTurn(
-                sessionID: sessionID,
-                customAgentID: customAgentID,
-                role: role,
-                text: text
-            )
+            let event: AgentEvent
+            switch role.stored {
+            case .user:
+                event = .userTurn(id: random.uuid().uuidString, text: text)
+            case .thinking:
+                let id = random.uuid()
+                await recordBackgroundSessionEvents(.init(
+                    sessionID: sessionID,
+                    events: [
+                        .thinkingChunk(blockID: id, delta: text),
+                        .thinkingComplete(blockID: id, duration: .zero),
+                    ]
+                ))
+                return
+            default:
+                let id = random.uuid().uuidString
+                event = .assistantText(id: id,
+                                       blockID: id,
+                                       text: text,
+                                       isFinal: true)
+            }
+            await recordBackgroundSessionEvents(.init(sessionID: sessionID,
+                                                      events: [event]))
         }
 
         switch kind {
@@ -243,15 +221,26 @@ extension ACPEventDecoder {
                 ?? stringified(update["rawOutput"])
                 ?? status
                 ?? ""
-            await index.appendToolTurn(
+            await recordBackgroundSessionEvents(.init(
                 sessionID: sessionID,
-                customAgentID: customAgentID,
-                toolCallID: toolCallID,
-                name: name,
-                success: status != "failed",
-                outputSummary: outputSummary,
-                inputJSON: meta?.inputJSON ?? stringified(update)
-            )
+                events: [
+                    .toolStart(
+                        id: toolCallID,
+                        name: name,
+                        input: ToolInput(summary: name,
+                                         jsonPayload: meta?.inputJSON ?? stringified(update)),
+                        startedAt: clock.now()
+                    ),
+                    .toolEnd(
+                        id: toolCallID,
+                        success: status != "failed",
+                        output: ToolOutput(summary: outputSummary,
+                                           errorMessage: status == "failed"
+                                               ? outputSummary : nil),
+                        durationMS: 0
+                    ),
+                ]
+            ))
         default:
             break
         }
@@ -263,23 +252,6 @@ extension ACPEventDecoder {
             ?? content?["content"]?.stringValue
             ?? update["text"]?.stringValue
             ?? ""
-    }
-
-    func historyChunk(role: ACPTurnRole, update: JSONValue) -> Batch {
-        let content = update["content"]
-        let text = content?["text"]?.stringValue
-            ?? content?["content"]?.stringValue
-            ?? update["text"]?.stringValue
-            ?? ""
-        let messageID = update["messageId"]?.stringValue
-            ?? update["message_id"]?.stringValue
-        let events = state.appendHistoryChunk(
-            role: role,
-            messageID: messageID,
-            delta: text,
-            random: random
-        )
-        return Batch(events: events)
     }
 
     func agentMessageChunk(_ update: JSONValue) -> Batch {
@@ -349,19 +321,7 @@ extension ACPEventDecoder {
                 ?? stringified(update["rawOutput"])
                 ?? status
                 ?? ""
-            let meta = state.takeToolMeta(id: toolCallID)
-            let name = meta?.name
-                ?? update["title"]?.stringValue
-                ?? update["kind"]?.stringValue
-                ?? "Tool"
-            let inputJSON = meta?.inputJSON ?? stringified(update)
-            persistToolTurn(
-                toolCallID: toolCallID,
-                name: name,
-                success: success,
-                outputSummary: outputSummary,
-                inputJSON: inputJSON
-            )
+            _ = state.takeToolMeta(id: toolCallID)
             return Batch(events: [
                 .toolEnd(
                     id: toolCallID,
@@ -380,27 +340,4 @@ extension ACPEventDecoder {
         return Batch()
     }
 
-    func persistToolTurn(toolCallID: String,
-                         name: String,
-                         success: Bool,
-                         outputSummary: String,
-                         inputJSON: String?) {
-        // Only cache live turns — load-time wire replay must not rewrite the index.
-        guard state.phase() == .ready,
-              let context = state.currentContext(),
-              let sessionID = state.sessionID() else { return }
-        let customAgentID = context.customAgentID
-        let index = sessionIndex
-        Task {
-            await index.appendToolTurn(
-                sessionID: sessionID,
-                customAgentID: customAgentID,
-                toolCallID: toolCallID,
-                name: name,
-                success: success,
-                outputSummary: outputSummary,
-                inputJSON: inputJSON
-            )
-        }
-    }
 }

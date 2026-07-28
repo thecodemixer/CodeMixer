@@ -37,7 +37,7 @@ byte-for-byte forwarding to `inner` (`makeEventStream`, `encodeUserPrompt`,
 `defaultEnvOverrides`/`authStatus`/`enumerateProjectCommands`/
 `resumeArgvAddition` answers. Identity, launch argv, and mode-mapping
 (`encodeCommand`, `availableAgentModes`, `availableModels`,
-`listResumableSessions`) differ per vendor and stay in each adapter.
+`importSessionCatalog`) differ per vendor and stay in each adapter.
 
 ## Cursor ACP contract snapshot
 
@@ -52,7 +52,7 @@ Probed against `cursor-agent` `2026.04.15-dccdccd` (`cursor-agent acp`):
 | Slash `/agent` `/plan` `/ask` | Treated as ordinary prompts — **not** mode switches |
 | `/debug` | **Not** an ACP chat mode. Slash `/debug` only starts a conversational debug help turn. CLI `--mode` has no `debug` choice. Documented as diagnostic-only. |
 | Models | `session/new` may include `models.availableModels` |
-| Sessions | App-support `ACPSessionIndex` (turn cache for empty `session/load`) |
+| Sessions | AgentCore project-local transcript/index; Cursor SQLite is read once when an existing project is added |
 
 Codemixer therefore encodes Cursor mode changes via `session/set_mode`, not
 slash text. `/debug` is listed in the catalog as diagnostic-only and is not
@@ -67,13 +67,13 @@ register `CustomACPAdapterFactory` (caches by `CustomAgentRef`).
 | Concern | Behavior |
 | --- | --- |
 | Launch | Resolved executable + `CustomAgentRef.arguments` (`CODEMIXER_CUSTOM_ACP_BIN` override for tests) |
-| Auth / handshake | Inherited from `ACPAdapter` (`.sessionHandshakeGate`) |
+| Auth / readiness | Inherited from `ACPAdapter`; the composer unlocks after the real session open response |
 | Modes | Dynamic from `session/new` `availableModes` (id + name + description); composer lists them; slash `/<id>` remaps to `session/set_mode` |
 | Models | From ACP session (`availableModels`) |
-| Sessions | Project-local store under `<project>/.codemixer/acp/<customAgentID>/` |
+| Sessions | AgentCore store under `<project>/.codemixer/history/`; old ACP project stores are one-shot import sources |
 | Twin | `fake-custom-acp` advertises `migrate` / `document` / `agent` (not Cursor’s plan/ask) |
 
-### Project store layout
+### Retired project store import
 
 ```
 <project>/.codemixer/acp/<customAgentID>/
@@ -81,16 +81,10 @@ register `CustomACPAdapterFactory` (caches by `CustomAgentRef`).
   transcripts/<session-id>.jsonl
 ```
 
-- Index holds metadata + embedded turns (same turn-cache roles as Cursor:
-  `user` / `thinking` / `tool` / `assistant`) for `localHistoryEvents` on empty
-  `session/load`.
-- JSONL is dual-written on each append (portable transcript; same 200-turn cap).
-- One-time migrate copies matching rows from app-support `acp-sessions.json`.
-- Resume still uses ACP `session/load` / `session/resume`; JSONL is not a
-  substitute for agent state.
-
-This Codemixer-owned transcript is an intentional exception for custom CLIs
-that do not write a vendor JSONL of their own (see `docs/architecture.md`).
+`ACPSessionCatalogImporter` can read this retired format when an existing
+project is added. New turns are never dual-written here. Resume still uses ACP
+`session/load` for agent state, while visible history and listing always come
+from AgentCore's `SessionTranscriptRepository`.
 
 ### Dashboard URL, reverse session/new, archive & attention
 
@@ -105,6 +99,6 @@ Custom ACP agents may advertise extensions via `_meta` (additive; unknown keys a
 | `_meta.archived` | `session_info_update` | Session hidden from sidebar summaries |
 | `_meta.needsAttention` | `session_info_update` | Per-session sidebar badge; project-row attention count rollup; `sessionAttentionChanged` → macOS notification (`Migration Tool` / `"<title> needs human review"`) |
 
-Streaming `session/update` chunks are scoped to the foreground `sessionId`; background permission prompts are parked per-session (not in `pendingApprovals`, which is cleared on switch) and re-emitted after `session/load`.
+Streaming `session/update` chunks for foreground sessions enter the normal event stream. Foreign chunks are persisted through `recordBackgroundSessionEvents` without reaching the foreground UI. Background permission prompts are parked per-session (not in `pendingApprovals`, which is cleared on switch) and re-emitted after `session/load`.
 
 Reference product using this contract: top-level [`migration-tool/`](../../../migration-tool/) (SQL Server / API → MongoDB migrator).

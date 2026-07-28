@@ -3,8 +3,8 @@ import SwiftUI
 
 /// Workspace picker shown when no workspace is open, or via File → Open Workspace.
 ///
-/// The user picks a folder from disk; the engine resolves the workspace or
-/// project type after selection and presents configuration only when needed.
+/// The user picks a folder from disk; Bootstrap opens it as a workspace shell
+/// (or as a single-project workspace when the folder itself has a project type).
 public struct WorkspacePickerView: View {
     public let onOpen: (URL, _ resumeSessionID: String?) -> Void
     public let onCancel: () -> Void

@@ -128,7 +128,7 @@ extension EngineViewModel {
         }
 
         do {
-            let models = try await adapter.refreshModelCatalog()
+            let models = try await probeModelCatalog(adapter)
             guard !models.isEmpty else {
                 if let cached, !cached.models.isEmpty {
                     adapter.seedModelCatalog(cached.models)
@@ -181,7 +181,7 @@ extension EngineViewModel {
         modelCatalogRefreshInFlight = agentID
         defer { modelCatalogRefreshInFlight = nil }
         do {
-            let models = try await adapter.refreshModelCatalog()
+            let models = try await probeModelCatalog(adapter)
             guard !models.isEmpty else {
                 if let previous, !previous.models.isEmpty {
                     adapter.seedModelCatalog(previous.models)
@@ -267,11 +267,35 @@ extension EngineViewModel {
     }
 
     private func probeAndSeed(_ adapter: any AgentAdapter) async throws -> [AgentModelOption] {
-        let models = try await adapter.refreshModelCatalog()
+        let models = try await probeModelCatalog(adapter)
         if !models.isEmpty {
             adapter.seedModelCatalog(models)
         }
         return models.isEmpty ? adapter.availableModels() : models
+    }
+
+    /// Live adapter probe with a hard deadline so a hung CLI cannot freeze
+    /// create/open / Settings refresh.
+    private func probeModelCatalog(_ adapter: any AgentAdapter) async throws -> [AgentModelOption] {
+        try await withThrowingTaskGroup(of: [AgentModelOption].self) { group in
+            group.addTask {
+                try await adapter.refreshModelCatalog()
+            }
+            group.addTask { [clock] in
+                try await clock.sleep(for: ModelCatalogTiming.probeTimeout)
+                throw ModelCatalogLoadError.probeTimedOut(adapter.displayName)
+            }
+            do {
+                guard let result = try await group.next() else {
+                    throw ModelCatalogLoadError.probeTimedOut(adapter.displayName)
+                }
+                group.cancelAll()
+                return result
+            } catch {
+                group.cancelAll()
+                throw error
+            }
+        }
     }
 
     /// Shipping agents whose model catalogs are required for `projectType`.

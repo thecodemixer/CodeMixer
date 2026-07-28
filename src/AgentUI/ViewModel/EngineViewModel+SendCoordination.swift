@@ -230,17 +230,16 @@ extension EngineViewModel {
         }
     }
 
-    /// Edit-and-resubmit restarts the session (which clears `messages` and
-    /// replays the truncated transcript), so we don't pre-insert a bubble —
-    /// the genuine `.userTurn` carries the revised text. We only flip to a
-    /// working state immediately for instant feedback, and let the echo dedup
-    /// collapse the engine + hook duplicates.
+    /// Edit-and-resubmit clears the visible pane first, then the engine
+    /// truncates the domain transcript, republishes the truncated history,
+    /// and respawns. The revised `.userTurn` arrives after that restore.
     public func editAndResubmit(targetBubbleID: UUID,
                                 text: String,
                                 attachments: [AttachmentRef] = []) {
         guard !isComposerLockedForSessionResume else { return }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        clearConversationState()
         enterWorkingState()
         send(.editAndResubmitLast(targetBubbleID: targetBubbleID,
                                   text: text,

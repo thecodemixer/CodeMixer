@@ -209,6 +209,10 @@ struct WireCodecParityTests {
             .engineRestarted,
             .stopped(reason: .naturalExit),
             .error(.binaryNotFound(agentID: .claudeCode, hint: "install")),
+            .error(.historyWriteFailed(path: cwd.path, detail: "disk full")),
+            .error(.historyLoadFailed(path: cwd.path, detail: "invalid journal")),
+            .error(.historyJournalLocked(sessionID: "locked-1", ownerPID: 42)),
+            .error(.sessionReadinessFailed(sessionID: "ready-1", detail: "timed out")),
             .speakBubbleRequested(
                 eventID: UUID(uuidString: "00000000-0000-0000-0000-000000000005")!,
                 action: .play
@@ -227,9 +231,25 @@ struct WireCodecParityTests {
                 url: URL(string: "http://127.0.0.1:8423/dashboard")!,
                 title: "Migration Dashboard"
             ),
-            .sessionIndexChanged(projectPath: cwd),
             .sessionAttentionChanged(sessionID: "bg-1", title: "Background", needsAttention: true),
-            .cachedTranscriptLoaded(sessionID: "cached-1"),
+            .sessionHistoryRestored(sessionID: "restored-1"),
+            .sessionPromptReady(sessionID: "ready-1"),
+            .sessionsListed(
+                projectPath: cwd,
+                sessions: [
+                    SessionSummary(id: "listed-1",
+                                   agentID: .codex,
+                                   workspace: cwd,
+                                   title: "Listed session",
+                                   lastActivity: Date(timeIntervalSince1970: 1_700_000_001),
+                                   messageCount: 3,
+                                   gitBranch: "main",
+                                   needsAttention: true,
+                                   historyImportState: .imported),
+                ]
+            ),
+            .historyImportProgress(projectPath: cwd, completed: 2, total: 5),
+            .historyImportFinished(projectPath: cwd, imported: 4, failed: 1),
             .sessionPhaseChanged(
                 sessionID: "file-1",
                 phase: SessionPhase(id: "reviewing", label: "Review", ordinal: 2, group: .review)
@@ -272,9 +292,12 @@ extension AgentEvent {
         case .snapshotReady:            "snapshotReady"
         case .clientAction:             "clientAction"
         case .agentDashboard:           "agentDashboard"
-        case .sessionIndexChanged:      "sessionIndexChanged"
         case .sessionAttentionChanged:  "sessionAttentionChanged"
-        case .cachedTranscriptLoaded:   "cachedTranscriptLoaded"
+        case .sessionHistoryRestored:   "sessionHistoryRestored"
+        case .sessionPromptReady:       "sessionPromptReady"
+        case .sessionsListed:           "sessionsListed"
+        case .historyImportProgress:    "historyImportProgress"
+        case .historyImportFinished:    "historyImportFinished"
         case .sessionPhaseChanged:      "sessionPhaseChanged"
         }
     }
@@ -351,18 +374,45 @@ extension AgentEvent {
             return a1 == a2
         case (.agentDashboard(let u1, let t1), .agentDashboard(let u2, let t2)):
             return u1.absoluteString == u2.absoluteString && t1 == t2
-        case (.sessionIndexChanged(let p1), .sessionIndexChanged(let p2)):
-            return p1.path == p2.path
         case (.sessionAttentionChanged(let s1, let t1, let n1),
               .sessionAttentionChanged(let s2, let t2, let n2)):
             return s1 == s2 && t1 == t2 && n1 == n2
-        case (.cachedTranscriptLoaded(let s1), .cachedTranscriptLoaded(let s2)):
+        case (.sessionHistoryRestored(let s1), .sessionHistoryRestored(let s2)),
+             (.sessionPromptReady(let s1), .sessionPromptReady(let s2)):
             return s1 == s2
+        case (.sessionsListed(let p1, let s1), .sessionsListed(let p2, let s2)):
+            return p1.standardizedFileURL.path == p2.standardizedFileURL.path
+                && s1.count == s2.count
+                && zip(s1, s2).allSatisfy { $0.semanticallyEquals($1) }
+        case (.historyImportProgress(let p1, let c1, let t1),
+              .historyImportProgress(let p2, let c2, let t2)):
+            return p1.path == p2.path && c1 == c2 && t1 == t2
+        case (.historyImportFinished(let p1, let i1, let f1),
+              .historyImportFinished(let p2, let i2, let f2)):
+            return p1.path == p2.path && i1 == i2 && f1 == f2
         case (.sessionPhaseChanged(let s1, let p1), .sessionPhaseChanged(let s2, let p2)):
             return s1 == s2 && p1 == p2
         default:
             return false
         }
+    }
+}
+
+extension SessionSummary {
+    fileprivate func semanticallyEquals(_ other: SessionSummary) -> Bool {
+        id == other.id
+            && agentID == other.agentID
+            && workspace.standardizedFileURL.path == other.workspace.standardizedFileURL.path
+            && title == other.title
+            && lastActivity == other.lastActivity
+            && messageCount == other.messageCount
+            && gitBranch == other.gitBranch
+            && needsAttention == other.needsAttention
+            && isOverview == other.isOverview
+            && overviewURL == other.overviewURL
+            && archived == other.archived
+            && supersededAt == other.supersededAt
+            && historyImportState == other.historyImportState
     }
 }
 

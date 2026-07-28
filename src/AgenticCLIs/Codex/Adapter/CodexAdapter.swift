@@ -25,7 +25,6 @@ public final class CodexAdapter: AgentAdapter {
     private let processRunner: ProcessRunner
     private let binaryLocator: CodexBinaryLocator
     private let state: CodexSessionState
-    private let threadIndex: CodexThreadIndex
     private let modelCache: AgentModelCatalogCache
 
     private static let clientVersion = "0.1.0"
@@ -46,11 +45,6 @@ public final class CodexAdapter: AgentAdapter {
             fileSystem: fileSystem
         )
         self.state = CodexSessionState()
-        self.threadIndex = CodexThreadIndex(
-            environment: environment,
-            fileSystem: fileSystem,
-            clock: clock
-        )
         self.modelCache = AgentModelCatalogCache(models: initialModels)
     }
 
@@ -114,7 +108,6 @@ public final class CodexAdapter: AgentAdapter {
     public func makeEventStream(inputs: AgentInputs) -> AsyncStream<AgentEvent> {
         let decoder = CodexEventDecoder(
             state: state,
-            threadIndex: threadIndex,
             workspace: inputs.workspace,
             clock: clock,
             random: random
@@ -237,8 +230,21 @@ public final class CodexAdapter: AgentAdapter {
         )
     }
 
-    public func listResumableSessions(workspace: URL) async -> [SessionSummary] {
-        await threadIndex.summaries(workspace: workspace)
+    public func importSessionCatalog(
+        workspace: URL,
+        env: ResolvedEnvironment,
+        progress: @escaping @Sendable (Int, Int) async -> Void
+    ) async throws -> [ImportedSession] {
+        let codexHome = env.variables["CODEX_HOME"].map {
+            URL(fileURLWithPath: $0, isDirectory: true)
+        } ?? environment.homeDirectory.appendingPathComponent(".codex",
+                                                               isDirectory: true)
+        return try await CodexSessionCatalogImporter(
+            fileSystem: fileSystem,
+            clock: clock
+        ).sessions(workspace: workspace,
+                   codexHome: codexHome,
+                   progress: progress)
     }
 
     public func resumeArgvAddition(sessionID: String) -> [String] {
@@ -293,7 +299,6 @@ public final class CodexAdapter: AgentAdapter {
     public func truncateTranscript(afterUserTurnID turnID: String,
                                    sessionID: String,
                                    workspace: URL) async -> Bool {
-        await threadIndex.supersede(threadID: sessionID)
         return false
     }
 

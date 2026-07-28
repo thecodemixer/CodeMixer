@@ -15,9 +15,11 @@ into the daemon and GUI.
 
 ## Layout convention (required)
 
-Every agent under `src/AgenticCLIs/<AgentName>/` uses the same three-folder
-shape. **Do not invent a fourth top-level bucket** without updating this README
-and `Package.swift` in the same PR.
+Every agent under `src/AgenticCLIs/<AgentName>/` uses the same three core
+folders. An `External/` folder is added only when the adapter needs a wrapped
+system-framework seam, such as Cursor's read-only SQLite boundary. **Do not
+invent another top-level bucket** without updating this README and
+`Package.swift` in the same PR.
 
 ```
 src/AgenticCLIs/
@@ -26,6 +28,7 @@ src/AgenticCLIs/
     ├── README.md             # executable contract for that CLI (transport, events, sessions)
     ├── Adapter/              # production `AgentAdapter` + parsers/installers
     ├── Common/               # code shared by Adapter/ and digital-twin/ only
+    ├── External/             # optional wrapped system-framework calls
     └── digital-twin/
         ├── Twin/             # in-process twin (`AgentAdapter` for tests)
         └── <fake-binary>/    # optional stand-in executable for CI / no-login dev
@@ -34,7 +37,7 @@ src/AgenticCLIs/
 ### `Adapter/`
 
 Production integration: binary discovery, transport descriptor, bootstrap and
-command encoding, event decode, session listing, and the type that conforms to
+command encoding, event decode, one-shot catalog import, and the type that conforms to
 `AgentAdapter`.
 
 - May import `AgentCore`, `AgentProtocol`, and types from `Common/`.
@@ -43,12 +46,18 @@ command encoding, event decode, session listing, and the type that conforms to
 ### `Common/`
 
 Shared **contract surface** used by both the adapter and the digital twin:
-path conventions, stdin encoding, built-in slash-command catalog, session-list
+path conventions, stdin encoding, built-in slash-command catalog, catalog-import
 helpers, and other logic that must stay identical in tests and production.
 
 - Twin and adapter both compile against `Common/` inside the same SPM target.
 - Twin sources must not call adapter-only types (`*HookDecoder`, `*TranscriptTailer`, …).
   Parity tests in `<Agent>AdapterTests` validate the contract from the outside.
+
+### `External/` (optional)
+
+Framework wrappers that must remain behind a testable seam. Cursor's
+`SQLiteReader` is the current example; direct `sqlite3_*` calls stay in that
+file, while catalog import depends on `SQLiteReading`.
 
 ### `digital-twin/`
 

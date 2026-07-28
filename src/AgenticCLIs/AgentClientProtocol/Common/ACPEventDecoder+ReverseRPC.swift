@@ -45,7 +45,7 @@ extension ACPEventDecoder {
     }
 
     func reverseSessionNew(id: JSONValue, params: JSONValue) async -> Batch {
-        guard let context = state.currentContext() else {
+        guard state.currentContext() != nil else {
             return Batch(
                 replies: [
                     ACPRPCCodec.errorResponse(
@@ -67,43 +67,36 @@ extension ACPEventDecoder {
                 ]
             )
         }
-        let cwdPath = params["cwd"]?.stringValue ?? context.workspace.path
-        let workspace = URL(fileURLWithPath: cwdPath)
         let title = params["title"]?.stringValue
         let meta = params["_meta"]?.objectValue
-        await sessionIndex.recordSession(
-            id: sessionID,
-            customAgentID: context.customAgentID,
-            workspace: workspace,
-            title: title
-        )
+        await updateSessionMetadata(.registered(sessionID: sessionID,
+                                                title: title))
         if let isOverview = meta?["codemixer.dev/overviewSession"]?.boolValue
             ?? meta?["overviewSession"]?.boolValue {
-            let overviewURL = meta?["codemixer.dev/dashboardUrl"]?.stringValue
-                .flatMap(URL.init(string:))
-            await sessionIndex.setIsOverview(
-                sessionID: sessionID,
-                customAgentID: context.customAgentID,
-                isOverview: isOverview,
-                overviewURL: overviewURL
-            )
+            if isOverview {
+                let overviewURL = meta?["codemixer.dev/dashboardUrl"]?.stringValue
+                    .flatMap(URL.init(string:))
+                await updateSessionMetadata(.markAsOverview(sessionID: sessionID,
+                                                            url: overviewURL))
+            } else {
+                await updateSessionMetadata(.unmarkAsOverview(sessionID: sessionID))
+            }
         }
         if let archived = meta?["archived"]?.boolValue {
-            await sessionIndex.setArchived(
-                sessionID: sessionID,
-                customAgentID: context.customAgentID,
-                archived: archived
-            )
+            if archived {
+                await updateSessionMetadata(.archived(sessionID: sessionID))
+            } else {
+                await updateSessionMetadata(.unarchived(sessionID: sessionID))
+            }
         }
+        var events: [AgentEvent] = []
         if let needsAttention = meta?["needsAttention"]?.boolValue {
-            await sessionIndex.setNeedsAttention(
-                sessionID: sessionID,
-                customAgentID: context.customAgentID,
-                needsAttention: needsAttention
-            )
+            events.append(.sessionAttentionChanged(sessionID: sessionID,
+                                                   title: title ?? sessionID,
+                                                   needsAttention: needsAttention))
         }
         return Batch(
-            events: [.sessionIndexChanged(projectPath: workspace)],
+            events: events,
             replies: [ACPRPCCodec.response(id: id, result: .object([:]))]
         )
     }

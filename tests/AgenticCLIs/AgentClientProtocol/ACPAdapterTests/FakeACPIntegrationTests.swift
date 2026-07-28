@@ -92,7 +92,7 @@ struct FakeACPIntegrationTests {
         )
     }
 
-    @Test("spawned fake-acp resume uses session/load and preserves resume id")
+    @Test("spawned fake-acp resume suppresses vendor replay and preserves resume id")
     func spawnedResumeTurn() async throws {
         let resumeID = "resume-\(UUID().uuidString)"
         try await runScenario(
@@ -105,11 +105,11 @@ struct FakeACPIntegrationTests {
                     if case .sessionStarted(let id, _, _) = $0 { return id == resumeID }
                     return false
                 })
-                #expect(events.contains {
+                #expect(!events.contains {
                     if case .userTurn(_, let text) = $0 { return text.contains("prior user") }
                     return false
                 })
-                #expect(events.contains {
+                #expect(!events.contains {
                     if case .assistantText(_, _, let text, true) = $0 {
                         return text.contains("prior assistant")
                     }

@@ -24,24 +24,23 @@ extension EngineViewModel {
     /// gate before engine spawn so an early send cannot race protocol bootstrap.
     public func prepareProjectOpen(url: URL, projectType: ProjectType) async {
         let target = url.standardizedFileURL
-        workspaceRoot = target
+        // Keep an existing workspace shell root (multi-project). Only seed the
+        // root when opening a single-folder / typed workspace.
+        if workspaceRoot == nil {
+            workspaceRoot = target
+        }
         workspace = target
-        let needsGate = await Self.adapterRequiresSessionHandshakeGate(projectType)
         let supportsOverview = await Self.adapterSupportsOverviewDashboard(projectType)
         if var caps = projectCapabilities[target.path] {
-            caps.requiresSessionHandshakeGate = needsGate
             caps.supportsOverviewDashboard = supportsOverview
             projectCapabilities[target.path] = caps
         } else {
             projectCapabilities[target.path] = .init(
                 supportsResumableSessions: false,
-                requiresSessionHandshakeGate: needsGate,
                 supportsOverviewDashboard: supportsOverview
             )
         }
-        if needsGate {
-            lockComposerForSessionHandshake()
-        }
+        noteAdapterPending()
     }
 
     /// Create or adopt a project from sheet-collected `ProjectDraft`.
@@ -55,7 +54,8 @@ extension EngineViewModel {
     }
 
     /// Create a new project (subfolder of the workspace) and switch to it.
-    /// Blocks until the project is registered and its model catalog is ready.
+    /// Returns once the project is listed and opened; model-catalog warm runs
+    /// on the open path and must not block the New Project sheet.
     public func createProject(_ info: ProjectDraft, projectType: ProjectType) async {
         guard let workspaceRoot, let store = workspaceProjects else { return }
         do {
@@ -72,7 +72,8 @@ extension EngineViewModel {
     }
 
     /// Register an existing folder as a project of the workspace.
-    /// Blocks until the project is registered and its model catalog is ready.
+    /// Returns once the project is listed and opened. Vendor history import
+    /// continues in the background so a large catalog cannot freeze the sheet.
     public func addExistingProject(_ info: ProjectDraft,
                                    url: URL,
                                    projectType: ProjectType) async {
@@ -86,13 +87,21 @@ extension EngineViewModel {
                 in: workspaceRoot
             )
             await finishProjectRegistration(ref, projectType: projectType)
+            let path = ref.path
+            Task { [weak self] in
+                guard let self else { return }
+                do {
+                    try await self.engine.send(.importProjectHistory(path: path))
+                } catch {
+                    await MainActor.run { self.recordProjectError(error) }
+                }
+            }
         } catch {
             recordProjectError(error)
         }
     }
 
     /// Create a new project (subfolder of the workspace) and switch to it.
-    /// Blocks until the project is registered and its model catalog is ready.
     public func createProject(name: String,
                               projectType: ProjectType,
                               preferFreshAgentProcess: Bool = false) async {
@@ -107,7 +116,6 @@ extension EngineViewModel {
     }
 
     /// Register an existing folder as a project of the workspace.
-    /// Blocks until the project is registered and its model catalog is ready.
     public func addExistingProject(url: URL,
                                    projectType: ProjectType,
                                    displayName: String? = nil,
@@ -127,21 +135,19 @@ extension EngineViewModel {
     private func finishProjectRegistration(_ ref: WorkspaceProjectsStore.ProjectRef,
                                            projectType: ProjectType) async {
         guard let workspaceRoot, let store = workspaceProjects else { return }
-        do {
-            if !projectType.isFolderBacked {
-                try await WorkspaceLifecycle(model: self).ensureModels(for: projectType)
-            }
-            let refs = await store.projects(for: workspaceRoot, rootProjectType: projectType)
-            await applyProjectList(refs)
-            if projectType.isFolderBacked {
-                openFolderProject(ref, relativePath: nil)
-            } else {
-                applyAdapterCapabilities(for: projectType, projectURL: URL(fileURLWithPath: ref.path))
-                newChat(in: ref.path)
-            }
-        } catch {
-            recordProjectError(error)
+        // Do not pass `rootProjectType` — that seeds the workspace folder as a
+        // synthetic root project when the in-memory list is momentarily empty.
+        let refs = await store.projects(for: workspaceRoot)
+        await applyProjectList(refs)
+        if projectType.isFolderBacked {
+            openFolderProject(ref, relativePath: nil)
+            return
         }
+        // Model warm is bounded inside `loadModels` and runs from
+        // `applyAdapterCapabilities` — never block sheet dismissal on a live
+        // CLI probe (`claude -p`, `cursor-agent models`, …).
+        applyAdapterCapabilities(for: projectType, projectURL: URL(fileURLWithPath: ref.path))
+        newChat(in: ref.path)
     }
 
     /// Rename a project and its folder on disk.
@@ -245,7 +251,6 @@ extension EngineViewModel {
     /// Project type is chosen later via File → New Project…
     /// Awaits model-catalog warm so callers can gate the UI until catalogs are ready.
     public func adoptEmptyWorkspace(_ url: URL) async throws {
-        endSessionSwitch()
         workspaceRoot = url
         workspace = nil
         sessionID = nil
@@ -259,7 +264,7 @@ extension EngineViewModel {
         removedProjectUndo = nil
         removedProjectUndoTask?.cancel()
         removedProjectUndoTask = nil
-        unlockComposerForSessionResume()
+        clearSessionActivation()
         clearConversationState()
         changedFiles = []
         clearAllPendingPermissions()
@@ -277,7 +282,6 @@ extension EngineViewModel {
 
     /// Clears navigator + conversation chrome after File → Close Workspace.
     public func resetForClosedWorkspace() {
-        endSessionSwitch()
         workspaceRoot = nil
         workspace = nil
         sessionID = nil
@@ -291,7 +295,7 @@ extension EngineViewModel {
         removedProjectUndo = nil
         removedProjectUndoTask?.cancel()
         removedProjectUndoTask = nil
-        unlockComposerForSessionResume()
+        clearSessionActivation()
         clearConversationState()
         changedFiles = []
         clearAllPendingPermissions()
@@ -322,7 +326,6 @@ extension EngineViewModel {
         for ref in refs {
             index[ref.path] = ProjectCapabilities(
                 supportsResumableSessions: await projectTypeSupportsResumableSessions(ref.projectType),
-                requiresSessionHandshakeGate: await adapterRequiresSessionHandshakeGate(ref.projectType),
                 supportsOverviewDashboard: await adapterSupportsOverviewDashboard(ref.projectType)
             )
         }
@@ -339,25 +342,6 @@ extension EngineViewModel {
             return false
         }
         return adapter.capabilities.contains(.resumableSessions)
-    }
-
-    private static func adapterRequiresSessionHandshakeGate(_ projectType: ProjectType) async -> Bool {
-        if projectType.isFolderBacked { return false }
-        // Mixed with a default: ask that agent. Mixed without a default: gate if
-        // any registered adapter declares the capability (safer than false-open).
-        // Custom ACP refs resolve through `CustomAgentAdapterFactories` → `ACPAdapter`.
-        if case .mixed(let defaultAgent) = projectType {
-            if let defaultAgent,
-               let adapter = await AdapterRegistry.shared.adapter(for: defaultAgent) {
-                return adapter.capabilities.contains(.sessionHandshakeGate)
-            }
-            let adapters = await AdapterRegistry.shared.all()
-            return adapters.contains { $0.capabilities.contains(.sessionHandshakeGate) }
-        }
-        guard let adapter = await ProjectAgentRouter.resolveAdapter(projectType: projectType) else {
-            return false
-        }
-        return adapter.capabilities.contains(.sessionHandshakeGate)
     }
 
     private static func adapterSupportsOverviewDashboard(_ projectType: ProjectType) async -> Bool {

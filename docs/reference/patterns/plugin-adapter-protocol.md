@@ -69,6 +69,8 @@ public protocol Adapter: Sendable {
     // 7. Permission responses (if applicable)
     func encodePermissionResponse(_ decision: PermissionDecision,
                                   for prompt: PermissionPrompt) -> PermissionResponseDelivery
+    /// Optional silent decision (e.g. Claude folder trust). Default `nil`.
+    func autoAllowDecision(for prompt: PermissionPrompt) -> PermissionDecision?
 
     // 8. Slash-command catalog
     var actionCatalog: [Action] { get }
@@ -80,8 +82,13 @@ public protocol Adapter: Sendable {
     func refreshModelCatalog() async throws -> [AgentModelOption]
     func seedModelCatalog(_ models: [AgentModelOption])
 
-    // 10. Resume / session listing
-    func listResumableSessions(workspace: URL) async -> [SessionSummary]
+    // 10. Project-local history namespace and one-shot vendor import
+    var historyNamespace: String { get }
+    func importSessionCatalog(
+        workspace: URL,
+        env: ResolvedEnvironment,
+        progress: @escaping @Sendable (Int, Int) async -> Void
+    ) async throws -> [ImportedSession]
     func resumeArgvAddition(sessionID: String) -> [String]
 
     // 11. Rendering hints
@@ -247,7 +254,9 @@ Adapter authors must **not**:
 
 UI call sites should use `EngineViewModel.selectAgentMode`, `selectModel`, `setPermissionMode`, `activateSlashCommand`, `respondToPermission`, `startNewSession`, or `compactContext` so one readable action row is recorded before the underlying commands run.
 
-**Known limitation:** ClientAction rows are live-session + Codemixer snapshot-export only. They do not survive reopen/resume from the agent's own transcript until Codemixer has a durable conversation log.
+`ClientAction` rows are durable in Codemixer's project-local
+`SessionTranscript`; they survive reopen/resume and snapshot export without
+being written into vendor-owned history.
 
 ---
 

@@ -22,6 +22,12 @@ public actor SnapshotService {
         public let role: TranscriptRole
         public let text: String
         public let timestamp: Date
+
+        public init(role: TranscriptRole, text: String, timestamp: Date) {
+            self.role = role
+            self.text = text
+            self.timestamp = timestamp
+        }
     }
 
     public struct DiffSnapshot: Sendable, Codable {

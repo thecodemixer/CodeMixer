@@ -27,18 +27,15 @@ public actor CodexEventDecoder {
     /// `+ApprovalServerRequestHandler` extensions in the other files in this
     /// directory.
     let state: CodexSessionState
-    let threadIndex: CodexThreadIndex
     let workspace: URL
     let clock: any AgentClock
     let random: any RandomSource
 
     public init(state: CodexSessionState,
-                threadIndex: CodexThreadIndex,
                 workspace: URL,
                 clock: any AgentClock,
                 random: any RandomSource) {
         self.state = state
-        self.threadIndex = threadIndex
         self.workspace = workspace
         self.clock = clock
         self.random = random

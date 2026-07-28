@@ -19,38 +19,33 @@ extension AgentEngine {
 
         switch command {
         case .sendPrompt(let text, let attachments):
+            guard case .ready = sessionActivationState else {
+                throw AgentError.sessionReadinessFailed(
+                    sessionID: currentSessionID ?? "",
+                    detail: "Wait for the adapter to finish connecting, then retry."
+                )
+            }
             let bubbleID = seams.random.uuid()
             lastUserBubbleID = bubbleID
             let prompt = try await promptText(text, attachments: attachments)
             let bytes = adapter.encodeUserPrompt(prompt)
+            guard !bytes.isEmpty else {
+                throw AgentError.sessionReadinessFailed(
+                    sessionID: currentSessionID ?? "",
+                    detail: "The adapter reported readiness but did not encode the prompt."
+                )
+            }
             // Echo the turn BEFORE the awaited write so every connected surface
             // reflects the turn instantly. If the write then fails, `send` still
             // throws so the caller surfaces the error.
-            //
-            // ACP may return empty bytes while session/open is still in flight —
-            // the prompt is queued in adapter state and flushed on SessionStart.
-            // Do not start the heartbeat or leave the turn "awaiting acceptance"
-            // forever in that case.
             await record(.userTurn(id: bubbleID.uuidString, text: prompt))
             await bus.publish(.userTurn(id: bubbleID.uuidString, text: prompt))
-            if bytes.isEmpty {
-                currentTurnID = bubbleID
-                promptAcceptance = .queued(prompt: prompt)
-                await bus.publish(.statusPhraseChanged(
-                    source: .adapterPinned,
-                    phrase: "Waiting for session…"
-                ))
-                return
-            }
             currentTurnID = bubbleID
-            promptAcceptance = .awaiting(prompt: prompt)
             await heartbeat?.startTurn(bubbleID, baseline: .awaitingFirstChunk)
             do {
                 try await writePromptBytes(bytes)
             } catch {
-                promptAcceptance = .idle
                 currentTurnID = nil
-                cancelStartupSubmitRecovery()
                 await heartbeat?.endTurn()
                 throw error
             }
@@ -61,8 +56,6 @@ extension AgentEngine {
             if adapter.transportDescriptor.supportsOutOfBandInterrupt {
                 await transport?.interrupt()
             }
-            promptAcceptance = .idle
-            cancelStartupSubmitRecovery()
             currentTurnID = nil
             await heartbeat?.endTurn()
 
@@ -73,6 +66,7 @@ extension AgentEngine {
             guard let ws = workspace else {
                 throw AgentError.internalInvariant(detail: "editAndResubmitLast: no workspace")
             }
+            let revisedPrompt = try await promptText(text, attachments: attachments)
             // Snapshot live state before shutdown clears it.
             // `adapter` is guaranteed non-optional here (the guard above enforced it).
             let savedAdapter = adapter
@@ -84,13 +78,42 @@ extension AgentEngine {
             try await seams.clock.sleep(for: .milliseconds(50))
 
             // Step 2: atomic transcript truncation — strip everything after the
-            // user turn being edited so the resumed session looks clean.
+            // user turn in Codemixer's domain history first. Vendor transcript
+            // truncation is a separate adapter concern.
             var resumeSessionID: String?
-            if let sid = savedSessionID,
-               await savedAdapter.truncateTranscript(afterUserTurnID: target.uuidString,
-                                                     sessionID: sid,
-                                                     workspace: ws) {
-                resumeSessionID = sid
+            if let sid = savedSessionID {
+                let key = SessionTranscriptKey(projectRoot: ws,
+                                               namespace: savedAdapter.historyNamespace,
+                                               sessionID: sid)
+                do {
+                    try await transcriptRepository.truncate(
+                        afterUserTurnID: target.uuidString,
+                        for: key
+                    )
+                    try await transcriptRepository.replaceUserTurn(
+                        id: target.uuidString,
+                        text: revisedPrompt,
+                        for: key
+                    )
+                    // Republish the truncated domain transcript so every
+                    // attached surface (GUI + remote) matches the journal
+                    // before the adapter process is replaced.
+                    await restoreHistory(for: key)
+                } catch {
+                    throw AgentError.historyWriteFailed(
+                        path: ws.path,
+                        detail: String(describing: error)
+                    )
+                }
+                if await savedAdapter.truncateTranscript(
+                    afterUserTurnID: target.uuidString,
+                    sessionID: sid,
+                    workspace: ws
+                ) {
+                    resumeSessionID = sid
+                } else {
+                    try await transcriptRepository.markSuperseded(sid, in: ws)
+                }
             }
 
             // Step 3: shut down the current session slot only.
@@ -113,20 +136,16 @@ extension AgentEngine {
             }
 
             // Step 5: send the revised prompt.
-            let prompt = try await promptText(text, attachments: attachments)
-            let bytes = savedAdapter.encodeUserPrompt(prompt)
+            let bytes = savedAdapter.encodeUserPrompt(revisedPrompt)
+            await record(.userTurn(id: target.uuidString, text: revisedPrompt))
+            await bus.publish(.userTurn(id: target.uuidString, text: revisedPrompt))
             try await writePromptBytes(bytes)
-            await bus.publish(.userTurn(id: target.uuidString, text: prompt))
             lastUserBubbleID = target
 
         case .respondToPermission(let id, let decision):
             permissionTimeouts.removeValue(forKey: id)?.cancel()
             guard let prompt = pendingPermissions.removeValue(forKey: id) else { return }
             try await deliverPermissionResponse(decision, for: prompt, id: id)
-            // Trust screens can outlive the first resume-startup watchdog tick.
-            // Once the dialog is gone, make sure a ready-poll / watchdog is alive
-            // so a held sendPrompt can still flush.
-            resumePollingAfterPermissionIfNeeded()
 
         case .newSession,
              .compact,
@@ -144,6 +163,8 @@ extension AgentEngine {
             await shutdownActiveSlot(reason: .userCancel)
 
         case .openProject,
+             .listSessions,
+             .importProjectHistory,
              .speakAssistantBubble, .revertFile, .revertHunk,
              .updateAutoApprovalRules, .updateAppearancePref, .requestSnapshot,
              .recordClientAction:
@@ -162,12 +183,14 @@ extension AgentEngine {
             return ()
         case .revertFile(let file):
             try await gitReverter.checkout(file: file, workspace: workspace)
+            await record(.fileReverted(file: file))
             await bus.publish(.fileReverted(file: file))
             return ()
         case .revertHunk(let file, let hunkID):
             try await gitReverter.revertHunk(file: file,
                                              hunkID: hunkID,
                                              workspace: workspace)
+            await record(.fileReverted(file: file))
             await bus.publish(.fileReverted(file: file))
             return ()
         case .updateAutoApprovalRules(let rules):
@@ -180,19 +203,37 @@ extension AgentEngine {
             await bus.publish(.appearancePrefChanged(key: patch.key, value: patch.value))
             return ()
         case .requestSnapshot(let kind):
+            let snapshotMessages: [SnapshotService.SnapshotMessage]
+            let snapshotFiles: [ChangedFile]
+            if let key = activeTranscriptKey() {
+                snapshotMessages = try await transcriptRepository.snapshotMessages(for: key)
+                snapshotFiles = try await transcriptRepository.changedFiles(for: key)
+            } else {
+                snapshotMessages = transcript
+                snapshotFiles = changedFiles
+            }
             let data = await snapshots.snapshot(
                 kind,
-                conversation: transcript.map { ($0.role, $0.text, $0.timestamp) },
+                conversation: snapshotMessages.map { ($0.role, $0.text, $0.timestamp) },
                 sessionID: currentSessionID,
-                changedFiles: changedFiles,
+                changedFiles: snapshotFiles,
                 workspace: workspace
             )
             await bus.publish(.snapshotReady(kind: kind, payload: data))
             return ()
         case .recordClientAction(let action):
-            let text = action.detail.map { "\(action.title): \($0)" } ?? action.title
-            transcript.append(.init(role: .action, text: text, timestamp: seams.clock.now()))
+            await record(.clientAction(action))
             await bus.publish(.clientAction(action))
+            return ()
+        case .listSessions(let path):
+            try await publishStoredSessions(
+                in: URL(fileURLWithPath: path).standardizedFileURL
+            )
+            return ()
+        case .importProjectHistory(let path):
+            try await importProjectHistory(
+                at: URL(fileURLWithPath: path).standardizedFileURL
+            )
             return ()
         default:
             return nil
@@ -246,6 +287,15 @@ extension AgentEngine {
             )
         }
 
+        if let resumeSessionID {
+            let transcriptKey = SessionTranscriptKey(
+                projectRoot: projectURL,
+                namespace: nextAdapter.historyNamespace,
+                sessionID: resumeSessionID
+            )
+            await restoreHistory(for: transcriptKey)
+        }
+
         var key = runtimeKey(for: project, agentID: nextAdapter.id)
         if project.preferFreshAgentProcess {
             // Always replace slots for this project+agent. Mint + persist a
@@ -275,51 +325,47 @@ extension AgentEngine {
             return
         }
 
-        // Pool hit for this project+agent — park/activate; warm session switch
-        // via encodeResumeSession (/resume) or new chat via encodeCommand(.newSession)
-        // (/clear for Claude, thread/start for Codex). No Claude-only respawn.
-        if let existingKey = findRuntime(projectPath: project.path, agentID: nextAdapter.id),
-           let runtime = runtimes[existingKey] {
-            if await activate(key: existingKey, resumeSessionID: resumeSessionID) {
-                if resumeSessionID == nil,
-                   let bytes = runtime.adapter.encodeCommand(.newSession),
-                   !bytes.isEmpty {
-                    transcript = []
-                    changedFiles = []
-                    currentTurnID = nil
-                    promptAcceptance = .idle
-                    cancelStartupSubmitRecovery()
-                    currentSessionID = nil
-                    if var updated = runtimes[existingKey] {
-                        updated.boundSessionID = nil
-                        updated.transcript = []
-                        updated.changedFiles = []
-                        updated.replayEvents = []
-                        runtimes[existingKey] = updated
-                    }
-                    state = .running(sessionID: nil)
-                    try? await runtimes[existingKey]?.transport.write(bytes)
-                    await bus.publish(.sessionStarted(sessionID: "",
-                                                      model: nil,
-                                                      cwd: projectURL))
-                }
-                return
-            }
-            await shutdownSlot(existingKey, publishStopped: false)
-        }
-
-        // Same-process warm when already active on this project (ACP/Codex).
+        // Session resume is pool-only for every adapter: if this project already
+        // has a live (active or parked) slot, switch via encodeResumeSession —
+        // never tear down and cold-spawn with --resume / bootstrap load.
         if let resumeSessionID,
-           await tryWarmResume(
-            projectURL: projectURL,
-            resumeSessionID: resumeSessionID,
-            nextAdapter: nextAdapter
-           ) {
+           let existingKey = findRuntime(projectPath: project.path, agentID: nextAdapter.id),
+           runtimes[existingKey] != nil {
+            guard await activate(key: existingKey, resumeSessionID: resumeSessionID) else {
+                throw AgentError.unsupportedOperation(
+                    detail: "Could not resume session \(resumeSessionID) on the live agent process for \(project.path)."
+                )
+            }
+            log.notice(
+                "pool resume project=\(project.path, privacy: .public) session=\(resumeSessionID, privacy: .public)"
+            )
             return
         }
 
+        // No resume id: park return, or New Chat on the live pooled process.
+        // Cold start only when this project+agent is not already in the pool.
+        if let existingKey = findRuntime(projectPath: project.path, agentID: nextAdapter.id),
+           runtimes[existingKey] != nil {
+            if activeKey != existingKey {
+                if await activate(key: existingKey, resumeSessionID: nil) {
+                    log.notice("warm activate parked project=\(project.path, privacy: .public)")
+                    return
+                }
+                log.warning("warm park activate failed; falling back to cold start")
+                await shutdownSlot(existingKey, publishStopped: false)
+            } else {
+                guard await applyWarmNewSession() else {
+                    throw AgentError.unsupportedOperation(
+                        detail: "Could not start a new chat on the live agent process for \(project.path)."
+                    )
+                }
+                log.notice("warm newSession project=\(project.path, privacy: .public)")
+                return
+            }
+        }
+
         if resumeSessionID != nil {
-            log.notice("cold openProject after pool miss session=\(resumeSessionID ?? "", privacy: .public)")
+            log.notice("cold-open session into pool=\(resumeSessionID ?? "", privacy: .public)")
         }
         try await start(adapter: nextAdapter,
                         workspace: projectURL,
@@ -328,71 +374,100 @@ extension AgentEngine {
                         runtimeKey: key)
     }
 
-    /// Returns `true` when the live agent accepted a same-process session load.
-    private func tryWarmResume(projectURL: URL,
-                               resumeSessionID: String,
-                               nextAdapter: any AgentAdapter) async -> Bool {
-        guard case .running = state else {
-            await recordWarmMiss(reason: "engine not running", sessionID: resumeSessionID)
-            return false
+    private func importProjectHistory(at projectURL: URL) async throws {
+        if case .completed = try await transcriptRepository.catalogImportState(in: projectURL) {
+            try await publishStoredSessions(in: projectURL)
+            await bus.publish(.historyImportFinished(projectPath: projectURL,
+                                                     imported: 0,
+                                                     failed: 0))
+            return
         }
-        guard let live = adapter else {
-            await recordWarmMiss(reason: "no live adapter", sessionID: resumeSessionID)
-            return false
-        }
-        guard live.id == nextAdapter.id else {
-            await recordWarmMiss(reason: "adapter mismatch live=\(live.id.rawValue) next=\(nextAdapter.id.rawValue)",
-                                 sessionID: resumeSessionID)
-            return false
-        }
-        guard let currentWorkspace = workspace,
-              Self.sameWorkspacePath(currentWorkspace, projectURL) else {
-            await recordWarmMiss(reason: "workspace path mismatch", sessionID: resumeSessionID)
-            return false
-        }
-        // Warm when the adapter can encode an in-process resume (ACP/Codex).
-        guard let bytes = live.encodeResumeSession(sessionID: resumeSessionID),
-              !bytes.isEmpty else {
-            await recordWarmMiss(reason: "encodeResumeSession empty", sessionID: resumeSessionID)
-            return false
-        }
-        transcript = []
-        changedFiles = []
-        currentTurnID = nil
-        promptAcceptance = .idle
-        cancelStartupSubmitRecovery()
-        await heartbeat?.endTurn()
-        currentSessionID = resumeSessionID
-        if let key = activeKey, var runtime = runtimes[key] {
-            runtime.boundSessionID = resumeSessionID
-            runtime.transcript = []
-            runtime.changedFiles = []
-            runtime.replayEvents = []
-            runtimes[key] = runtime
-        }
-        state = .running(sessionID: resumeSessionID)
-        do {
-            try await transport?.write(bytes)
-            log.notice("warm session/load session=\(resumeSessionID, privacy: .public)")
-            return true
-        } catch {
-            await SilentDiagnostics.shared.record(
-                kind: .other,
-                owner: "AgentEngine",
-                summary: "warm session/load write failed; falling back to cold open",
-                details: String(describing: error)
+        let store = WorkspaceProjectsStore(environment: seams.environment,
+                                           fileSystem: seams.fileSystem)
+        await store.load()
+        guard let project = await store.project(path: projectURL.path) else {
+            throw AgentError.unsupportedOperation(
+                detail: "Project \(projectURL.path) must be added before its history can be imported."
             )
-            return false
         }
+        let adapters = await importAdapters(for: project.projectType)
+        guard !adapters.isEmpty else {
+            try await transcriptRepository.setCatalogImportState(.notNeeded,
+                                                                 in: projectURL)
+            await bus.publish(.historyImportFinished(projectPath: projectURL,
+                                                     imported: 0,
+                                                     failed: 0))
+            return
+        }
+
+        try await transcriptRepository.setCatalogImportState(.pending,
+                                                             in: projectURL)
+        let environment = await ShellEnvironmentResolver(
+            environment: seams.environment
+        ).resolve()
+        var imported = 0
+        var failed = 0
+        for adapter in adapters {
+            do {
+                let sessions = try await adapter.importSessionCatalog(
+                    workspace: projectURL,
+                    env: environment
+                ) { [bus] completed, total in
+                    await bus.publish(.historyImportProgress(
+                        projectPath: projectURL,
+                        completed: completed,
+                        total: total
+                    ))
+                }
+                try await transcriptRepository.importCatalog(
+                    sessions,
+                    namespace: adapter.historyNamespace,
+                    agentID: adapter.id,
+                    into: projectURL
+                )
+                imported += sessions.count
+            } catch is CancellationError {
+                try await transcriptRepository.setCatalogImportState(
+                    .partial(at: seams.clock.now()),
+                    in: projectURL
+                )
+                throw CancellationError()
+            } catch {
+                failed += 1
+                log.error(
+                    "history import failed adapter=\(adapter.id.rawValue, privacy: .public) error=\(String(describing: error), privacy: .public)"
+                )
+            }
+        }
+        try await transcriptRepository.setCatalogImportState(
+            failed == 0 ? .completed(at: seams.clock.now())
+                : .partial(at: seams.clock.now()),
+            in: projectURL
+        )
+        try await publishStoredSessions(in: projectURL)
+        await bus.publish(.historyImportFinished(projectPath: projectURL,
+                                                 imported: imported,
+                                                 failed: failed))
     }
 
-    private func recordWarmMiss(reason: String, sessionID: String) async {
-        await SilentDiagnostics.shared.record(
-            kind: .other,
-            owner: "AgentEngine",
-            summary: "warm session/load skipped; cold open",
-            details: "\(reason) session=\(sessionID)"
-        )
+    private func importAdapters(for projectType: ProjectType) async -> [any AgentAdapter] {
+        switch projectType {
+        case .mixed:
+            return await AdapterRegistry.shared.all()
+        case .custom(let ref):
+            if let adapter = await CustomAgentAdapterFactories.shared.makeAdapter(for: ref) {
+                return [adapter]
+            }
+            return []
+        case .folder:
+            return []
+        case .claudeCode, .codex, .cursorCLI:
+            guard let id = projectType.primaryAgentID,
+                  let adapter = await AdapterRegistry.shared.adapter(for: id) else {
+                return []
+            }
+            return [adapter]
+        }
     }
 
     /// `standardizedFileURL` does not resolve symlinks (`/var` vs `/private/var`).
@@ -408,14 +483,10 @@ extension AgentEngine {
                                 mode: ProjectType) async -> AgentID? {
         guard let resumeSessionID else { return nil }
         guard case .mixed = mode else { return nil }
-        let adapters = await AdapterRegistry.shared.all()
-        for adapter in adapters where adapter.capabilities.contains(.resumableSessions) {
-            let sessions = await adapter.listResumableSessions(workspace: workspace)
-            if let match = sessions.first(where: { $0.id == resumeSessionID }) {
-                return match.agentID
-            }
-        }
-        return nil
+        return try? await transcriptRepository.records(
+            forSessionID: resumeSessionID,
+            inProject: workspace
+        ).first?.agentID
     }
 
     // MARK: - Helpers
@@ -428,19 +499,9 @@ extension AgentEngine {
     }
 
     private func writePromptBytes(_ bytes: Data) async throws {
-        await waitForResumeStartupIfNeeded()
         guard let transport else {
             throw AgentError.internalInvariant(detail: "transport closed before prompt write")
         }
         try await transport.write(bytes)
-        // Independent safety net for the very first real prompt of a freshly
-        // started TUI session: if the readiness heuristic was fooled and the
-        // submit key or whole write was swallowed, recover based on the visible
-        // input row. Hook/user echoes and assistant activity cancel this before
-        // it can duplicate an accepted prompt.
-        if startupSubmitRecoveryArmed, let turnID = currentTurnID {
-            startupSubmitRecoveryArmed = false
-            armStartupSubmitRecovery(turnID: turnID, promptBytes: bytes)
-        }
     }
 }

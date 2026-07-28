@@ -16,9 +16,9 @@ import AgentProtocol
 /// A *workspace* is the loaded folder (one per window). Each workspace owns an
 /// ordered list of `ProjectRef`s: the workspace root is seeded as the default
 /// project; further projects are either created as subfolders of the workspace
-/// or added from anywhere on disk. Sessions are not modelled here — they flow
-/// through the `AgentAdapter` (`listResumableSessions`) so this store stays
-/// agent-agnostic and contains no Claude (or terminal) specifics.
+/// or added from anywhere on disk. Sessions are not modelled here —
+/// `SessionTranscriptRepository` owns their project-local index, so this store
+/// stays agent-agnostic and contains no Claude (or terminal) specifics.
 ///
 /// Persisted at `<appSupport>/workspaces.json` atomically through the
 /// `FileSystem` seam (never `UserDefaults`, never `FileManager` directly). The
@@ -179,10 +179,13 @@ public actor WorkspaceProjectsStore {
     }
 
     /// Marks `workspace` as the open session so the next launch restores it.
+    ///
+    /// Does not rewrite `.codemixer/workspace.json` — that catalog is owned by
+    /// create/add/remove and by `projects(for:)`. Writing it here from an
+    /// unloaded empty in-memory cache would wipe child projects on Open Workspace.
     public func markActiveWorkspace(_ workspace: URL) async throws {
         activeWorkspacePath = workspace.path
         try await persist()
-        try await persistWorkspaceLocal(for: workspace)
     }
 
     /// Clears the active workspace (Close Workspace). Next launch shows the landing screen.
@@ -260,61 +263,41 @@ public actor WorkspaceProjectsStore {
 
     // MARK: - Private
 
-    /// Overlay project-local `.codemixer/project.json` onto in-memory refs so
-    /// the folder remains authoritative for mode + display name.
+    /// Keeps only catalog rows whose folder carries a readable
+    /// `.codemixer/project.json`, overlays that file as authoritative, and
+    /// prunes stale index rows from app-support + `workspace.json` on full
+    /// workspace loads.
     private func reconcileLocalState(_ refs: [ProjectRef],
                                      workspaceKey: String?) async -> [ProjectRef] {
         guard !refs.isEmpty else { return refs }
-        var changed = false
-        let updated: [ProjectRef] = refs.map { ref in
-            guard let local = ProjectLocalStateStore.load(
-                from: URL(fileURLWithPath: ref.path),
-                fileSystem: fileSystem
-            ) else { return ref }
-            var next = ref
-            if next.projectType != local.projectType {
-                next.projectType = local.projectType
-                changed = true
-            }
-            if next.displayName != local.displayName {
-                next.displayName = local.displayName
-                changed = true
-            }
-            if next.preferFreshAgentProcess != local.preferFreshAgentProcess {
-                next.preferFreshAgentProcess = local.preferFreshAgentProcess
-                changed = true
-            }
-            if next.agentInstanceIdentity != local.agentInstanceIdentity {
-                next.agentInstanceIdentity = local.agentInstanceIdentity
-                changed = true
-            }
-            return next
+        let validated = refs.compactMap { validatedProjectRef(from: $0) }
+        guard let workspaceKey else { return validated }
+
+        let pruned = validated.count < refs.count
+        let fieldsChanged = !pruned && zip(refs, validated).contains { $0 != $1 }
+        guard pruned || fieldsChanged else { return validated }
+
+        workspaces[workspaceKey] = validated
+        try? await persist()
+        try? await persistWorkspaceLocal(
+            projects: validated,
+            for: URL(fileURLWithPath: workspaceKey)
+        )
+        return validated
+    }
+
+    /// Returns a catalog row backed by on-disk project state, or `nil` when the
+    /// folder has no readable `.codemixer/project.json`.
+    private func validatedProjectRef(from catalogRef: ProjectRef) -> ProjectRef? {
+        let root = URL(fileURLWithPath: catalogRef.path)
+        guard let local = ProjectLocalStateStore.load(from: root, fileSystem: fileSystem) else {
+            return nil
         }
-        guard changed else { return updated }
-        let key = workspaceKey ?? workspaces.first(where: { entry in
-            refs.allSatisfy { ref in entry.value.contains { $0.path == ref.path } }
-        })?.key
-        if let key {
-            // Replace only the paths we reconciled; keep sibling projects intact
-            // when reconciling a single lookup.
-            if let existing = workspaces[key], existing.count > updated.count {
-                var merged = existing
-                for ref in updated {
-                    if let idx = merged.firstIndex(where: { $0.path == ref.path }) {
-                        merged[idx] = ref
-                    }
-                }
-                workspaces[key] = merged
-            } else {
-                workspaces[key] = updated
-            }
-            try? await persist()
-            try? await persistWorkspaceLocal(
-                projects: workspaces[key] ?? updated,
-                for: URL(fileURLWithPath: key)
-            )
-        }
-        return updated
+        return ProjectRef(path: catalogRef.path,
+                        displayName: local.displayName,
+                        projectType: local.projectType,
+                        preferFreshAgentProcess: local.preferFreshAgentProcess,
+                        agentInstanceIdentity: local.agentInstanceIdentity)
     }
 
     /// Non-private: called from `+Mutation` as well as the query/reconcile

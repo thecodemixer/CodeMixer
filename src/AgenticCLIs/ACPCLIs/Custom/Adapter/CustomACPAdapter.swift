@@ -15,10 +15,10 @@ public final class CustomACPAdapter: AgentAdapter, ACPBackedAdapter {
     public let capabilities: AgentCapabilities = [
         .permissionPrompts,
         .resumableSessions,
-        .sessionHandshakeGate,
         .overviewDashboard,
     ]
     public var transportDescriptor: AgentTransportDescriptor { .agentClientProtocol }
+    public var historyNamespace: String { ref.id }
 
     public let ref: CustomAgentRef
     private let locator: CustomACPBinaryLocator
@@ -37,19 +37,12 @@ public final class CustomACPAdapter: AgentAdapter, ACPBackedAdapter {
             environment: environment,
             fileSystem: fileSystem
         )
-        let store = ACPProjectSessionStore(
-            customAgentID: ref.id,
-            environment: environment,
-            fileSystem: fileSystem,
-            clock: clock
-        )
         self.inner = ACPAdapter(
             ref: ref,
             environment: environment,
             fileSystem: fileSystem,
             clock: clock,
-            random: random,
-            sessionIndex: store
+            random: random
         )
     }
 
@@ -115,7 +108,4 @@ public final class CustomACPAdapter: AgentAdapter, ACPBackedAdapter {
         inner.availableModels()
     }
 
-    public func listResumableSessions(workspace: URL) async -> [SessionSummary] {
-        await inner.listResumableSessions(workspace: workspace)
-    }
 }

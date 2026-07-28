@@ -2,60 +2,48 @@ import Foundation
 import AgentCore
 
 /// Pure session export helpers shared by the app shell and tests.
+///
+/// Prefer `SnapshotService.SnapshotMessage` (domain transcript projection).
+/// The `EngineViewModel.Message` overloads exist for unit tests and adapt
+/// live UI rows into the same domain shape.
 public enum SessionExporter {
 
-    public static func markdown(_ messages: [EngineViewModel.Message]) -> Data {
-        let lines = messages.compactMap { message -> String? in
-            switch message {
-            case .user(_, let text):
-                return "**You:** \(text)"
-            case .assistant(_, let text), .assistantStreaming(_, let text):
-                return text
-            case .clientAction(let action):
-                let body = action.detail.map { "\(action.title): \($0)" } ?? action.title
-                return "*\(body)*"
-            case .thinkingChunk, .thinkingComplete, .toolCall:
-                return nil
+    public static func markdown(_ messages: [SnapshotService.SnapshotMessage]) -> Data {
+        let lines = messages.map { message -> String in
+            switch message.role {
+            case .user:
+                return "**You:** \(message.text)"
+            case .assistant:
+                return message.text
+            case .action:
+                return "*\(message.text)*"
             }
-        }.joined(separator: "\n\n")
-        return Data(lines.utf8)
+        }
+        return Data(lines.joined(separator: "\n\n").utf8)
     }
 
-    public static func jsonl(_ messages: [EngineViewModel.Message]) -> Data {
+    public static func jsonl(_ messages: [SnapshotService.SnapshotMessage]) -> Data {
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
+        struct Line: Encodable {
+            let role: SnapshotService.TranscriptRole
+            let text: String
+        }
         let lines = messages.compactMap { message -> Data? in
-            struct Line: Encodable {
-                let role: SnapshotService.TranscriptRole
-                let text: String
-            }
-            switch message {
-            case .user(_, let text):
-                return try? encoder.encode(Line(role: .user, text: text))
-            case .assistant(_, let text), .assistantStreaming(_, let text):
-                return try? encoder.encode(Line(role: .assistant, text: text))
-            case .clientAction(let action):
-                let text = action.detail.map { "\(action.title): \($0)" } ?? action.title
-                return try? encoder.encode(Line(role: .action, text: text))
-            case .thinkingChunk, .thinkingComplete, .toolCall:
-                return nil
-            }
+            try? encoder.encode(Line(role: message.role, text: message.text))
         }
         return Data(lines.flatMap { $0 + "\n".utf8 })
     }
 
-    public static func html(_ messages: [EngineViewModel.Message]) -> Data {
-        let rows = messages.compactMap { message -> String? in
-            switch message {
-            case .user(_, let text):
-                return "<div class=\"user\"><strong>You:</strong> \(htmlEscaped(text))</div>"
-            case .assistant(_, let text), .assistantStreaming(_, let text):
-                return "<div class=\"assistant\">\(htmlEscaped(text))</div>"
-            case .clientAction(let action):
-                let body = action.detail.map { "\(action.title): \($0)" } ?? action.title
-                return "<div class=\"action\">\(htmlEscaped(body))</div>"
-            case .thinkingChunk, .thinkingComplete, .toolCall:
-                return nil
+    public static func html(_ messages: [SnapshotService.SnapshotMessage]) -> Data {
+        let rows = messages.map { message -> String in
+            switch message.role {
+            case .user:
+                return "<div class=\"user\"><strong>You:</strong> \(htmlEscaped(message.text))</div>"
+            case .assistant:
+                return "<div class=\"assistant\">\(htmlEscaped(message.text))</div>"
+            case .action:
+                return "<div class=\"action\">\(htmlEscaped(message.text))</div>"
             }
         }.joined(separator: "\n")
         let html = """
@@ -74,10 +62,40 @@ public enum SessionExporter {
         return Data(html.utf8)
     }
 
+    public static func markdown(_ messages: [EngineViewModel.Message]) -> Data {
+        markdown(snapshotMessages(from: messages))
+    }
+
+    public static func jsonl(_ messages: [EngineViewModel.Message]) -> Data {
+        jsonl(snapshotMessages(from: messages))
+    }
+
+    public static func html(_ messages: [EngineViewModel.Message]) -> Data {
+        html(snapshotMessages(from: messages))
+    }
+
     public static func htmlEscaped(_ string: String) -> String {
         string
             .replacingOccurrences(of: "&", with: "&amp;")
             .replacingOccurrences(of: "<", with: "&lt;")
             .replacingOccurrences(of: ">", with: "&gt;")
+    }
+
+    public static func snapshotMessages(from messages: [EngineViewModel.Message])
+        -> [SnapshotService.SnapshotMessage] {
+        let now = Date()
+        return messages.compactMap { message in
+            switch message {
+            case .user(_, let text):
+                return .init(role: .user, text: text, timestamp: now)
+            case .assistant(_, let text), .assistantStreaming(_, let text):
+                return .init(role: .assistant, text: text, timestamp: now)
+            case .clientAction(let action):
+                let text = action.detail.map { "\(action.title): \($0)" } ?? action.title
+                return .init(role: .action, text: text, timestamp: now)
+            case .thinkingChunk, .thinkingComplete, .toolCall:
+                return nil
+            }
+        }
     }
 }

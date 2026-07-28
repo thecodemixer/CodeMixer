@@ -87,11 +87,15 @@ final class Bootstrap {
     }
 }
 
-/// Waiting on Configure Project before Add Existing registration or Open Workspace adopt.
+/// Waiting on Configure Project before Add Existing registration.
+///
+/// Open Workspace no longer uses this — untyped workspace folders adopt as a
+/// shell (child projects load from `.codemixer/workspace.json`). The
+/// `openWorkspace` case remains for confirm handlers that still accept it.
 enum PendingConfigure: Hashable {
     /// Register `draft.existingFolderURL` into the open workspace after type is chosen.
     case addExisting(ProjectDraft)
-    /// Adopt the folder as the workspace root after type is chosen.
+    /// Legacy: adopt the folder as a typed workspace root after type is chosen.
     case openWorkspace(ProjectDraft, resumeSessionID: String?)
 
     var draft: ProjectDraft {

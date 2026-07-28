@@ -30,17 +30,16 @@ public final class RecordingMockAdapter: AgentAdapter, @unchecked Sendable {
 
     private let binaryURL: URL
     private let permissionDelivery: PermissionResponseDelivery
-    /// Optional TUI input classifier (Claude glyph heuristics in AgentCoreTests).
-    public var terminalInputClassifier: (@Sendable ([String]) -> TerminalInputState)?
+    private let autoAllowToolNames: Set<String>
 
     public init(binary: URL = SystemPaths.cat,
                 capabilities: AgentCapabilities = [],
                 permissionDelivery: PermissionResponseDelivery = .writePTY(Data()),
-                terminalInputClassifier: (@Sendable ([String]) -> TerminalInputState)? = nil) {
+                autoAllowToolNames: Set<String> = []) {
         self.binaryURL = binary
         self.capabilities = capabilities
         self.permissionDelivery = permissionDelivery
-        self.terminalInputClassifier = terminalInputClassifier
+        self.autoAllowToolNames = autoAllowToolNames
     }
 
     public var recorded: [Recorded] {
@@ -95,10 +94,6 @@ public final class RecordingMockAdapter: AgentAdapter, @unchecked Sendable {
         return Data(text.utf8)
     }
 
-    public func classifyTerminalInput(rows: [String]) -> TerminalInputState {
-        terminalInputClassifier?(rows) ?? .unknown
-    }
-
     public func cancelSequence() -> Data {
         lock.lock(); _recorded.append(.cancel); lock.unlock()
         return Data([0x03])
@@ -112,7 +107,10 @@ public final class RecordingMockAdapter: AgentAdapter, @unchecked Sendable {
         return permissionDelivery
     }
 
+    public func autoAllowDecision(for prompt: PermissionPrompt) -> PermissionDecision? {
+        autoAllowToolNames.contains(prompt.toolName) ? .allow : nil
+    }
+
     public func enumerateProjectCommands(workspace: URL) async -> [SlashCommand] { [] }
-    public func listResumableSessions(workspace: URL) async -> [SessionSummary] { [] }
     public func resumeArgvAddition(sessionID: String) -> [String] { [] }
 }

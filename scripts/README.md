@@ -38,7 +38,7 @@ This directory contains local automation and validation helpers for Codemixer.
   - Ensures `import SwiftUI` appears only in allowed UI targets.
 
 - `check-direct-framework-calls.swift`
-  - Prevents direct calls to wrapped Apple APIs outside `External/` wrapper seams.
+  - Prevents direct calls to wrapped Apple and SQLite APIs outside `External/` wrapper seams.
   - Usage:
     - `scripts/check-direct-framework-calls.swift`
     - `scripts/check-direct-framework-calls.swift <SourcesDirectory>`
@@ -59,6 +59,11 @@ This directory contains local automation and validation helpers for Codemixer.
   - Fails if tests drift back under a nested package layout or a suite directory is missing.
   - Usage:
     - `scripts/check-package-layout.swift`
+
+- `check-no-personal-paths.swift`
+  - Fails when sources or docs contain macOS home-directory paths (live probes must use env vars or neutral placeholders).
+  - Usage:
+    - `scripts/check-no-personal-paths.swift`
 
 ### Live Spikes (Manual Validation)
 

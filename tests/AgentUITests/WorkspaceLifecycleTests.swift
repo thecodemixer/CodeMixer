@@ -19,8 +19,48 @@ struct WorkspaceLifecycleTests {
 
         #expect(vm.workspaceRoot?.path == folder.path)
         #expect(vm.projects.isEmpty)
+        #expect(vm.workspace == nil)
         #expect(vm.workspaceModelCatalogRows.isEmpty)
         #expect(await store.activeWorkspaceURL()?.path == folder.path)
+
+        await bus.shutdown()
+    }
+
+    @Test("openEmptyWorkspace loads child projects from workspace.json without seeding the root")
+    func openEmptyWorkspaceLoadsChildProjectsWithoutRootType() async throws {
+        let (vm, bus, store, fileSystem, _) = makeHarness()
+        let folder = TestPaths.workspace("ws-mongomixer-shape")
+        let child = folder.appendingPathComponent("claude", isDirectory: true)
+        try fileSystem.createDirectory(at: folder, withIntermediates: true)
+        try fileSystem.createDirectory(at: child, withIntermediates: true)
+
+        let childRef = WorkspaceProjectsStore.ProjectRef(
+            path: child.path,
+            displayName: "claude",
+            projectType: .claudeCode
+        )
+        try ProjectLocalStateStore.save(ref: childRef, fileSystem: fileSystem)
+        try WorkspaceLocalStateStore.save(projects: [childRef], to: folder, fileSystem: fileSystem)
+
+        #expect(await store.resolveProjectType(for: folder) == nil)
+
+        await AdapterRegistry.shared.register(MockAdapter(
+            id: .claudeCode,
+            displayName: "Claude Code",
+            models: [AgentModelOption(id: "sonnet", label: "Sonnet")]
+        ))
+
+        try await WorkspaceLifecycle(model: vm).openEmptyWorkspace(folder)
+
+        #expect(vm.workspaceRoot?.path == folder.path)
+        #expect(vm.projects.map(\.path) == [child.path])
+        #expect(vm.projects.first?.projectType == .claudeCode)
+        #expect(!(vm.projects.contains { $0.path == folder.path }))
+        #expect(await store.activeWorkspaceURL()?.path == folder.path)
+        #expect(await store.resolveProjectType(for: folder) == nil)
+        // Shell with a single agent project auto-starts a new chat there.
+        #expect(vm.workspace?.path == child.path)
+        #expect(vm.sessionActivation == .awaitingAdapter(sessionID: ""))
 
         await bus.shutdown()
     }

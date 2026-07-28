@@ -17,7 +17,66 @@ struct CursorACPAdapterTests {
         #expect(adapter.transportDescriptor == .agentClientProtocol)
         #expect(adapter.capabilities.contains(.permissionPrompts))
         #expect(adapter.capabilities.contains(.resumableSessions))
-        #expect(adapter.capabilities.contains(.sessionHandshakeGate))
+    }
+
+    @Test("workspace identity matches Cursor's MD5 path layout")
+    func workspaceIdentity() {
+        #expect(CursorWorkspaceIdentity.projectDirectoryName(
+            forWorkspace: URL(fileURLWithPath: "/workspace/codemixer")
+        ) == "3e7652358e6e6b04c9c2112b8e247b8d")
+    }
+
+    @Test("SQLite reader opens vendor databases read-only")
+    func sqliteReaderRejectsMissingDatabase() {
+        #expect(throws: SQLiteReader.ReaderError.self) {
+            try SQLiteReader().rows(
+                in: TestPaths.underTemporary("missing-cursor-state.vscdb"),
+                query: "SELECT value FROM ItemTable",
+                textBindings: []
+            )
+        }
+    }
+
+    @Test("catalog import preserves Cursor user thinking and assistant blocks")
+    func catalogImportPreservesVisibleBlocks() async throws {
+        let fileSystem = InMemoryFileSystem()
+        let home = TestPaths.underTemporary("cursor-import-home")
+        let workspace = TestPaths.underTemporary("cursor-import-workspace")
+        let chats = home.appendingPathComponent(
+            ".cursor/chats/\(CursorWorkspaceIdentity.projectDirectoryName(forWorkspace: workspace))",
+            isDirectory: true
+        )
+        try fileSystem.createDirectory(at: chats, withIntermediates: true)
+        let chat = chats.appendingPathComponent("chat-1", isDirectory: true)
+        try fileSystem.createDirectory(at: chat, withIntermediates: true)
+        try fileSystem.writeAtomically(Data(), to: chat.appendingPathComponent("store.db"))
+
+        let imported = try await CursorSessionCatalogImporter(
+            homeDirectory: home,
+            fileSystem: fileSystem,
+            sqlite: CursorSQLiteFixture(),
+            random: FakeRandomSource()
+        ).sessions(workspace: workspace) { _, _ in }
+
+        let session = try #require(imported.first)
+        #expect(session.id == "chat-1")
+        #expect(session.title == "Imported session")
+        #expect(session.events.count == 4)
+        if case .userTurn(_, let text) = session.events[0] {
+            #expect(text == "Explain the history store")
+        } else {
+            Issue.record("Expected imported user turn")
+        }
+        if case .thinkingChunk(_, let text) = session.events[1] {
+            #expect(text == "Tracing the journal")
+        } else {
+            Issue.record("Expected imported thinking")
+        }
+        if case .assistantText(_, _, let text, true) = session.events[3] {
+            #expect(text == "The repository owns replay.")
+        } else {
+            Issue.record("Expected imported assistant text")
+        }
     }
 
     @Test("buildLaunchArgv is cursor-agent acp")
@@ -159,6 +218,43 @@ struct CursorACPAdapterTests {
         #expect(AgentID.shipping.contains(.cursorCLI))
         #expect(SupportedBuiltInAgent.shipping.contains { $0.id == .cursorCLI })
         #expect(SupportedBuiltInAgent.entry(for: .cursorCLI)?.projectType == .cursorCLI)
+    }
+}
+
+private struct CursorSQLiteFixture: SQLiteReading {
+    func rows(in _: URL,
+              query: String,
+              textBindings: [String]) throws -> [[String: Data]] {
+        if query.contains("FROM meta") {
+            #expect(textBindings == ["0"])
+            let metadata = Data(
+                #"{"agentId":"chat-1","latestRootBlobId":"root","name":"Imported session","createdAt":1700000000000}"#.utf8
+            )
+            let hex = metadata.map { String(format: "%02x", $0) }.joined()
+            return [["value": Data(hex.utf8)]]
+        }
+        guard query.contains("FROM blobs"), let id = textBindings.first else {
+            return []
+        }
+        if id == "root" {
+            return [["data": Self.rootBlob]]
+        }
+        if id == String(repeating: "11", count: 32) {
+            return [["data": Data(
+                #"{"role":"user","content":[{"type":"text","text":"<user_query>\nExplain the history store\n</user_query>"}]}"#.utf8
+            )]]
+        }
+        if id == String(repeating: "22", count: 32) {
+            return [["data": Data(
+                #"{"role":"assistant","content":[{"type":"reasoning","text":"Tracing the journal"},{"type":"text","text":"The repository owns replay."}]}"#.utf8
+            )]]
+        }
+        return []
+    }
+
+    private static var rootBlob: Data {
+        Data([0x0A, 0x20] + Array(repeating: 0x11, count: 32)
+            + [0x0A, 0x20] + Array(repeating: 0x22, count: 32))
     }
 }
 

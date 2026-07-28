@@ -69,16 +69,27 @@ public enum WireCodec {
             return .clientAction(action)
         case .agentDashboard(let url, let title):
             return .agentDashboard(url: url.absoluteString, title: title)
-        case .sessionIndexChanged(let projectPath):
-            return .sessionIndexChanged(projectPath: projectPath.path)
         case .sessionAttentionChanged(let sessionID, let title, let needsAttention):
             return .sessionAttentionChanged(
                 sessionID: sessionID,
                 title: title,
                 needsAttention: needsAttention
             )
-        case .cachedTranscriptLoaded(let sessionID):
-            return .cachedTranscriptLoaded(sessionID: sessionID)
+        case .sessionHistoryRestored(let sessionID):
+            return .sessionHistoryRestored(sessionID: sessionID)
+        case .sessionPromptReady(let sessionID):
+            return .sessionPromptReady(sessionID: sessionID)
+        case .sessionsListed(let projectPath, let sessions):
+            return .sessionsListed(projectPath: projectPath.path,
+                                   sessions: sessions.map(encode))
+        case .historyImportProgress(let projectPath, let completed, let total):
+            return .historyImportProgress(projectPath: projectPath.path,
+                                          completed: completed,
+                                          total: total)
+        case .historyImportFinished(let projectPath, let imported, let failed):
+            return .historyImportFinished(projectPath: projectPath.path,
+                                          imported: imported,
+                                          failed: failed)
         case .sessionPhaseChanged(let sessionID, let phase):
             return .sessionPhaseChanged(
                 sessionID: sessionID,
@@ -153,16 +164,29 @@ public enum WireCodec {
                 return .error(.internalInvariant(detail: "invalid agentDashboard URL"))
             }
             return .agentDashboard(url: url, title: title)
-        case .sessionIndexChanged(let path):
-            return .sessionIndexChanged(projectPath: URL(fileURLWithPath: path))
         case .sessionAttentionChanged(let sessionID, let title, let needsAttention):
             return .sessionAttentionChanged(
                 sessionID: sessionID,
                 title: title,
                 needsAttention: needsAttention
             )
-        case .cachedTranscriptLoaded(let sessionID):
-            return .cachedTranscriptLoaded(sessionID: sessionID)
+        case .sessionHistoryRestored(let sessionID):
+            return .sessionHistoryRestored(sessionID: sessionID)
+        case .sessionPromptReady(let sessionID):
+            return .sessionPromptReady(sessionID: sessionID)
+        case .sessionsListed(let projectPath, let sessions):
+            return .sessionsListed(
+                projectPath: URL(fileURLWithPath: projectPath),
+                sessions: sessions.map(decode)
+            )
+        case .historyImportProgress(let projectPath, let completed, let total):
+            return .historyImportProgress(projectPath: URL(fileURLWithPath: projectPath),
+                                          completed: completed,
+                                          total: total)
+        case .historyImportFinished(let projectPath, let imported, let failed):
+            return .historyImportFinished(projectPath: URL(fileURLWithPath: projectPath),
+                                          imported: imported,
+                                          failed: failed)
         case .sessionPhaseChanged(let sessionID, let wirePhase):
             let group = SessionPhase.Group(rawValue: wirePhase.group) ?? .plan
             return .sessionPhaseChanged(
@@ -177,6 +201,40 @@ public enum WireCodec {
     private static func ms(of duration: Duration) -> Int {
         let comp = duration.components
         return Int(comp.seconds * 1_000) + Int(comp.attoseconds / 1_000_000_000_000_000)
+    }
+
+    private static func encode(_ summary: SessionSummary) -> WireSessionSummary {
+        WireSessionSummary(id: summary.id,
+                           agentID: summary.agentID.rawValue,
+                           workspace: summary.workspace.path,
+                           title: summary.title,
+                           lastActivity: summary.lastActivity,
+                           messageCount: summary.messageCount,
+                           gitBranch: summary.gitBranch,
+                           needsAttention: summary.needsAttention,
+                           isOverview: summary.isOverview,
+                           overviewURL: summary.overviewURL?.absoluteString,
+                           archived: summary.archived,
+                           supersededAt: summary.supersededAt,
+                           historyImportState: summary.historyImportState.rawValue)
+    }
+
+    private static func decode(_ summary: WireSessionSummary) -> SessionSummary {
+        SessionSummary(id: summary.id,
+                       agentID: AgentID(rawValue: summary.agentID) ?? .other,
+                       workspace: URL(fileURLWithPath: summary.workspace),
+                       title: summary.title,
+                       lastActivity: summary.lastActivity,
+                       messageCount: summary.messageCount,
+                       gitBranch: summary.gitBranch,
+                       needsAttention: summary.needsAttention,
+                       isOverview: summary.isOverview,
+                       overviewURL: summary.overviewURL.flatMap(URL.init(string:)),
+                       archived: summary.archived,
+                       supersededAt: summary.supersededAt,
+                       historyImportState: HistoryImportState(
+                           rawValue: summary.historyImportState
+                       ) ?? .notNeeded)
     }
 
 }

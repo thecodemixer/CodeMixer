@@ -9,8 +9,8 @@ import AgentTestSupport
 @Suite("AgentEngine + CustomACPAdapter + fake-custom-acp", .serialized)
 struct FakeCustomACPIntegrationTests {
 
-    @Test("Custom adapter starts session, exposes migrate/document modes, writes project JSONL")
-    func sessionModesAndStore() async throws {
+    @Test("Custom adapter modes and live events persist in the local transcript")
+    func sessionModesAndLocalTranscript() async throws {
         guard let fakeBin = locateFakeCustomACP() else {
             Issue.record("fake-custom-acp not built — run swift build --product fake-custom-acp")
             return
@@ -90,27 +90,32 @@ struct FakeCustomACPIntegrationTests {
         }
         #expect(sawText)
 
-        let summaries = await adapter.listResumableSessions(workspace: ws)
-        #expect(summaries.contains { $0.title.contains("hello custom") || $0.messageCount > 0 })
-
-        if let sid = summaries.first?.id {
-            let url = ACPProjectPaths.transcriptURL(
-                projectRoot: ws,
-                customAgentID: ref.id,
-                sessionID: sid
-            )
-            #expect(fs.fileExists(at: url))
-            let jsonl = String(decoding: try fs.readData(at: url), as: UTF8.self)
-            #expect(jsonl.contains("hello custom") || jsonl.contains("user"))
-            #expect(fs.fileExists(at: ACPProjectPaths.sessionsIndexURL(
-                projectRoot: ws,
-                customAgentID: ref.id
-            )))
-        } else {
-            Issue.record("expected resumable session after prompt")
+        guard let sessionID = await sink.sessionID() else {
+            Issue.record("expected an active session after prompt")
+            await engine.shutdown(reason: .naturalExit)
+            return
         }
-
         await engine.shutdown(reason: .naturalExit)
+
+        let repository = SessionTranscriptRepository(
+            store: ProjectSessionTranscriptStore(fileSystem: fs),
+            clock: SystemClock()
+        )
+        let key = SessionTranscriptKey(projectRoot: ws,
+                                       namespace: adapter.historyNamespace,
+                                       sessionID: sessionID)
+        let events = try await repository.replayEvents(for: key)
+        #expect(events.contains {
+            if case .userTurn(_, "hello custom") = $0 { return true }
+            return false
+        })
+        #expect(events.contains {
+            if case .assistantText(_, _, let text, true) = $0 {
+                return text.contains("Hello from fake-custom-acp")
+            }
+            return false
+        })
+        try await repository.shutdown()
     }
 
     private func locateFakeCustomACP() -> URL? {
@@ -138,6 +143,13 @@ private actor CustomEventSink {
             if case .sessionStarted(let id, _, _) = $0 { return !id.isEmpty }
             return false
         }
+    }
+
+    func sessionID() -> String? {
+        events.compactMap {
+            if case .sessionStarted(let id, _, _) = $0 { return id }
+            return nil
+        }.last
     }
 
     func hasStatusPhrase(containing needle: String) -> Bool {

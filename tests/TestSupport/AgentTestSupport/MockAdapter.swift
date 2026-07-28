@@ -116,6 +116,5 @@ public final class MockAdapter: AgentAdapter, @unchecked Sendable {
     }
 
     public func enumerateProjectCommands(workspace: URL) async -> [SlashCommand] { [] }
-    public func listResumableSessions(workspace: URL) async -> [SessionSummary] { [] }
     public func resumeArgvAddition(sessionID: String) -> [String] { [] }
 }

@@ -75,7 +75,7 @@ struct TUIFallbackTests {
         let snapshot = TerminalSnapshot(plainText: """
         Accessing workspace:
 
-        /Users/alice/workspace
+        /workspace/alice/workspace
 
         Quick safety check: Is this a project you created or one you trust?
         Claude Code'll be able to read, edit, and execute files here.
@@ -93,11 +93,43 @@ struct TUIFallbackTests {
             if case .permissionRequest(let prompt) = $0 {
                 return prompt.toolName == ClaudeTUIFallback.workspaceTrustToolName
                     && prompt.summary == "Trust this workspace?"
-                    && prompt.argumentsSummary == "/Users/alice/workspace"
+                    && prompt.argumentsSummary == "/workspace/alice/workspace"
             }
             return false
         })
         #expect(second.isEmpty)
+    }
+
+    @Test("workspace trust screen matches when SwiftTerm inserts NUL between cells")
+    func workspaceTrustScreenMatchesNulSeparatedCells() async {
+        let fallback = ClaudeTUIFallback()
+        // Live PTY dumps from Claude's trust gate interleave U+0000 between
+        // characters; detection must still fire so the engine can auto-allow.
+        let nulSeparated = { (text: String) -> String in
+            text.map(String.init).joined(separator: "\u{0000}")
+        }
+        let snapshot = TerminalSnapshot(plainText: """
+        \(nulSeparated("Accessing workspace:"))
+
+        \(nulSeparated("/Users/hari/Hub/CodePeek/MongoMixer/MongoMixer/claude"))
+
+        \(nulSeparated("Quick safety check: Is this a project you created or one you trust? (Like your own code, a well-known open source project, or work from your team). If not,"))
+        \(nulSeparated("take a moment to review what's in this folder first."))
+
+        \(nulSeparated("❯ 1. Yes, I trust this folder"))
+        \(nulSeparated("  2. No, exit"))
+
+        \(nulSeparated("Enter to confirm · Esc to cancel"))
+        """)
+
+        let events = await fallback.ingest(snapshot: snapshot)
+        #expect(events.contains {
+            if case .permissionRequest(let prompt) = $0 {
+                return prompt.toolName == ClaudeTUIFallback.workspaceTrustToolName
+                    && prompt.argumentsSummary == "/Users/hari/Hub/CodePeek/MongoMixer/MongoMixer/claude"
+            }
+            return false
+        })
     }
 
     @Test("workspace trust permission maps allow and deny to TUI choices")
@@ -105,7 +137,7 @@ struct TUIFallbackTests {
         let adapter = ClaudeAdapter()
         let prompt = PermissionPrompt(toolName: ClaudeTUIFallback.workspaceTrustToolName,
                                       summary: "Trust this workspace?",
-                                      argumentsSummary: "/Users/alice/workspace",
+                                      argumentsSummary: "/workspace/alice/workspace",
                                       requestedAt: Date(timeIntervalSince1970: 0))
 
         guard case .writePTY(let allowBytes) = adapter.encodePermissionResponse(.allow, for: prompt),

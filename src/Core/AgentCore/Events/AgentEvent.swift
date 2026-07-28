@@ -56,21 +56,30 @@ public enum AgentEvent: Sendable {
     /// `title` is agent-owned display copy, used for the sidebar overview row.
     case agentDashboard(url: URL, title: String?)
 
-    /// ACP session index changed for a project — sidebar should reload sessions.
-    case sessionIndexChanged(projectPath: URL)
-
     /// Background session needs user attention (e.g. parked permission).
     case sessionAttentionChanged(sessionID: String, title: String, needsAttention: Bool)
 
-    /// The agent no longer owns this session, so Codemixer restored cached
-    /// project transcript history instead of live ACP state.
-    case cachedTranscriptLoaded(sessionID: String)
+    /// Project-local transcript restoration completed. This never implies that
+    /// the adapter is ready to accept a prompt.
+    case sessionHistoryRestored(sessionID: String)
+
+    /// The live adapter has bound the session and can accept user input.
+    case sessionPromptReady(sessionID: String)
+
+    /// Store-owned session list for one project.
+    case sessionsListed(projectPath: URL, sessions: [SessionSummary])
+
+    /// Progress from the one-shot add-existing-project history import.
+    case historyImportProgress(projectPath: URL, completed: Int, total: Int)
+
+    /// Terminal result from the one-shot project history import.
+    case historyImportFinished(projectPath: URL, imported: Int, failed: Int)
 
     /// A file-level pipeline phase advanced for this session. Agent-agnostic:
     /// a Custom ACP adapter maps its vendor status onto `SessionPhase`. Always
     /// file-scoped — there is no run/overall variant (see `AGENTS.md` phase
     /// bridge notes). Ordered and durable: emitted live and re-emitted, in
-    /// order, on both `session/load` replay and cached-transcript replay, so
+    /// order from the project-local transcript, so
     /// the rail can phase-group reopened history, not just the live tail.
     case sessionPhaseChanged(sessionID: String, phase: SessionPhase)
 }

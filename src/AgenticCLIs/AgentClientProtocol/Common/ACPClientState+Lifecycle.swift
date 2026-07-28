@@ -38,7 +38,6 @@ extension ACPClientState {
             currentModelIDStorage = nil
             thoughtText = ""
             lastForegroundPhaseID = nil
-            clearReplayLocked()
             parkedPermissionsBySession.removeAll()
         }
     }
@@ -83,7 +82,6 @@ extension ACPClientState {
             currentModelIDStorage = nil
             thoughtText = ""
             lastForegroundPhaseID = nil
-            clearReplayLocked()
         }
     }
 
@@ -114,7 +112,6 @@ extension ACPClientState {
             currentModelIDStorage = nil
             thoughtText = ""
             lastForegroundPhaseID = nil
-            clearReplayLocked()
         }
     }
 

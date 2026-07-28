@@ -7,13 +7,12 @@ extension EngineViewModel {
                                   relativePath: String?,
                                   focusPreview: Bool = false) {
         guard let kind = project.projectType.folderKind else { return }
-        endSessionSwitch()
         let target = URL(fileURLWithPath: project.path).standardizedFileURL
         workspace = target
         sessionID = nil
         clearConversationState()
         clearAllPendingPermissions()
-        unlockComposerForSessionResume()
+        clearSessionActivation()
         status = .idle
         activity = .idle
         dashboardURL = nil

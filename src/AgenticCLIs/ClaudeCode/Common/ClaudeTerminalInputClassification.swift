@@ -1,15 +1,20 @@
 import Foundation
-import AgentCore
+
+/// Diagnostic state of Claude Code's live terminal prompt.
+public enum ClaudeTerminalInputState: Sendable, Hashable {
+    case unknown
+    case ready
+    case unsubmitted
+}
 
 /// Classifies Claude Code's interactive input row from a headless VT snapshot.
 ///
-/// Used by `ClaudeAdapter.classifyTerminalInput` so `AgentEngine`'s resume-startup
-/// gate and first-prompt submit recovery stay vendor-agnostic. History paint
-/// leaves prior `❯ <old text>` lines above the live input — only the **last**
-/// prompt-looking row counts.
+/// Used only by the opt-in live harness to diagnose Claude's prompt screen.
+/// History paint leaves prior `❯ <old text>` lines above the live input, so
+/// only the **last** prompt-looking row counts.
 public enum ClaudeTerminalInputClassification: Sendable {
 
-    public static func classify(_ rows: [String]) -> TerminalInputState {
+    public static func classify(_ rows: [String]) -> ClaudeTerminalInputState {
         let normalizedRows = rows.map(normalizedRow(_:))
         let hasShortcutFooter = normalizedRows.contains { looksLikeShortcutFooter($0) }
         guard let lastPrompt = normalizedRows.last(where: {

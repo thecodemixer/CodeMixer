@@ -23,26 +23,19 @@ extension CodexEventDecoder {
                 return Batch(events: [.error(CodexAgentError.missingThreadID.agentError)])
             }
             let queuedBatches = state.activateThread(id: threadID)
-            await threadIndex.recordThread(id: threadID, workspace: workspace)
             let queued = CodexInputEncoding.queuedTurns(queuedBatches, state: state)
             let replies = queued.isEmpty ? [] : [queued]
             let model = result?["thread"]?["model"]?.stringValue
-            var events: [AgentEvent] = [
+            let events: [AgentEvent] = [
                 .sessionStarted(sessionID: threadID, model: model, cwd: workspace),
             ]
-            if let turns = result?["thread"]?["turns"]?.arrayValue, !turns.isEmpty {
-                events.append(contentsOf: CodexThreadHistoryReplay.events(from: turns, random: random))
-            }
             return Batch(events: events, replies: replies)
 
-        case .turnStart(let title):
+        case .turnStart:
             guard let turnID = result?["turn"]?["id"]?.stringValue else {
                 return Batch(events: [.error(CodexAgentError.missingTurnID.agentError)])
             }
             state.beginTurn(turnID)
-            if let threadID = state.threadID() {
-                await threadIndex.recordTurn(threadID: threadID, title: title)
-            }
             return Batch()
 
         case .initialize, .compact, .review, .other:

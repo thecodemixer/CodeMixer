@@ -34,43 +34,20 @@ extension View {
     }
 }
 
-private enum SessionSwitchEmptyTiming {
-    static let loadingCopyDelay: Duration = .seconds(20)
-}
-
 /// First-impression hero shown in the conversation pane before any turn has
 /// landed. Faces: no workspace, workspace ready for a prompt, or restoring a
 /// saved session (including while the composer is still gated on resume).
 /// Transport-neutral — it only reads view-model state, never the agent.
-///
-/// While restoring a saved session the pane stays visually blank; copy
-/// appears only if restore is still in flight after `loadingCopyDelay`.
 struct ConversationEmptyState: View {
     let workspace: URL?
-    /// True while opening/replaying a saved session, or while the composer is
-    /// still locked waiting for live resume readiness.
-    let isSwitchingSession: Bool
-
-    @State private var showSwitchingCopy = false
+    /// Workspace shell is loaded but no project is selected yet.
+    let hasWorkspaceProjects: Bool
+    let sessionActivation: SessionActivation
+    let historyUnavailable: Bool
 
     var body: some View {
-        Group {
-            if isSwitchingSession && !showSwitchingCopy {
-                Color.clear
-                    .accessibilityLabel("Loading session")
-            } else {
-                hero
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-        .task(id: isSwitchingSession) {
-            showSwitchingCopy = false
-            guard isSwitchingSession else { return }
-            try? await Task.sleep(for: SessionSwitchEmptyTiming.loadingCopyDelay)
-            if isSwitchingSession {
-                showSwitchingCopy = true
-            }
-        }
+        hero
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 
     private var hero: some View {
@@ -97,23 +74,59 @@ struct ConversationEmptyState: View {
     }
 
     private var icon: String {
-        if isSwitchingSession { return "clock.arrow.circlepath" }
-        return workspace == nil ? "folder.badge.questionmark" : "sparkles"
+        switch sessionActivation {
+        case .restoringHistory:
+            return "clock.arrow.circlepath"
+        case .awaitingAdapter:
+            return "ellipsis.bubble"
+        case .failed:
+            return "exclamationmark.triangle"
+        case .idle, .ready:
+            if historyUnavailable { return "clock.badge.questionmark" }
+            if workspace == nil {
+                return hasWorkspaceProjects ? "sidebar.left" : "folder.badge.questionmark"
+            }
+            return "sparkles"
+        }
     }
 
     private var title: String {
-        if isSwitchingSession { return "Loading selected chat" }
-        return workspace == nil ? "No workspace open" : "Ready when you are"
+        switch sessionActivation {
+        case .restoringHistory:
+            return "Loading selected chat"
+        case .awaitingAdapter:
+            return "Starting chat"
+        case .failed:
+            return "Agent unavailable"
+        case .idle, .ready:
+            if historyUnavailable { return "History unavailable" }
+            if workspace == nil {
+                return hasWorkspaceProjects ? "Select a project" : "No workspace open"
+            }
+            return "Ready when you are"
+        }
     }
 
     private var subtitle: String {
-        if isSwitchingSession {
+        switch sessionActivation {
+        case .restoringHistory:
             return "Replaying the saved session so prompts, responses, and tool calls appear in order."
+        case .awaitingAdapter:
+            return "Connecting the agent for a new chat. You can type once it is ready."
+        case .failed(_, let message):
+            return message
+        case .idle, .ready:
+            if historyUnavailable {
+                return "Cursor reported this session, but its stored message graph is not available through a stable public format. New work will appear here."
+            }
+            if let workspace {
+                return "Ask anything about \(workspace.lastPathComponent). Type a prompt below to begin."
+            }
+            if hasWorkspaceProjects {
+                return "Open a project from the sidebar to start a conversation."
+            }
+            return "Open a project from the sidebar to start a conversation."
         }
-        if let workspace {
-            return "Ask anything about \(workspace.lastPathComponent). Type a prompt below to begin."
-        }
-        return "Open a project from the sidebar to start a conversation."
     }
 }
 

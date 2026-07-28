@@ -46,7 +46,7 @@ Engine + protocol spine:
 
 - ✅ Generic transport pipeline: `AgentTransport` → interactive terminal (`PTYHost` + `TerminalEngine`) or stdio JSON-RPC (`StdioJSONRPCTransport`, including ACP) → adapter event stream → `MulticastEventBus` → SwiftUI.
 - ✅ Typed `AgentCommand` ↔ `AgentEvent` alphabets with a `WireCodec` boundary and parity/dispatch tests that refuse drift.
-- ✅ `AgentAdapter` protocol with Claude, Codex, and custom ACP adapters (binary lookup, transport descriptor, bootstrap bytes, command encoding, event decoding, session listing).
+- ✅ `AgentAdapter` protocol with Claude, Codex, and custom ACP adapters (binary lookup, transport descriptor, bootstrap bytes, command encoding, event decoding, and one-shot catalog import).
 - ✅ Server-side `HeartbeatActivityMonitor` + `StatusPhraseResolver` so every connected client sees identical "still working" escalation.
 - ✅ `SnapshotService`, `EngineViewModel` event reduction, and a `GitReverter` for file/hunk-level revert.
 - ✅ `SilentDiagnostics` ring buffer with opt-in UI and `GET /v1/diagnostics/silent` sidecar.
@@ -195,6 +195,14 @@ Every UI affordance — keyboard, mouse, voice, remote phone — maps to one
 (`WireCodec`) translates the domain `AgentEvent` to its portable `AgentEventWire`
 mirror at the network boundary, and a parity test refuses to let them drift.
 
+Visible session history is project-local and adapter-namespaced under
+`.codemixer/history/`. `SessionTranscriptRepository` is the only listing and
+replay authority: it restores prompts, thinking, replies, tools, phases, and
+changed files before the adapter resumes. The composer remains locked until a
+separate `sessionPromptReady` event confirms that the live adapter can accept
+input. Existing projects receive one eager vendor-catalog import when they are
+added; later sidebar reads never rescan vendor state.
+
 **Terminology:** *remote client* is used in two related senses — client role
 (`RemoteEngineClient`) vs connected-peer count (`connectedRemoteClients`). See
 [`docs/architecture.md` §4.1](docs/architecture.md) and
@@ -232,7 +240,7 @@ src/
 │   └── AgentCore/       # AgentTransport, PTY/reaper, stdio transport, terminal engine, event bus,
 │                        # engine actor + commands, snapshot, git diff/revert,
 │                        # hooks, FSEvents, attachments, status, activity,
-│                        # network transport, persistence, paths, DI seams
+│                        # transcript aggregate/repository, persistence, paths, DI seams
 ├── AgenticCLIs/     # one folder per agent CLI — see AgenticCLIs/README.md
 │   ├── ClaudeCode/  # Adapter/, Common/, digital-twin/, contract README
 │   ├── Codex/       # App Server stdio adapter, Common/, digital-twin/, contract README
@@ -469,7 +477,7 @@ Full per-suite index: [`AGENTS.md`](AGENTS.md) (Inside `tests/` → suites).
 | `ClaudeAdapterTests / HookInstallerTests` | Hook settings are written idempotently; managed entries exist for every Claude lifecycle event. |
 | `ClaudeAdapterTests / ClaudeHookDecoderTests` / `TranscriptTailerTests` / `TranscriptTruncationTests` | Hook JSON decode, transcript tailing, and JSONL truncation at turn boundaries. |
 | `ClaudeAdapterTests / ClaudeAdapterEventStreamTests` / `ClaudeBinaryLocatorTests` | Adapter event stream wiring, `claude` binary discovery, and Stop/`last_assistant_message` dedup when the transcript already emitted. |
-| `ClaudeAdapterTests / ClaudeSlashCommandsTests` / `ClaudeSessionListerTests` | Slash-command catalog and resumable-session listing. |
+| `ClaudeAdapterTests / ClaudeSlashCommandsTests` / `ClaudeSessionCatalogImporterTests` | Slash-command catalog and one-shot existing-project transcript import. |
 | `ClaudeAdapterTests / TUIFallbackTests` / `TUIFallbackGateTests` | TUI scrape parsing and gating for terminal fallback. |
 | `ClaudeAdapterTests / TwinDecoderParityTests` | Hook decoder output matches the digital-twin emitter contract. |
 | `ClaudeAdapterTests / FakeClaudeIntegrationTests` | Production adapter + spawned `fake-claude` emits `assistantText` end-to-end. |

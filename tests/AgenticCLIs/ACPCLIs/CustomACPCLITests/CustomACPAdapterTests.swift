@@ -27,7 +27,6 @@ struct CustomACPAdapterTests {
         #expect(adapter.displayName == "Migration Assistant")
         #expect(adapter.transportDescriptor == .agentClientProtocol)
         #expect(adapter.capabilities.contains(.resumableSessions))
-        #expect(adapter.capabilities.contains(.sessionHandshakeGate))
     }
 
     @Test("buildLaunchArgv uses exe basename plus ref arguments")

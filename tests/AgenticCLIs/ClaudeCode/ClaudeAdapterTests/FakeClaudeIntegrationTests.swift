@@ -106,8 +106,8 @@ struct FakeClaudeIntegrationTests {
         })
     }
 
-    @Test("adapter transcript path emits assistantText through the engine bus")
-    func adapterTranscriptPath() async throws {
+    @Test("adapter transcript tail emits only new assistant text after resume")
+    func adapterTranscriptTailEmitsOnlyNewText() async throws {
         let suffix = String(UUID().uuidString.prefix(8))
         let workspace = URL(fileURLWithPath: "/tmp/cmw-\(suffix)", isDirectory: true)
         try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
@@ -147,11 +147,16 @@ struct FakeClaudeIntegrationTests {
         let store = ClaudeCodeTwinSessionStore(sessionID: sessionID,
                                                workspace: workspace,
                                                claudeDirectory: env.claudeDirectory)
-        try store.append(ClaudeCodeTwinTranscript.assistantTextLine(text: "Hello from fake-claude transcript."))
+        try store.append(ClaudeCodeTwinTranscript.assistantTextLine(text: "Prior vendor history."))
 
         try await engine.start(adapter: adapter,
                                workspace: workspace,
                                resumeSessionID: sessionID)
+        for _ in 0 ..< 4 {
+            clock.advance(by: .milliseconds(100))
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        try store.append(ClaudeCodeTwinTranscript.assistantTextLine(text: "New live assistant text."))
         for _ in 0..<20 {
             clock.advance(by: .milliseconds(100))
             try await Task.sleep(for: .milliseconds(5))
@@ -161,8 +166,18 @@ struct FakeClaudeIntegrationTests {
         await engine.bus.unsubscribe(sub.id)
         await engine.shutdown(reason: .naturalExit)
 
-        #expect(events.contains { if case .sessionStarted = $0 { return true }; return false })
-        #expect(events.contains { if case .assistantText(_, _, let t, let f) = $0 { return f && t.contains("fake-claude transcript") }; return false })
+        #expect(!events.contains {
+            if case .assistantText(_, _, let text, _) = $0 {
+                return text.contains("Prior vendor history")
+            }
+            return false
+        })
+        #expect(events.contains {
+            if case .assistantText(_, _, let text, true) = $0 {
+                return text.contains("New live assistant text")
+            }
+            return false
+        })
     }
 
     @Test("auth status --json via fake-claude returns authenticated by default")

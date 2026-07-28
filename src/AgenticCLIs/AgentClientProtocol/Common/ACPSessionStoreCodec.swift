@@ -2,18 +2,10 @@ import Foundation
 
 import AgentCore
 
-/// Shared Codable envelope used by app-support and project ACP session stores.
+/// Decoder for the retired project-local ACP store, used only during import.
 enum ACPSessionStoreCodec {
-    static let maxTurns = 200
-
     /// ISO-8601 on disk. Decode also accepts legacy reference-date doubles from
-    /// older `ACPSessionIndex` writes that used the default `JSONEncoder`.
-    static func makeEncoder() -> JSONEncoder {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        return encoder
-    }
-
+    /// older retired-store writes that used the default `JSONEncoder`.
     static func makeDecoder() -> JSONDecoder {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .custom { decoder in
@@ -103,11 +95,7 @@ enum ACPSessionStoreCodec {
         }
     }
 
-    /// Lifecycle (archived), attention, and single-per-project overview state
-    /// for one session record. Shared by `ACPSessionIndex` and
-    /// `ACPProjectSessionStore` so the side effects below (archiving clears
-    /// attention; promoting an overview demotes/archives stale ones) live in
-    /// one place instead of two copies.
+    /// Lifecycle and overview state retained by the retired store.
     struct SessionRecordFlags: Sendable, Equatable {
         var archived = false
         var needsAttention = false
@@ -115,67 +103,9 @@ enum ACPSessionStoreCodec {
         var overviewURL: URL?
     }
 
-    /// Sets `archived`, applying the archive-clears-attention rule. No-op if
-    /// `key` has no entry.
-    static func setArchived(_ archived: Bool, key: String, in entries: inout [String: Entry]) {
-        guard var entry = entries[key] else { return }
-        entry.flags.archived = archived
-        if archived {
-            entry.flags.needsAttention = false
-        }
-        entries[key] = entry
-    }
-
-    /// Sets `needsAttention` directly (archiving is the only path that force-clears it).
-    static func setNeedsAttention(_ needsAttention: Bool, key: String, in entries: inout [String: Entry]) {
-        guard var entry = entries[key] else { return }
-        entry.flags.needsAttention = needsAttention
-        entries[key] = entry
-    }
-
-    /// Promotes `key` to the single overview entry for its
-    /// (customAgentID, workspacePath): demotes any other `.isOverview` entry
-    /// and archives entries sharing its title (a fresh spawn's control chat
-    /// otherwise collides in the sidebar with a stale one of the same name).
-    /// No-op if `key` has no entry.
-    static func setIsOverview(_ isOverview: Bool,
-                              overviewURL: URL?,
-                              key: String,
-                              in entries: inout [String: Entry]) {
-        guard var entry = entries[key] else { return }
-        if isOverview {
-            for (otherKey, var other) in entries where otherKey != key {
-                guard other.customAgentID == entry.customAgentID,
-                      other.workspacePath == entry.workspacePath else { continue }
-                var changed = false
-                if other.flags.isOverview {
-                    other.flags.isOverview = false
-                    other.flags.overviewURL = nil
-                    changed = true
-                }
-                if other.title == entry.title {
-                    other.flags.archived = true
-                    changed = true
-                }
-                if changed {
-                    entries[otherKey] = other
-                }
-            }
-        }
-        entry.flags.isOverview = isOverview
-        if let overviewURL {
-            entry.flags.overviewURL = overviewURL
-        }
-        entries[key] = entry
-    }
-
     struct Store: Sendable, Codable {
         var schemaVersion: Int?
         var entries: [Entry]
-    }
-
-    static func key(customAgentID: String, sessionID: String) -> String {
-        "\(customAgentID)::\(sessionID)"
     }
 
     static func events(from turns: [ACPConversationTurn],
@@ -221,12 +151,4 @@ enum ACPSessionStoreCodec {
         }
     }
 
-    static func trimmedTurns(_ turns: [ACPConversationTurn]) -> [ACPConversationTurn] {
-        guard turns.count > maxTurns else { return turns }
-        return Array(turns.suffix(maxTurns))
-    }
-
-    static func chatMessageCount(in turns: [ACPConversationTurn]) -> Int {
-        turns.filter(\.role.isChatMessage).count
-    }
 }

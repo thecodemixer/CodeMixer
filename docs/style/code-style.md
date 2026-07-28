@@ -444,6 +444,7 @@ Checked by SwiftLint, SwiftFormat, custom scripts, and CI. A pull request that v
     - `AVFoundation.AVAudioEngine` + `Speech.SFSpeechRecognizer` → use `SpeechCapture`
     - `UserNotifications.UNUserNotificationCenter` → use `SystemNotifications`
     - `Foundation.URLSession` (for our own networking) → use `NetworkTransport`
+    - `SQLite3.sqlite3_*` → use the adapter-local `SQLiteReader`
 
     Enforced by `scripts/check-direct-framework-calls.swift` in CI.
 - **No `print`.** Use `os.Logger`.
@@ -1250,7 +1251,7 @@ The *principle* is universal: each module operates with the minimum capabilities
 
 ## 18.5 External integration boundaries
 
-> **Rule.** Business code never imports Apple / system frameworks directly to make calls into them. Every call to `Foundation.Process`, `Security.SecItem*`, `CoreServices.FSEventStream*`, `Network.NWListener` / `NWConnection`, `AVFoundation.AVAudioEngine` / `AVSpeechSynthesizer`, `Speech.SFSpeechRecognizer`, `UserNotifications.UNUserNotificationCenter`, `Foundation.NetService`, `Foundation.URLSession` (for our own networking) — anything that crosses the Codemixer / Apple-framework boundary — goes through a single wrapper class.
+> **Rule.** Business code never imports Apple / system frameworks directly to make calls into them. Every call to `Foundation.Process`, `Security.SecItem*`, `CoreServices.FSEventStream*`, `Network.NWListener` / `NWConnection`, `AVFoundation.AVAudioEngine` / `AVSpeechSynthesizer`, `Speech.SFSpeechRecognizer`, `UserNotifications.UNUserNotificationCenter`, `Foundation.NetService`, `Foundation.URLSession` (for our own networking), or `SQLite3.sqlite3_*` — anything that crosses the Codemixer / framework boundary — goes through a single wrapper class.
 
 ### Where wrappers live
 
@@ -1266,6 +1267,7 @@ The *principle* is universal: each module operates with the minimum capabilities
 | `AVFoundation.AVAudioEngine` + `Speech.SFSpeechRecognizer` | `SpeechCapture` | `AgentUI` |
 | `AVFoundation.AVSpeechSynthesizer` | `SpeechSynthesis` | `AgentUI` |
 | `UserNotifications.UNUserNotificationCenter` + `NSSound` | `SystemNotifications` | `AgentUI` |
+| `SQLite3.sqlite3_*` | `SQLiteReader` | `ACPCLIs` (Cursor) |
 
 ### Wrapper shape
 

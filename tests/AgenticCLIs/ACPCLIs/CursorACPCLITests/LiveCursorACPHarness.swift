@@ -1,6 +1,6 @@
 import Foundation
 import ACPCLIs
-import AgentCore
+@testable import AgentCore
 import AgentProtocol
 
 /// Opt-in driver for Cursor ACP through `CursorACPAdapter` + `AgentEngine`.
@@ -356,7 +356,7 @@ struct LiveCursorACPHarness {
         )
     }
 
-    /// Seed a session with one turn, shut down, respawn, and `session/load` history.
+    /// Seed, restore local history, respawn, and verify `session/load` follow-up.
     func runFreshProcessLoad(_ configuration: Configuration) async throws -> ResumeLoadResult {
         let version = await Self.readVersion(executablePath: configuration.executablePath)
         let seedPrompt = configuration.prompt
@@ -409,6 +409,29 @@ struct LiveCursorACPHarness {
             Task { await engine.bus.unsubscribe(sub.id) }
         }
 
+        await engine.restoreHistory(for: SessionTranscriptKey(
+            projectRoot: configuration.workspace,
+            namespace: adapter.historyNamespace,
+            sessionID: seedSessionID
+        ))
+        let historyReady = await poll(timeout: .seconds(5)) {
+            let user = await sink.containsUserTurn(matching: seedPrompt)
+            let assistant = await sink.containsFinalAssistantText(matching: seedNeedle)
+            return user && assistant
+        }
+        let sawUser = await sink.containsUserTurn(matching: seedPrompt)
+        let sawAssistant = await sink.containsFinalAssistantText(matching: seedNeedle)
+        guard historyReady else {
+            let events = await sink.snapshot()
+            await engine.shutdown(reason: .naturalExit)
+            throw LiveCursorHarnessError.historyLoadTimedOut(
+                events: events,
+                sessionID: seedSessionID,
+                version: version,
+                detail: "missing local user/assistant (user=\(sawUser), assistant=\(sawAssistant))"
+            )
+        }
+
         try await engine.start(
             adapter: adapter,
             workspace: configuration.workspace,
@@ -439,24 +462,6 @@ struct LiveCursorACPHarness {
             let events = await sink.snapshot()
             await engine.shutdown(reason: .naturalExit)
             throw LiveCursorHarnessError.sessionStartTimedOut(events: events, version: version)
-        }
-
-        let historyReady = await poll(timeout: configuration.assistantTextTimeout) {
-            let user = await sink.containsUserTurn(matching: seedPrompt)
-            let assistant = await sink.containsFinalAssistantText(matching: seedNeedle)
-            return user && assistant
-        }
-        let eventsAfterLoad = await sink.snapshot()
-        let sawUser = await sink.containsUserTurn(matching: seedPrompt)
-        let sawAssistant = await sink.containsFinalAssistantText(matching: seedNeedle)
-        guard historyReady else {
-            await engine.shutdown(reason: .naturalExit)
-            throw LiveCursorHarnessError.historyLoadTimedOut(
-                events: eventsAfterLoad,
-                sessionID: seedSessionID,
-                version: version,
-                detail: "missing replayed user/assistant (user=\(sawUser), assistant=\(sawAssistant))"
-            )
         }
 
         let followUp = try await Self.awaitFinalTurn(

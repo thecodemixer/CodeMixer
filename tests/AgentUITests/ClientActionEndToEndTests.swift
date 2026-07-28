@@ -90,7 +90,11 @@ private final class LiveEngineViewModelHarness {
         let seams = Seams.fake(environment: env, fileSystem: fs)
         let engine = AgentEngine(seams: seams, transportFactory: { _, _ in E2EScriptedTransport() })
         await engine.bootstrap()
-        try await engine.start(adapter: RecordingMockAdapter(), workspace: workspace)
+        let adapter = RecordingMockAdapter()
+        try await engine.start(adapter: adapter, workspace: workspace)
+        adapter.emit(.sessionStarted(sessionID: "session-actions",
+                                     model: nil,
+                                     cwd: workspace))
 
         let viewModel = EngineViewModel(engine: engine, bus: engine.bus)
         viewModel.subscribe()

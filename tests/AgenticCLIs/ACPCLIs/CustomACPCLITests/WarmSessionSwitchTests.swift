@@ -17,14 +17,8 @@ struct WarmSessionSwitchTests {
         let clock = FakeClock()
         let random = FakeRandomSource()
         let state = ACPClientState()
-        let sessionIndex = ACPSessionIndex(
-            environment: FakeEnvironment(),
-            fileSystem: fileSystem,
-            clock: clock
-        )
         let decoder = ACPEventDecoder(
             state: state,
-            sessionIndex: sessionIndex,
             fileAccess: ACPFileAccess(workspace: workspace, fileSystem: fileSystem),
             terminals: ACPTerminalSession(workspace: workspace, random: random),
             clock: clock,

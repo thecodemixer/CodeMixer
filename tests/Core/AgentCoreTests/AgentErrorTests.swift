@@ -18,6 +18,10 @@ struct AgentErrorTests {
             .unsupportedCommand(name: "/wat"),
             .engineRestartLimitReached,
             .permissionTimeout(promptID: UUID(), action: .deny),
+            .historyWriteFailed(path: "/workspace", detail: "disk full"),
+            .historyLoadFailed(path: "/workspace", detail: "invalid journal"),
+            .historyJournalLocked(sessionID: "session-1", ownerPID: 42),
+            .sessionReadinessFailed(sessionID: "session-1", detail: "timed out"),
             .internalInvariant(detail: "logic bug"),
             .unsupportedOperation(detail: "revertHunk"),
         ]

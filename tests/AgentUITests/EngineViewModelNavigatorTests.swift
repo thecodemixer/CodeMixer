@@ -146,40 +146,54 @@ struct EngineViewModelNavigatorTests {
 
     @Test("loadSessions uses project-specific support when the current adapter is non-resumable")
     func loadSessionsUsesProjectSpecificSupport() async {
-        let (vm, bus, _) = makeModel()
+        let port = RecordingPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port,
+                                 bus: bus,
+                                 clock: FakeClock(),
+                                 random: FakeRandomSource())
         let path = TestPaths.workspacePath("ws/claude")
         vm.supportsResumableSessions = false
         vm.projectCapabilities[path] = .init(
             supportsResumableSessions: true,
-            requiresSessionHandshakeGate: false
         )
-        vm.sessionLister = { url in
-            [SessionSummary(id: "s1", agentID: .claudeCode,
-                            workspace: url, title: "Claude chat",
-                            lastActivity: Date(), messageCount: 1)]
-        }
 
         vm.loadSessions(for: path)
-        try? await Task.sleep(for: .milliseconds(60))
+        await drain()
 
-        #expect(vm.sessionsByProject[path]?.map(\.title) == ["Claude chat"])
+        #expect(port.commands.contains {
+            if case .listSessions(let listedPath) = $0 { return listedPath == path }
+            return false
+        })
+        #expect(vm.loadingProjectPaths.contains(path))
         #expect(vm.hasResumableSessionProjects)
 
         await bus.shutdown()
     }
 
-    @Test("loadSessions populates sessions from the injected lister")
-    func loadSessionsPopulates() async {
+    @Test("sessionsListed populates sessions and clears loading state")
+    func sessionsListedPopulates() async {
         let (vm, bus, _) = makeModel()
         let path = TestPaths.workspacePath("ws")
         vm.supportsResumableSessions = true
-        vm.sessionLister = { url in
-            [SessionSummary(id: "s1", agentID: .claudeCode,
-                            workspace: url, title: "First",
-                            lastActivity: Date(), messageCount: 3, gitBranch: "main")]
-        }
+        vm.subscribe()
+        defer { vm.unsubscribe() }
         vm.loadSessions(for: path)
-        try? await Task.sleep(for: .milliseconds(60))
+        let workspace = URL(fileURLWithPath: path)
+
+        await bus.publish(.sessionsListed(
+            projectPath: workspace,
+            sessions: [
+                SessionSummary(id: "s1",
+                               agentID: .claudeCode,
+                               workspace: workspace,
+                               title: "First",
+                               lastActivity: Date(timeIntervalSince1970: 1_700_000_000),
+                               messageCount: 3,
+                               gitBranch: "main"),
+            ]
+        ))
+        await drain()
 
         #expect(vm.sessionsByProject[path]?.count == 1)
         #expect(vm.sessionsByProject[path]?.first?.title == "First")
@@ -203,7 +217,6 @@ struct EngineViewModelNavigatorTests {
         vm.supportsResumableSessions = true
         vm.projectCapabilities[project.path] = .init(
             supportsResumableSessions: true,
-            requiresSessionHandshakeGate: true,
             supportsOverviewDashboard: true
         )
         vm.sessionsByProject[project.path] = [
@@ -255,7 +268,6 @@ struct EngineViewModelNavigatorTests {
         vm.sessionID = "other-chat"
         vm.projectCapabilities[migration.path] = .init(
             supportsResumableSessions: true,
-            requiresSessionHandshakeGate: true,
             supportsOverviewDashboard: true
         )
         vm.sessionsByProject[migration.path] = [
@@ -313,7 +325,6 @@ struct EngineViewModelNavigatorTests {
         vm.loadingProjectPaths.insert(oldPath)
         vm.projectCapabilities[oldPath] = .init(
             supportsResumableSessions: true,
-            requiresSessionHandshakeGate: false
         )
 
         vm.renameProject(path: oldPath, newName: "Backend")
@@ -509,8 +520,8 @@ struct EngineViewModelNavigatorTests {
         await bus.shutdown()
     }
 
-    @Test("openSession retries the current session when the pane is blank")
-    func openSessionRetriesCurrentBlankSession() async {
+    @Test("openSession never reopens the current session because its pane is blank")
+    func openSessionDoesNotRetryCurrentBlankSession() async {
         let port = RecordingPort()
         let bus = MulticastEventBus()
         let workspace = TestPaths.workspace("ws")
@@ -524,132 +535,56 @@ struct EngineViewModelNavigatorTests {
         vm.openSession(projectPath: workspace.path, id: "sess-42")
         try? await Task.sleep(for: .milliseconds(60))
 
-        #expect(port.commands.contains {
+        #expect(!port.commands.contains {
             if case .openProject(let path, let resume) = $0 {
                 return path == workspace.path && resume == "sess-42"
             }
             return false
         })
-        #expect(vm.isSwitchingSession)
+        #expect(!vm.isSwitchingSession)
 
         await bus.shutdown()
     }
 
-    @Test("openSession enters a switching state until replayed content arrives")
-    func openSessionSwitchingState() async {
+    @Test("openSession separates history restoration from prompt readiness")
+    func openSessionActivationSequence() async {
         let port = RecordingPort()
         let bus = MulticastEventBus()
-        let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
+        let vm = EngineViewModel(engine: port,
+                                 bus: bus,
+                                 clock: FakeClock(),
+                                 random: FakeRandomSource())
         vm.subscribe()
         defer { vm.unsubscribe() }
 
-        await bus.publish(.userTurn(id: UUID().uuidString, text: "old"))
-        await drain()
-        #expect(vm.messages.count == 1)
-
+        vm.changedFiles = [ChangedFile(relativePath: "stale.swift")]
+        vm.messages = [.user(bubbleID: UUID(), text: "stale")]
         vm.openSession(projectPath: TestPaths.workspacePath("ws"), id: "sess-42")
-        #expect(vm.isSwitchingSession)
         #expect(vm.messages.isEmpty)
+        #expect(vm.changedFiles.isEmpty)
+        #expect(vm.sessionActivation == .restoringHistory(sessionID: "sess-42"))
+        #expect(vm.isSwitchingSession)
+        #expect(vm.isComposerLockedForSessionResume)
 
         await bus.publish(.userTurn(id: UUID().uuidString, text: "historical"))
+        await bus.publish(.sessionHistoryRestored(sessionID: "sess-42"))
         await drain()
 
         #expect(!vm.isSwitchingSession)
-        #expect(vm.messages.count == 1)
-
-        await bus.shutdown()
-    }
-
-    @Test("openSession locks composer until history appears")
-    func openSessionLocksComposerUntilResumeReady() async {
-        let port = RecordingPort()
-        let bus = MulticastEventBus()
-        let clock = FakeClock()
-        let vm = EngineViewModel(engine: port, bus: bus, clock: clock, random: FakeRandomSource())
-        vm.subscribe()
-        defer { vm.unsubscribe() }
-
-        vm.openSession(projectPath: TestPaths.workspacePath("ws"), id: "sess-42")
+        #expect(vm.sessionActivation == .awaitingAdapter(sessionID: "sess-42"))
         #expect(vm.isComposerLockedForSessionResume)
 
-        vm.sendPrompt("too early")
-        #expect(vm.messages.isEmpty)
-
-        await bus.publish(.userTurn(id: UUID().uuidString, text: "historical"))
+        await bus.publish(.sessionPromptReady(sessionID: "sess-42"))
         await drain()
-        #expect(!vm.isSwitchingSession)
-        #expect(!vm.isComposerLockedForSessionResume)
 
-        vm.sendPrompt("now allowed")
-        #expect(vm.messages.count == 2)
-
-        await bus.shutdown()
-    }
-
-    @Test("Cursor openSession stays locked through history until live SessionStart")
-    func cursorOpenSessionKeepsComposerLockedThroughHistoryReplay() async {
-        await AdapterRegistry.shared.register(MockAdapter(
-            id: .cursorCLI,
-            displayName: "Cursor",
-            capabilities: [.sessionHandshakeGate, .resumableSessions]
-        ))
-        let port = RecordingPort()
-        let bus = MulticastEventBus()
-        let clock = FakeClock()
-        let vm = EngineViewModel(engine: port, bus: bus, clock: clock, random: FakeRandomSource())
-        let project = TestPaths.workspace("ws/cursor")
-        vm.projects = [
-            .init(path: project.path, displayName: "Cursor", projectType: .cursorCLI),
-        ]
-        vm.projectCapabilities[project.path] = .init(
-            supportsResumableSessions: true,
-            requiresSessionHandshakeGate: true
-        )
-        vm.sessionsByProject[project.path] = [
-            SessionSummary(
-                id: "sess-cursor",
-                agentID: .cursorCLI,
-                workspace: project,
-                title: "Prior",
-                lastActivity: Date(),
-                messageCount: 2
-            ),
-        ]
-        vm.subscribe()
-        defer { vm.unsubscribe() }
-
-        vm.openSession(projectPath: project.path, id: "sess-cursor")
-        #expect(vm.isComposerLockedForSessionResume)
-
-        // Past the short Codex-style unlock — handshake gate must still hold.
-        clock.advance(by: SessionSwitchingTiming.composerHardUnlock + .milliseconds(1))
-        await drain()
-        #expect(vm.isComposerLockedForSessionResume)
-
-        await bus.publish(.userTurn(id: UUID().uuidString, text: "prior user"))
-        await bus.publish(.assistantText(
-            id: UUID().uuidString,
-            blockID: "a",
-            text: "prior assistant",
-            isFinal: true
-        ))
-        await drain()
-        #expect(vm.messages.count >= 2)
-        #expect(vm.isComposerLockedForSessionResume)
-
-        await bus.publish(.sessionStarted(
-            sessionID: "sess-cursor",
-            model: "auto",
-            cwd: project
-        ))
-        await drain()
+        #expect(vm.sessionActivation == .ready(sessionID: "sess-42"))
         #expect(!vm.isComposerLockedForSessionResume)
 
         await bus.shutdown()
     }
 
-    @Test("same-project openSession on a live ACP process uses warm switch lock")
-    func openSessionOnLiveProjectUsesWarmSwitchLock() async {
+    @Test("same-project openSession follows the same activation events")
+    func openSessionOnLiveProjectUsesActivationEvents() async {
         let port = RecordingPort()
         let bus = MulticastEventBus()
         let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
@@ -662,25 +597,71 @@ struct EngineViewModelNavigatorTests {
         ]
         vm.projectCapabilities[project.path] = .init(
             supportsResumableSessions: true,
-            requiresSessionHandshakeGate: true,
             supportsOverviewDashboard: true
         )
         vm.subscribe()
         defer { vm.unsubscribe() }
 
         vm.openSession(projectPath: project.path, id: "file:Orders.cs")
-        #expect(vm.isWarmSessionSwitch)
-        #expect(vm.isComposerLockedForSessionHandshake)
+        #expect(vm.sessionActivation == .restoringHistory(sessionID: "file:Orders.cs"))
         #expect(vm.isComposerLockedForSessionResume)
 
-        await bus.publish(.sessionStarted(
-            sessionID: "file:Orders.cs",
-            model: "auto",
-            cwd: project
-        ))
+        await bus.publish(.sessionHistoryRestored(sessionID: "file:Orders.cs"))
         await drain()
+        #expect(vm.isComposerLockedForSessionResume)
+
+        await bus.publish(.sessionPromptReady(sessionID: "file:Orders.cs"))
+        await drain()
+
         #expect(!vm.isComposerLockedForSessionResume)
-        #expect(!vm.isWarmSessionSwitch)
+
+        await bus.shutdown()
+    }
+
+    @Test("rapid session selection ignores stale restoration and readiness events")
+    func rapidSessionSelectionKeepsNewestActivation() async {
+        let port = RecordingPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port,
+                                 bus: bus,
+                                 clock: FakeClock(),
+                                 random: FakeRandomSource())
+        let projectPath = TestPaths.workspacePath("ws/rapid-switch")
+        let sessionIDs = (0 ..< 100).map { "session-\($0)" }
+        let latestSessionID = "session-\(sessionIDs.count - 1)"
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        for sessionID in sessionIDs {
+            vm.openSession(projectPath: projectPath, id: sessionID)
+        }
+        await drain()
+
+        for sessionID in sessionIDs.dropLast() {
+            await bus.publish(.sessionHistoryRestored(sessionID: sessionID))
+            await bus.publish(.sessionPromptReady(sessionID: sessionID))
+        }
+        await drain()
+
+        #expect(vm.sessionActivation == .restoringHistory(sessionID: latestSessionID))
+        #expect(vm.isSwitchingSession)
+        #expect(vm.isComposerLockedForSessionResume)
+
+        await bus.publish(.sessionHistoryRestored(sessionID: latestSessionID))
+        await drain()
+        #expect(vm.sessionActivation == .awaitingAdapter(sessionID: latestSessionID))
+        #expect(vm.isComposerLockedForSessionResume)
+
+        await bus.publish(.sessionPromptReady(sessionID: latestSessionID))
+        await drain()
+        #expect(vm.sessionActivation == .ready(sessionID: latestSessionID))
+        #expect(!vm.isComposerLockedForSessionResume)
+        #expect(port.commands.filter {
+            if case .openProject(_, let resumeID) = $0 {
+                return sessionIDs.contains(resumeID ?? "")
+            }
+            return false
+        }.count == sessionIDs.count)
 
         await bus.shutdown()
     }
@@ -696,7 +677,6 @@ struct EngineViewModelNavigatorTests {
         ]
         vm.projectCapabilities[project.path] = .init(
             supportsResumableSessions: true,
-            requiresSessionHandshakeGate: true
         )
         vm.subscribe()
         defer { vm.unsubscribe() }
@@ -714,13 +694,12 @@ struct EngineViewModelNavigatorTests {
         vm.sendPrompt("too early")
         #expect(vm.messages.isEmpty)
 
-        // Engine bootstrap publishes an empty id before Cursor ACP completes
-        // initialize/auth/session-new; that is not prompt-ready.
+        // Engine bootstrap identity is not equivalent to prompt readiness.
         await bus.publish(.sessionStarted(sessionID: "", model: nil, cwd: project))
         await drain()
         #expect(vm.isComposerLockedForSessionResume)
 
-        await bus.publish(.sessionStarted(sessionID: "cursor-session", model: nil, cwd: project))
+        await bus.publish(.sessionPromptReady(sessionID: "cursor-session"))
         await drain()
         #expect(!vm.isComposerLockedForSessionResume)
 
@@ -730,49 +709,8 @@ struct EngineViewModelNavigatorTests {
         await bus.shutdown()
     }
 
-    @Test("new Cursor chat on the same project reuses session/new instead of respawning")
-    func newCursorChatOnSameProjectUsesNewSession() async {
-        let port = RecordingPort()
-        let bus = MulticastEventBus()
-        let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
-        let project = TestPaths.workspace("ws/cursor")
-        vm.projects = [
-            .init(path: project.path, displayName: "Cursor", projectType: .cursorCLI),
-        ]
-        vm.projectCapabilities[project.path] = .init(
-            supportsResumableSessions: true,
-            requiresSessionHandshakeGate: true
-        )
-        vm.workspace = project
-        vm.sessionID = "cursor-session"
-        vm.messages = [.user(bubbleID: UUID(), text: "old")]
-        vm.subscribe()
-        defer { vm.unsubscribe() }
-
-        vm.newChat(in: project.path)
-        try? await Task.sleep(for: .milliseconds(60))
-
-        #expect(vm.isComposerLockedForSessionResume)
-        #expect(vm.messages.contains {
-            if case .clientAction(let action) = $0 {
-                return action.kind == .sessionLifecycle && action.detail == "New session"
-            }
-            return false
-        } || port.commands.contains {
-            if case .newSession = $0 { return true }
-            if case .recordClientAction = $0 { return true }
-            return false
-        })
-        #expect(!port.commands.contains {
-            if case .openProject = $0 { return true }
-            return false
-        })
-
-        await bus.shutdown()
-    }
-
-    @Test("new Codex chat keeps the composer immediately available")
-    func newCodexChatDoesNotUseACPComposerLock() async {
+    @Test("new Codex chat waits for explicit prompt readiness")
+    func newCodexChatWaitsForPromptReadiness() async {
         let port = RecordingPort()
         let bus = MulticastEventBus()
         let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
@@ -784,141 +722,41 @@ struct EngineViewModelNavigatorTests {
         defer { vm.unsubscribe() }
 
         vm.newChat(in: project.path)
-        #expect(!vm.isComposerLockedForSessionResume)
+        #expect(vm.isComposerLockedForSessionResume)
 
-        vm.sendPrompt("ready")
-        #expect(vm.messages.count == 1)
+        await bus.publish(.sessionPromptReady(sessionID: "thread-1"))
+        await drain()
+
+        #expect(!vm.isComposerLockedForSessionResume)
+        #expect(vm.sessionID == "thread-1")
 
         await bus.shutdown()
     }
 
-    @Test("prepareProjectOpen gates mixed projects when a handshake-capable adapter is registered")
-    func prepareProjectOpenGatesMixedWithoutDefaultWhenHandshakeAdapterRegistered() async {
-        await AdapterRegistry.shared.register(MockAdapter(
-            id: .cursorCLI,
-            displayName: "Cursor Mock",
-            capabilities: [.sessionHandshakeGate, .resumableSessions]
+    @Test("session readiness failure ends switching and keeps composer locked")
+    func sessionReadinessFailureMarksActivationFailed() async {
+        let port = RecordingPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port,
+                                 bus: bus,
+                                 clock: FakeClock(),
+                                 random: FakeRandomSource())
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        vm.openSession(projectPath: TestPaths.workspacePath("ws"), id: "sess-42")
+        await bus.publish(.error(.sessionReadinessFailed(
+            sessionID: "sess-42",
+            detail: "adapter rejected session"
+        )))
+        await drain()
+
+        #expect(vm.sessionActivation == .failed(
+            sessionID: "sess-42",
+            message: "adapter rejected session"
         ))
-        let port = RecordingPort()
-        let bus = MulticastEventBus()
-        let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
-        let project = TestPaths.workspace("ws/mixed")
-
-        await vm.prepareProjectOpen(url: project, projectType: .mixed(defaultAgent: nil))
-        #expect(vm.isComposerLockedForSessionResume)
-        #expect(vm.projectCapabilities.requiresSessionHandshakeGate(for: project.path))
-
-        await bus.shutdown()
-    }
-
-    @Test("Claude openSession keeps composer locked past JSONL history until live resume settles")
-    func claudeOpenSessionWaitsForLiveResumeBeforeUnlockingComposer() async {
-        let port = RecordingPort()
-        let bus = MulticastEventBus()
-        let clock = FakeClock()
-        let vm = EngineViewModel(engine: port, bus: bus, clock: clock, random: FakeRandomSource())
-        vm.subscribe()
-        defer { vm.unsubscribe() }
-
-        let workspace = TestPaths.workspace("ws")
-        vm.sessionsByProject[workspace.path] = [
-            SessionSummary(id: "sess-42",
-                           agentID: .claudeCode,
-                           workspace: workspace,
-                           title: "Claude",
-                           lastActivity: Date(),
-                           messageCount: 2)
-        ]
-
-        vm.openSession(projectPath: workspace.path, id: "sess-42")
-        #expect(vm.isComposerLockedForSessionResume)
-
-        await bus.publish(.userTurn(id: UUID().uuidString, text: "historical"))
-        await drain()
         #expect(!vm.isSwitchingSession)
         #expect(vm.isComposerLockedForSessionResume)
-
-        await bus.publish(.sessionStarted(sessionID: "sess-42",
-                                          model: "sonnet",
-                                          cwd: workspace))
-        await drain()
-        #expect(vm.isComposerLockedForSessionResume)
-
-        clock.advance(by: SessionSwitchingTiming.claudeCodeComposerHookUnlock + .milliseconds(1))
-        try? await Task.sleep(for: .milliseconds(40))
-
-        #expect(!vm.isComposerLockedForSessionResume)
-
-        await bus.shutdown()
-    }
-
-    @Test("openSession unlocks composer on hook SessionStart with model")
-    func openSessionUnlocksComposerOnHookSessionStart() async {
-        let port = RecordingPort()
-        let bus = MulticastEventBus()
-        let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
-        vm.subscribe()
-        defer { vm.unsubscribe() }
-
-        vm.openSession(projectPath: TestPaths.workspacePath("ws"), id: "sess-42")
-        #expect(vm.isComposerLockedForSessionResume)
-
-        await bus.publish(.sessionStarted(sessionID: "sess-42",
-                                          model: "sonnet",
-                                          cwd: TestPaths.workspace("ws")))
-        await drain()
-
-        #expect(!vm.isComposerLockedForSessionResume)
-
-        await bus.shutdown()
-    }
-
-    @Test("openSession keeps switching state while empty resume still locks the composer")
-    func openSessionKeepsSwitchingWhileComposerLockedOnEmptyResume() async {
-        let port = RecordingPort()
-        let bus = MulticastEventBus()
-        let clock = FakeClock()
-        let vm = EngineViewModel(engine: port, bus: bus, clock: clock, random: FakeRandomSource())
-        vm.subscribe()
-        defer { vm.unsubscribe() }
-
-        vm.openSession(projectPath: TestPaths.workspacePath("ws"), id: "sess-42")
-        #expect(vm.isSwitchingSession)
-        #expect(vm.isComposerLockedForSessionResume)
-
-        await waitForPendingSleeps(clock, count: 2)
-        clock.advance(by: SessionSwitchingTiming.emptySessionFallback + .milliseconds(1))
-        try? await Task.sleep(for: .milliseconds(40))
-
-        #expect(vm.isSwitchingSession)
-        #expect(vm.isComposerLockedForSessionResume)
-
-        clock.advance(by: SessionSwitchingTiming.composerHardUnlock + .milliseconds(1))
-        try? await Task.sleep(for: .milliseconds(40))
-
-        #expect(!vm.isSwitchingSession)
-        #expect(!vm.isComposerLockedForSessionResume)
-
-        await bus.shutdown()
-    }
-
-    @Test("openSession composer lock has a hard fallback")
-    func openSessionComposerLockHardFallback() async {
-        let port = RecordingPort()
-        let bus = MulticastEventBus()
-        let clock = FakeClock()
-        let vm = EngineViewModel(engine: port, bus: bus, clock: clock, random: FakeRandomSource())
-        vm.subscribe()
-        defer { vm.unsubscribe() }
-
-        vm.openSession(projectPath: TestPaths.workspacePath("ws"), id: "sess-42")
-        #expect(vm.isComposerLockedForSessionResume)
-
-        await waitForPendingSleeps(clock, count: 2)
-        clock.advance(by: SessionSwitchingTiming.composerHardUnlock + .milliseconds(1))
-        try? await Task.sleep(for: .milliseconds(40))
-
-        #expect(!vm.isComposerLockedForSessionResume)
 
         await bus.shutdown()
     }
@@ -940,14 +778,12 @@ struct EngineViewModelNavigatorTests {
         #expect(vm.isSwitchingSession)
         #expect(vm.messages.isEmpty)
 
-        await bus.publish(.assistantText(id: UUID().uuidString,
-                                         blockID: UUID().uuidString,
-                                         text: "loaded",
-                                         isFinal: true))
+        await bus.publish(.sessionHistoryRestored(sessionID: "sess-42"))
         await drain()
 
         #expect(!vm.isSwitchingSession)
-        #expect(vm.messages.count == 1)
+        #expect(vm.messages.isEmpty)
+        #expect(vm.isComposerLockedForSessionResume)
 
         await bus.shutdown()
     }
@@ -1124,6 +960,43 @@ struct EngineViewModelNavigatorTests {
         await bus.shutdown()
     }
 
+    @Test("createProject lists and opens even when model catalog probe fails")
+    func createProjectDoesNotBlockOnFailedModelProbe() async throws {
+        let port = RecordingPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
+        let fileSystem = InMemoryFileSystem()
+        let environment = FakeEnvironment(home: TestPaths.fakeHome)
+        let store = WorkspaceProjectsStore(environment: environment, fileSystem: fileSystem)
+        vm.workspaceProjects = store
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        let workspace = TestPaths.workspace("ws-failed-catalog")
+        try await vm.adoptEmptyWorkspace(workspace)
+        await AdapterRegistry.shared.register(MockAdapter(
+            id: .claudeCode,
+            displayName: "Claude Code",
+            models: [],
+            refreshResult: [],
+            refreshError: EngineViewModel.ModelCatalogLoadError.emptyCatalog("Claude Code")
+        ))
+
+        await vm.createProject(name: "api", projectType: .claudeCode)
+        await drain()
+
+        let projectPath = workspace.appendingPathComponent("api").path
+        #expect(vm.projects.contains { $0.path == projectPath })
+        #expect(port.commands.contains {
+            if case .openProject(let path, let resume) = $0 {
+                return path == projectPath && resume == nil
+            }
+            return false
+        })
+
+        await bus.shutdown()
+    }
+
     @Test("createProject for a folder type opens the browser without openProject")
     func createFolderProjectDoesNotOpenAgent() async throws {
         let port = RecordingPort()
@@ -1291,49 +1164,37 @@ struct EngineViewModelNavigatorTests {
 
     @Test("sessionStarted for the same workspace does not reload sessions")
     func sessionStartedSameWorkspaceSkipsReload() async {
-        final class CallCounter: @unchecked Sendable {
-            var count = 0
-        }
-        let listerCalls = CallCounter()
-        let (vm, bus, _) = makeModel()
+        let port = RecordingPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port,
+                                 bus: bus,
+                                 clock: FakeClock(),
+                                 random: FakeRandomSource())
         vm.supportsResumableSessions = true
-        vm.sessionLister = { _ in
-            listerCalls.count += 1
-            return []
-        }
         vm.subscribe()
         defer { vm.unsubscribe() }
 
         let ws = TestPaths.workspace("ws")
         await bus.publish(.sessionStarted(sessionID: "s1", model: nil, cwd: ws))
         await drain()
-        #expect(listerCalls.count == 1)
+        #expect(listSessionCommands(in: port.commands).count == 1)
 
         await bus.publish(.sessionStarted(sessionID: "s1", model: nil, cwd: ws))
         await drain()
-        #expect(listerCalls.count == 1)
+        #expect(listSessionCommands(in: port.commands).count == 1)
 
         await bus.shutdown()
     }
 
     @Test("sessionStarted with a real session id after bootstrap empty id reloads sessions")
     func sessionStartedRealIDReloadsSessions() async {
-        final class CallCounter: @unchecked Sendable {
-            var count = 0
-            var lastURL: URL?
-        }
-        let listerCalls = CallCounter()
-        let (vm, bus, _) = makeModel()
+        let port = RecordingPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port,
+                                 bus: bus,
+                                 clock: FakeClock(),
+                                 random: FakeRandomSource())
         vm.supportsResumableSessions = true
-        vm.sessionLister = { url in
-            listerCalls.count += 1
-            listerCalls.lastURL = url
-            if listerCalls.count == 1 { return [] }
-            return [
-                SessionSummary(id: "thread-1", agentID: .codex, workspace: url,
-                               title: "First chat", lastActivity: Date(), messageCount: 1),
-            ]
-        }
         vm.subscribe()
         defer { vm.unsubscribe() }
 
@@ -1341,46 +1202,59 @@ struct EngineViewModelNavigatorTests {
         // Engine bootstrap publishes an empty session id before Codex thread/start.
         await bus.publish(.sessionStarted(sessionID: "", model: nil, cwd: project))
         await drain()
-        #expect(listerCalls.count == 1)
-        #expect(vm.sessionsByProject[project.path] == [])
+        #expect(listSessionCommands(in: port.commands).count == 1)
 
         await bus.publish(.sessionStarted(sessionID: "thread-1", model: nil, cwd: project))
+        await bus.publish(.sessionsListed(
+            projectPath: project,
+            sessions: [
+                SessionSummary(id: "thread-1",
+                               agentID: .codex,
+                               workspace: project,
+                               title: "First chat",
+                               lastActivity: Date(timeIntervalSince1970: 1_700_000_000),
+                               messageCount: 1),
+            ]
+        ))
         await drain()
-        #expect(listerCalls.count == 2)
+        #expect(listSessionCommands(in: port.commands).count == 2)
         #expect(vm.sessionsByProject[project.path]?.map(\.id) == ["thread-1"])
-        #expect(listerCalls.lastURL?.path == project.path)
 
         await bus.shutdown()
     }
 
     @Test("new Codex session id on the same project reloads the sidebar session list")
     func newSessionIDReloadsSessions() async {
-        final class CallCounter: @unchecked Sendable {
-            var count = 0
-        }
-        let listerCalls = CallCounter()
-        let (vm, bus, _) = makeModel()
+        let port = RecordingPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port,
+                                 bus: bus,
+                                 clock: FakeClock(),
+                                 random: FakeRandomSource())
         vm.supportsResumableSessions = true
-        vm.sessionLister = { url in
-            listerCalls.count += 1
-            return [
-                SessionSummary(id: "thread-\(listerCalls.count)", agentID: .codex,
-                               workspace: url, title: "Chat \(listerCalls.count)",
-                               lastActivity: Date(), messageCount: 1),
-            ]
-        }
         vm.subscribe()
         defer { vm.unsubscribe() }
 
         let project = TestPaths.workspace("ws/api")
         await bus.publish(.sessionStarted(sessionID: "thread-1", model: nil, cwd: project))
         await drain()
-        #expect(listerCalls.count == 1)
+        #expect(listSessionCommands(in: port.commands).count == 1)
 
         // File → New Chat / .newSession eventually yields a new thread id.
         await bus.publish(.sessionStarted(sessionID: "thread-2", model: nil, cwd: project))
+        await bus.publish(.sessionsListed(
+            projectPath: project,
+            sessions: [
+                SessionSummary(id: "thread-2",
+                               agentID: .codex,
+                               workspace: project,
+                               title: "Chat 2",
+                               lastActivity: Date(timeIntervalSince1970: 1_700_000_000),
+                               messageCount: 1),
+            ]
+        ))
         await drain()
-        #expect(listerCalls.count == 2)
+        #expect(listSessionCommands(in: port.commands).count == 2)
         #expect(vm.sessionsByProject[project.path]?.first?.id == "thread-2")
 
         await bus.shutdown()
@@ -1415,7 +1289,6 @@ struct EngineViewModelNavigatorTests {
         vm.projects = [custom, claude]
         vm.projectCapabilities[custom.path] = .init(
             supportsResumableSessions: true,
-            requiresSessionHandshakeGate: true,
             supportsOverviewDashboard: true
         )
         vm.dashboardURL = URL(string: "http://127.0.0.1:9/")
@@ -1538,6 +1411,13 @@ private func waitForPendingSleeps(_ clock: FakeClock, count: Int) async {
     let start = ContinuousClock.now
     while clock.pendingSleepCount < count, start.duration(to: .now) < .seconds(2) {
         try? await Task.sleep(for: .milliseconds(10))
+    }
+}
+
+private func listSessionCommands(in commands: [AgentCommand]) -> [String] {
+    commands.compactMap {
+        if case .listSessions(let path) = $0 { return path }
+        return nil
     }
 }
 

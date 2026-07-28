@@ -2,13 +2,13 @@ import Foundation
 
 /// Which live CLI slot a project binds to. Not a free-form string.
 public enum AgentInstanceIdentity: Hashable, Sendable, Codable {
-    /// Default shared slot for this project+agent — reused across returns.
+    /// Default slot identity for this project and agent.
     case shared
     /// Dedicated slot minted when Advanced → Launch new agent instance is on.
     case dedicated(UUID)
 }
 
-/// Pool lookup key: one live process per project+agent (+ instance identity).
+/// Pool lookup key for the currently retained process per project and agent.
 public struct AgentRuntimeKey: Hashable, Sendable {
     public var projectPath: String
     public var agentID: AgentID
@@ -33,13 +33,6 @@ struct AgentRuntime {
     /// Session/thread id this process is currently bound to (Claude `/resume`,
     /// Codex thread, ACP session).
     var boundSessionID: String?
-    /// Lightweight transcript snapshot for reactivating an already-bound
-    /// pooled runtime. Adapters do not replay history when the process is
-    /// already on the requested session, so the engine must replay its own
-    /// visible transcript back to the UI.
-    var transcript: [SnapshotService.SnapshotMessage] = []
-    var changedFiles: [ChangedFile] = []
-    var replayEvents: [AgentEvent] = []
     var forwardingTask: Task<Void, Never>?
     var bellTask: Task<Void, Never>?
     var sessionIDContinuation: AsyncStream<String>.Continuation?

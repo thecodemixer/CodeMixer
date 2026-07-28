@@ -43,22 +43,11 @@ extension ACPEventDecoder {
                     optionIDs: parsed.optionIDs
                 )
             )
-            guard let context = state.currentContext() else { return Batch() }
-            await sessionIndex.setNeedsAttention(
-                sessionID: requestSessionID,
-                customAgentID: context.customAgentID,
-                needsAttention: true
-            )
-            let title = await sessionTitle(
-                sessionID: requestSessionID,
-                customAgentID: context.customAgentID,
-                workspace: context.workspace
-            ) ?? requestSessionID
+            guard state.currentContext() != nil else { return Batch() }
             return Batch(events: [
-                .sessionIndexChanged(projectPath: context.workspace),
                 .sessionAttentionChanged(
                     sessionID: requestSessionID,
-                    title: title,
+                    title: requestSessionID,
                     needsAttention: true
                 ),
             ])

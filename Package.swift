@@ -88,7 +88,8 @@ let package = Package(
                 "README.md",
                 "Custom/digital-twin/fake-custom-acp",
             ],
-            swiftSettings: swiftSettings
+            swiftSettings: swiftSettings,
+            linkerSettings: [.linkedLibrary("sqlite3")]
         ),
         .target(
             name: "AgentRemoteControl",

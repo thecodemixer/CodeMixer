@@ -85,13 +85,13 @@ log.notice("starting pid=\(pid, privacy: .public) workspace=\(workspace, privacy
 Logs are searchable when they look like:
 
 ```
-engine started pid=4567 workspace=/Users/h/Code/foo session=a1b2c3
+engine started pid=4567 workspace=/workspace/foo session=a1b2c3
 ```
 
 Not:
 
 ```
-Started the engine with PID 4567 for the user's workspace at /Users/h/Code/foo
+Started the engine with PID 4567 for the user's workspace at /workspace/foo
 ```
 
 **Convention:**

@@ -8,7 +8,7 @@ extension EngineViewModel {
 
     func apply(_ event: AgentEvent) {
         switch event {
-        case .sessionStarted(let id, let model, let cwd):
+        case .sessionStarted(let id, _, let cwd):
             let selectedPath = workspace.map {
                 URL(fileURLWithPath: $0.path).standardizedFileURL
             }
@@ -29,9 +29,6 @@ extension EngineViewModel {
             let bindChatSession = !showsOverviewDashboard
             let sessionChanged = bindChatSession && previousSessionID != id
             let shouldResetConversation = projectChanged || (sessionChanged && activity == .idle)
-            if !id.isEmpty {
-                cachedTranscriptLoadedSessionID = nil
-            }
             // Engine bootstrap may publish an empty id for handshake-gated
             // adapters; do not clobber a resume id the navigator already set.
             if bindChatSession {
@@ -66,25 +63,6 @@ extension EngineViewModel {
             if bindChatSession, !id.isEmpty {
                 promotePendingPhases(for: id, projectPath: cwd.path)
             }
-            // SessionStart with a model is the first live signal from the
-            // resumed agent process. For Claude Code, that matters because the
-            // visible history may already be on screen from JSONL replay; wait
-            // one engine-aligned settle window before enabling GUI sends.
-            // Handshake-gated agents (Cursor / ACP) unlock on any non-empty
-            // live SessionStart — including same-id resume without a model.
-            if isComposerLockedForSessionResume, !id.isEmpty {
-                let handshake = projectNeedsSessionHandshakeGate(path: cwd.path)
-                    || projectNeedsSessionHandshakeGate(path: workspace?.path ?? "")
-                let resumedSessionConfirmed = id == previousSessionID && (model != nil || handshake)
-                let freshSessionConfirmed = previousSessionID?.isEmpty ?? true
-                if resumedSessionConfirmed || freshSessionConfirmed {
-                    if isComposerWaitingForClaudeCodeResume {
-                        scheduleComposerResumeUnlock(after: SessionSwitchingTiming.claudeCodeComposerHookUnlock)
-                    } else {
-                        unlockComposerForSessionResume()
-                    }
-                }
-            }
             if projectChanged {
                 onActiveProjectChanged()
             } else if sessionChanged, !id.isEmpty {
@@ -97,10 +75,8 @@ extension EngineViewModel {
                 applyAdapterCapabilities(forProjectPath: cwd.path)
             }
         case .userTurn(let id, let text):
-            finishSessionSwitchIfNeeded()
             applyUserTurn(id: id, text: text)
         case .assistantText(let msgID, _, let text, let isFinal):
-            finishSessionSwitchIfNeeded()
             noteAgentReplyObserved()
             // Prefer the open streaming bubble with this id — even when a tool
             // card was appended after it — so interleaved tools don't fork a
@@ -124,7 +100,6 @@ extension EngineViewModel {
                 settleTurnIdle()
             }
         case .textDelta(let messageID, let delta):
-            finishSessionSwitchIfNeeded()
             noteAgentReplyObserved()
             if let lastIdx = messages.indices.last,
                case .assistantStreaming(let existingID, let existingText) = messages[lastIdx] {
@@ -138,7 +113,6 @@ extension EngineViewModel {
             }
             updateTokenRate()
         case .thinkingChunk(let blockID, let delta):
-            finishSessionSwitchIfNeeded()
             noteAgentReplyObserved()
             // Accumulate chunks into a single message rather than appending one per chunk.
             let accumulated = (thinkingBlockTexts[blockID] ?? "") + delta
@@ -151,7 +125,6 @@ extension EngineViewModel {
                 messages.append(.thinkingChunk(blockID: blockID, delta: accumulated))
             }
         case .thinkingComplete(let blockID, let duration):
-            finishSessionSwitchIfNeeded()
             noteAgentReplyObserved()
             let text = thinkingBlockTexts.removeValue(forKey: blockID) ?? ""
             if let idx = messages.lastIndex(where: {
@@ -162,7 +135,6 @@ extension EngineViewModel {
                 messages.append(.thinkingComplete(blockID: blockID, text: text, duration: duration))
             }
         case .toolStart(let id, let name, let input, _):
-            finishSessionSwitchIfNeeded()
             noteAgentReplyObserved()
             activeToolCalls.append(ToolCallEntry(id: id, name: name, input: input, finished: false))
             // Drop an ordering marker into the message stream so the card renders
@@ -171,7 +143,6 @@ extension EngineViewModel {
                 messages.append(.toolCall(callID: id))
             }
         case .toolEnd(let id, let success, let output, _):
-            finishSessionSwitchIfNeeded()
             if let idx = activeToolCalls.firstIndex(where: { $0.id == id }) {
                 activeToolCalls[idx].finished = true
                 activeToolCalls[idx].success = success
@@ -218,15 +189,14 @@ extension EngineViewModel {
             let file = ChangedFile(url: url, workspace: workspace)
             if !changedFiles.contains(file) { changedFiles.append(file) }
         case .stopped:
-            if !isSwitchingSession {
-                endSessionSwitch()
-            }
             settleTurnIdle()
             Task { await self.refreshLivePooledProjectPaths() }
         case .error(let error):
-            endSessionSwitch()
             isAwaitingFirstReplyForPrompt = false
             stalledToastVisible = false
+            if case .sessionReadinessFailed(let id, let detail) = error {
+                sessionActivation = .failed(sessionID: id, message: detail)
+            }
             diagnostics.append(diagnostic(level: .error, message: error.userMessage))
         case .authURL:
             break
@@ -236,7 +206,6 @@ extension EngineViewModel {
             sessionTokens = tokens
             sessionCostUSD = cost
         case .toolProgress(let callID, let progress):
-            finishSessionSwitchIfNeeded()
             noteAgentReplyObserved()
             if let idx = activeToolCalls.firstIndex(where: { $0.id == callID.uuidString }) {
                 activeToolCalls[idx].progress = progress
@@ -259,7 +228,11 @@ extension EngineViewModel {
                 sidebarVisible = visible
             }
         case .snapshotReady(let kind, let payload):
-            pendingExport = PendingExport(kind: kind, payload: payload)
+            if let waiter = snapshotWaiters.removeValue(forKey: kind) {
+                waiter.resume(returning: payload)
+            } else {
+                pendingExport = PendingExport(kind: kind, payload: payload)
+            }
         case .clientAction(let action):
             messages.append(.clientAction(action))
         case .agentDashboard(let url, let title):
@@ -277,12 +250,26 @@ extension EngineViewModel {
             }
             // Navigator owns chat vs overview. An advertisement must never
             // steal focus from a file chat or New Chat (`sessionID` still nil).
-        case .sessionIndexChanged(let projectPath):
-            loadSessions(for: projectPath.path)
         case .sessionAttentionChanged(let sessionID, _, let needsAttention):
             updateSessionAttention(sessionID: sessionID, needsAttention: needsAttention)
-        case .cachedTranscriptLoaded(let id):
-            cachedTranscriptLoadedSessionID = id
+        case .sessionHistoryRestored(let id):
+            noteHistoryRestored(sessionID: id)
+        case .sessionPromptReady(let id):
+            notePromptReady(sessionID: id)
+        case .sessionsListed(let projectPath, let sessions):
+            let path = projectPath.standardizedFileURL.path
+            let filtered = SessionNavigatorFiltering.preferringSingleOverview(sessions)
+            sessionsByProject[path] = filtered
+            loadingProjectPaths.remove(path)
+            let liveIDs = Set(filtered.map(\.id))
+            pendingPermissionsBySession = pendingPermissionsBySession.filter { key, _ in
+                key == Self.unscopedPermissionSessionKey || liveIDs.contains(key)
+            }
+            refreshPermissionActivity()
+        case .historyImportProgress:
+            break
+        case .historyImportFinished(let projectPath, _, _):
+            loadSessions(for: projectPath.path)
         case .sessionPhaseChanged(let phaseSessionID, let phase):
             recordSessionPhase(sessionID: phaseSessionID, phase: phase)
         }
@@ -378,12 +365,12 @@ extension EngineViewModel {
         stalledToastTask?.cancel()
         stalledToastTask = nil
         stalledToastVisible = false
-        cachedTranscriptLoadedSessionID = nil
     }
 
     func clearConversationState() {
         messages = []
         activeToolCalls = []
+        changedFiles = []
         lastUserBubbleID = nil
         selectedTurnID = nil
         selectedPhaseID = nil

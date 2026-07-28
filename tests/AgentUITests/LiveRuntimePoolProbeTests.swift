@@ -7,153 +7,148 @@ import ClaudeCode
 import Codex
 import ACPCLIs
 
-/// Live probe of the sticky runtime pool: project A → B → A reuse, Claude
-/// New Chat + session switch without respawn, Codex/Cursor warm session switch.
+/// Live probe of runtime activation: background projects stay parked; session
+/// switches, project returns, and New Chat activate/reuse the live process
+/// without respawn. Cold spawn only when the project has no pool slot yet.
 ///
 /// ```bash
 /// CODEMIXER_LIVE_RUNTIME_POOL=1 \
+/// CODEMIXER_LIVE_CLAUDE_PROJECT_A=/path/to/claude-a \
+/// CODEMIXER_LIVE_CLAUDE_PROJECT_B=/path/to/claude-b \
+/// CODEMIXER_LIVE_CODEX_PROJECT=/path/to/codex-project \
+/// CODEMIXER_LIVE_CURSOR_PROJECT=/path/to/cursor-project \
 ///   swift test --no-parallel --filter LiveRuntimePoolProbeTests
 /// ```
-@Suite("Live runtime pool — project and session switches", .serialized)
+@Suite("Live runtime activation — project and session switches", .serialized)
 struct LiveRuntimePoolProbeTests {
 
     private static let enableVariable = "CODEMIXER_LIVE_RUNTIME_POOL"
+    private static let claudeProjectAKey = "CODEMIXER_LIVE_CLAUDE_PROJECT_A"
+    private static let claudeProjectBKey = "CODEMIXER_LIVE_CLAUDE_PROJECT_B"
+    private static let codexProjectKey = "CODEMIXER_LIVE_CODEX_PROJECT"
+    private static let cursorProjectKey = "CODEMIXER_LIVE_CURSOR_PROJECT"
 
-    /// Claude projects under the user's hiya workspace (two slots).
-    private static let claudeProjectA = "/Users/hari/Documents/codemixer workspace/hiya"
-    private static let claudeProjectB = "/Users/hari/Documents/codemixer workspace/hiya/cla"
-    /// Codex project for warm in-process session switch.
-    private static let codexProject = "/Users/hari/Documents/codemixer workspace/hiya/code"
-    /// Cursor ACP project for warm session switch.
-    private static let cursorProject = "/Users/hari/Documents/codemixer workspace/hiya/cur"
-
-    @Test("Claude cross-project round trip parks and reuses without a third spawn")
-    func claudeCrossProjectReuse() async throws {
+    @Test("Claude cross-project round trip parks and reactivates without respawn")
+    func claudeCrossProjectActivation() async throws {
         guard isEnabled else { return }
+        guard let paths = requiredProjectPaths() else { return }
         let counter = CountingTransportFactory()
         let engine = try await makeEngine(counter: counter)
         defer { Task { await engine.shutdown(reason: .naturalExit) } }
 
-        try await engine.send(.openProject(path: Self.claudeProjectA, resumeSessionID: nil))
+        try await engine.send(.openProject(path: paths.claudeA, resumeSessionID: nil))
         try await waitUntil(timeout: .seconds(90)) {
-            await engine.liveProjectPaths().contains(standardized(Self.claudeProjectA))
+            await engine.liveProjectPaths().contains(standardized(paths.claudeA))
                 && counter.spawnCount == 1
         }
         #expect(counter.spawnCount == 1)
         print("LIVE_POOL claude A open spawn=\(counter.spawnCount) paths=\(await engine.liveProjectPaths())")
 
-        try await engine.send(.openProject(path: Self.claudeProjectB, resumeSessionID: nil))
+        try await engine.send(.openProject(path: paths.claudeB, resumeSessionID: nil))
         try await waitUntil(timeout: .seconds(90)) {
-            let paths = await engine.liveProjectPaths()
-            return paths.contains(standardized(Self.claudeProjectA))
-                && paths.contains(standardized(Self.claudeProjectB))
+            let livePaths = await engine.liveProjectPaths()
+            return livePaths.contains(standardized(paths.claudeA))
+                && livePaths.contains(standardized(paths.claudeB))
                 && counter.spawnCount == 2
         }
         #expect(counter.spawnCount == 2)
         print("LIVE_POOL claude B open spawn=\(counter.spawnCount) paths=\(await engine.liveProjectPaths())")
 
-        try await engine.send(.openProject(path: Self.claudeProjectA, resumeSessionID: nil))
+        try await engine.send(.openProject(path: paths.claudeA, resumeSessionID: nil))
         try await waitUntil(timeout: .seconds(60)) {
             await engine.liveProjectPaths().count == 2
         }
-        #expect(counter.spawnCount == 2, "returning to A must reuse the parked Claude PTY")
-        let paths = await engine.liveProjectPaths()
-        #expect(paths.contains(standardized(Self.claudeProjectA)))
-        #expect(paths.contains(standardized(Self.claudeProjectB)))
-        print("LIVE_POOL claude A reuse spawn=\(counter.spawnCount) paths=\(paths)")
+        #expect(counter.spawnCount == 2, "returning to A must activate the parked Claude PTY")
+        let livePaths = await engine.liveProjectPaths()
+        #expect(livePaths.contains(standardized(paths.claudeA)))
+        #expect(livePaths.contains(standardized(paths.claudeB)))
+        print("LIVE_POOL claude A warm activate spawn=\(counter.spawnCount) paths=\(livePaths)")
     }
 
-    @Test("Claude new-chat and session switch reuse the same PTY")
-    func claudeSessionReuse() async throws {
+    @Test("Claude new-chat and session switch reuse the live PTY")
+    func claudeSessionActivation() async throws {
         guard isEnabled else { return }
+        guard let paths = requiredProjectPaths() else { return }
         let counter = CountingTransportFactory()
         let engine = try await makeEngine(counter: counter)
         defer { Task { await engine.shutdown(reason: .naturalExit) } }
 
-        let sub = await engine.bus.subscribe()
-        defer { Task { await engine.bus.unsubscribe(sub.id) } }
-
-        try await engine.send(.openProject(path: Self.claudeProjectA, resumeSessionID: nil))
+        try await engine.send(.openProject(path: paths.claudeA, resumeSessionID: nil))
         try await waitUntil(timeout: .seconds(90)) { counter.spawnCount == 1 }
-        let boundID = await waitForBoundSessionID(in: sub.stream, timeout: .seconds(90))
-        guard let boundID, !boundID.isEmpty else {
-            Issue.record("Claude never published a SessionStart id — cannot probe session reuse")
-            return
-        }
         #expect(await engine.liveProjectPaths().count == 1)
-        print("LIVE_POOL claude session#1 spawn=\(counter.spawnCount) bound=\(boundID)")
+        print("LIVE_POOL claude session#1 spawn=\(counter.spawnCount)")
 
-        // New Chat must keep the same PTY and send /clear in-process.
-        try await engine.send(.openProject(path: Self.claudeProjectA, resumeSessionID: nil))
-        try await Task.sleep(for: .seconds(3))
-        #expect(counter.spawnCount == 1, "Claude New Chat must reuse the project PTY")
+        try await engine.send(.openProject(path: paths.claudeA, resumeSessionID: nil))
+        try await Task.sleep(for: .seconds(2))
+        #expect(counter.spawnCount == 1, "Claude New Chat must reuse the live project PTY")
         #expect(await engine.liveProjectPaths().count == 1)
-        print("LIVE_POOL claude new-chat reuse spawn=\(counter.spawnCount)")
+        print("LIVE_POOL claude new-chat warm spawn=\(counter.spawnCount)")
 
-        let other = ClaudeSessionLister.summaries(
-            workspace: URL(fileURLWithPath: Self.claudeProjectA),
+        let other = ClaudeSessionCatalogImporter.summaries(
+            workspace: URL(fileURLWithPath: paths.claudeA),
             claudeDirectory: Seams.live.environment.claudeDirectory,
             fileSystem: Seams.live.fileSystem
-        ).first { $0.id != boundID }
+        ).first
         if let other {
-            try await engine.send(.openProject(path: Self.claudeProjectA, resumeSessionID: other.id))
+            try await engine.send(.openProject(path: paths.claudeA, resumeSessionID: other.id))
             try await Task.sleep(for: .seconds(4))
-            #expect(counter.spawnCount == 1, "Claude session switch must reuse the project PTY")
+            #expect(counter.spawnCount == 1, "Claude session switch must warm-resume on the live PTY")
             #expect(await engine.liveProjectPaths().count == 1)
             print("LIVE_POOL claude session switch → \(other.id) spawn=\(counter.spawnCount)")
         } else {
-            print("LIVE_POOL claude no second on-disk session; skip resume-id reuse check")
+            print("LIVE_POOL claude no second on-disk session; skip resume-id activation check")
         }
     }
 
-    @Test("Codex cross-project then return reuses the Codex slot; new chat stays warm")
-    func codexCrossProjectAndWarmNewChat() async throws {
+    @Test("Codex cross-project return and new chat reuse the live App Server")
+    func codexCrossProjectAndNewChatActivation() async throws {
         guard isEnabled else { return }
+        guard let paths = requiredProjectPaths() else { return }
         let counter = CountingTransportFactory()
         let engine = try await makeEngine(counter: counter)
         defer { Task { await engine.shutdown(reason: .naturalExit) } }
 
-        try await engine.send(.openProject(path: Self.codexProject, resumeSessionID: nil))
+        try await engine.send(.openProject(path: paths.codex, resumeSessionID: nil))
         try await waitUntil(timeout: .seconds(90)) {
-            await engine.liveProjectPaths().contains(standardized(Self.codexProject))
+            await engine.liveProjectPaths().contains(standardized(paths.codex))
                 && counter.spawnCount == 1
         }
         print("LIVE_POOL codex open spawn=\(counter.spawnCount)")
 
-        try await engine.send(.openProject(path: Self.claudeProjectA, resumeSessionID: nil))
+        try await engine.send(.openProject(path: paths.claudeA, resumeSessionID: nil))
         try await waitUntil(timeout: .seconds(90)) { counter.spawnCount == 2 }
         #expect(await engine.liveProjectPaths().count == 2)
         print("LIVE_POOL codex→claude spawn=\(counter.spawnCount) paths=\(await engine.liveProjectPaths())")
 
-        try await engine.send(.openProject(path: Self.codexProject, resumeSessionID: nil))
+        try await engine.send(.openProject(path: paths.codex, resumeSessionID: nil))
         try await waitUntil(timeout: .seconds(60)) {
-            await engine.liveProjectPaths().contains(standardized(Self.codexProject))
+            await engine.liveProjectPaths().contains(standardized(paths.codex))
         }
-        #expect(counter.spawnCount == 2, "returning to Codex must reuse the parked App Server")
-        print("LIVE_POOL codex reuse spawn=\(counter.spawnCount)")
+        #expect(counter.spawnCount == 2, "returning to Codex must activate the parked App Server")
+        print("LIVE_POOL codex warm activate spawn=\(counter.spawnCount)")
 
-        // New chat on Codex should stay in-process (thread/start), no third spawn.
-        try await engine.send(.openProject(path: Self.codexProject, resumeSessionID: nil))
+        try await engine.send(.openProject(path: paths.codex, resumeSessionID: nil))
         try await Task.sleep(for: .seconds(3))
-        #expect(counter.spawnCount == 2, "Codex new chat must not respawn")
+        #expect(counter.spawnCount == 2, "Codex new chat must reuse the live App Server")
         #expect(await engine.liveProjectPaths().count == 2)
         print("LIVE_POOL codex warm new-chat spawn=\(counter.spawnCount) paths=\(await engine.liveProjectPaths())")
     }
 
-    @Test("Cursor ACP new chat reuses the project process")
-    func cursorWarmNewChat() async throws {
+    @Test("Cursor ACP new chat reuses the live process via session/new")
+    func cursorNewChatActivation() async throws {
         guard isEnabled else { return }
+        guard let paths = requiredProjectPaths() else { return }
         let counter = CountingTransportFactory()
         let engine = try await makeEngine(counter: counter)
         defer { Task { await engine.shutdown(reason: .naturalExit) } }
 
-        try await engine.send(.openProject(path: Self.cursorProject, resumeSessionID: nil))
+        try await engine.send(.openProject(path: paths.cursor, resumeSessionID: nil))
         try await waitUntil(timeout: .seconds(90)) { counter.spawnCount == 1 }
         print("LIVE_POOL cursor open spawn=\(counter.spawnCount)")
 
-        try await engine.send(.openProject(path: Self.cursorProject, resumeSessionID: nil))
+        try await engine.send(.openProject(path: paths.cursor, resumeSessionID: nil))
         try await Task.sleep(for: .seconds(4))
-        #expect(counter.spawnCount == 1, "Cursor new chat must warm-switch without respawn")
+        #expect(counter.spawnCount == 1, "Cursor new chat must reuse the live ACP process")
         #expect(await engine.liveProjectPaths().count == 1)
         print("LIVE_POOL cursor warm new-chat spawn=\(counter.spawnCount)")
     }
@@ -162,6 +157,34 @@ struct LiveRuntimePoolProbeTests {
 
     private var isEnabled: Bool {
         ProcessInfo.processInfo.environment[Self.enableVariable] == "1"
+    }
+
+    private func requiredProjectPaths() -> (
+        claudeA: String,
+        claudeB: String,
+        codex: String,
+        cursor: String
+    )? {
+        guard let claudeA = Self.projectPath(envKey: Self.claudeProjectAKey),
+              let claudeB = Self.projectPath(envKey: Self.claudeProjectBKey),
+              let codex = Self.projectPath(envKey: Self.codexProjectKey),
+              let cursor = Self.projectPath(envKey: Self.cursorProjectKey)
+        else {
+            Issue.record("""
+                set CODEMIXER_LIVE_CLAUDE_PROJECT_A, CODEMIXER_LIVE_CLAUDE_PROJECT_B, \
+                CODEMIXER_LIVE_CODEX_PROJECT, and CODEMIXER_LIVE_CURSOR_PROJECT \
+                to trusted project directories
+                """)
+            return nil
+        }
+        return (claudeA, claudeB, codex, cursor)
+    }
+
+    private static func projectPath(envKey: String) -> String? {
+        let env = ProcessInfo.processInfo.environment[envKey]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let env, !env.isEmpty else { return nil }
+        return env
     }
 
     private func makeEngine(counter: CountingTransportFactory) async throws -> AgentEngine {
@@ -190,17 +213,6 @@ struct LiveRuntimePoolProbeTests {
         #expect(await condition(), "timed out waiting for live pool condition")
     }
 
-    private func waitForBoundSessionID(in stream: AsyncStream<MulticastEventBus.HistoryEntry>,
-                                        timeout: Duration) async -> String? {
-        let deadline = ContinuousClock.now + timeout
-        for await entry in stream {
-            if case .sessionStarted(let id, _, _) = entry.event, !id.isEmpty {
-                return id
-            }
-            if ContinuousClock.now >= deadline { break }
-        }
-        return nil
-    }
 }
 
 /// Counts live transport constructions so pool reuse can be asserted without mocks.

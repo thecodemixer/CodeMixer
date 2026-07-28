@@ -101,6 +101,52 @@ struct ConversationWorkbenchLaneVisibilityTests {
         await bus.shutdown()
     }
 
+    @Test("restored history projects every visible block into a workbench lane")
+    func restoredHistoryProjectsEveryVisibleBlock() async {
+        let (vm, bus) = makeModel()
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        let cwd = TestPaths.underTemporary("restored-workbench")
+        let thinkingID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        await bus.publish(.sessionStarted(sessionID: "restored", model: nil, cwd: cwd))
+        await bus.publish(.sessionPhaseChanged(
+            sessionID: "restored",
+            phase: SessionPhase(id: "verify", label: "Verify", ordinal: 4, group: .verify)
+        ))
+        await bus.publish(.userTurn(id: "user-1", text: "Run the checks"))
+        await bus.publish(.thinkingChunk(blockID: thinkingID, delta: "Inspecting failures"))
+        await bus.publish(.thinkingComplete(blockID: thinkingID, duration: .seconds(2)))
+        await bus.publish(.toolStart(
+            id: "tool-1",
+            name: "Tests",
+            input: ToolInput(summary: "swift test"),
+            startedAt: Date(timeIntervalSince1970: 1)
+        ))
+        await bus.publish(.toolEnd(
+            id: "tool-1",
+            success: true,
+            output: ToolOutput(summary: "Passed"),
+            durationMS: 10
+        ))
+        await bus.publish(.assistantText(
+            id: "assistant-1",
+            blockID: "answer-1",
+            text: "All checks pass.",
+            isFinal: true
+        ))
+        await bus.publish(.sessionHistoryRestored(sessionID: "restored"))
+        await drain()
+
+        #expect(vm.messages.contains { if case .user = $0 { true } else { false } })
+        #expect(vm.messages.contains { if case .thinkingComplete = $0 { true } else { false } })
+        #expect(vm.messages.contains { if case .assistant = $0 { true } else { false } })
+        #expect(WorkLaneView.hasContent(model: vm))
+        #expect(SessionScrubber.segmentCount(for: vm) == 1)
+
+        await bus.shutdown()
+    }
+
     @Test("WorkLaneView has content when there are changed files, even with no tools this turn")
     func hasContentTrueForChangedFiles() async {
         let (vm, bus) = makeModel()

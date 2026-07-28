@@ -80,12 +80,6 @@ struct ACPTwinTests {
         #expect(text.contains("session/new"))
     }
 
-    @Test("listResumableSessions returns configured twin session")
-    func sessions() async {
-        let twin = ACPTwin()
-        let sessions = await twin.listResumableSessions(workspace: TestPaths.temporaryRoot)
-        #expect(sessions.contains { $0.id == "acp-twin-session" })
-    }
 }
 
 @Suite("Engine + ACPTwin", .serialized)

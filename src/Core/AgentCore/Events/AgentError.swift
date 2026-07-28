@@ -20,6 +20,10 @@ public enum AgentError: Error, Sendable, Equatable {
     case attachmentNotFound(id: String)
     case engineRestartLimitReached
     case permissionTimeout(promptID: UUID, action: PermissionDecision)
+    case historyWriteFailed(path: String, detail: String)
+    case historyLoadFailed(path: String, detail: String)
+    case historyJournalLocked(sessionID: String, ownerPID: Int32?)
+    case sessionReadinessFailed(sessionID: String, detail: String)
     case internalInvariant(detail: String)
     case unsupportedOperation(detail: String)
 
@@ -42,6 +46,10 @@ public enum AgentError: Error, Sendable, Equatable {
         case .attachmentNotFound:        return .attachmentNotFound
         case .engineRestartLimitReached: return .engineRestartLimitReached
         case .permissionTimeout:         return .permissionTimeout
+        case .historyWriteFailed:        return .historyWriteFailed
+        case .historyLoadFailed:         return .historyLoadFailed
+        case .historyJournalLocked:      return .historyJournalLocked
+        case .sessionReadinessFailed:    return .sessionReadinessFailed
         case .internalInvariant:         return .internalInvariant
         case .unsupportedOperation:      return .unsupportedOperation
         }
@@ -82,6 +90,14 @@ public enum AgentError: Error, Sendable, Equatable {
             return "The agent crashed too many times in a short window."
         case .permissionTimeout(_, let action):
             return "Permission request timed out — auto-\(action.wireValue)."
+        case .historyWriteFailed:
+            return "Couldn't save this session's local history. Check disk space and folder permissions."
+        case .historyLoadFailed:
+            return "Couldn't load this session's local history. You can still reconnect to the agent."
+        case .historyJournalLocked:
+            return "This session's local history is open in another Codemixer process. History is read-only here."
+        case .sessionReadinessFailed(_, let detail):
+            return "The agent did not become ready for prompts. \(detail)"
         case .internalInvariant(let detail):
             return "Internal error: \(detail)"
         case .unsupportedOperation(let detail):

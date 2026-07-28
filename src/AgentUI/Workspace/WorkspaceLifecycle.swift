@@ -14,14 +14,18 @@ public final class WorkspaceLifecycle {
         self.model = model
     }
 
-    /// New Workspace / reopen of an empty workspace shell.
+    /// New Workspace / Open Workspace when the folder is not itself a typed project.
     ///
-    /// Marks the folder active, resets navigator chrome, reloads projects, and
-    /// runs model-catalog warm. With no projects yet this warm is a no-op;
+    /// Reloads projects from `.codemixer/workspace.json` (or the app-support
+    /// index), runs model-catalog warm, then marks the folder active. When the
+    /// shell already lists projects, activates the first concrete agent project
+    /// (else first folder project) so the workbench is not an empty
+    /// "No workspace open" shell. With no projects yet catalog warm is a no-op;
     /// the first project add goes through `ensureModels(for:)` and probes then.
     public func openEmptyWorkspace(_ url: URL) async throws {
-        try? await model.workspaceProjects?.markActiveWorkspace(url)
         try await model.adoptEmptyWorkspace(url)
+        try? await model.workspaceProjects?.markActiveWorkspace(url)
+        model.activateDefaultProjectIfNeeded()
     }
 
     /// Open / restore a workspace that has (or is seeding) projects.

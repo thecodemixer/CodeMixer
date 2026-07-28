@@ -50,7 +50,7 @@ struct LiveCodexIntegrationTests {
         #expect(result.finalAssistantTextCount == 1)
     }
 
-    @Test("App Server thread/resume replays history and answers a follow-up prompt")
+    @Test("local history restores before thread/resume answers a follow-up prompt")
     func appServerResumeHistoryAndFollowUp() async throws {
         guard LiveCodexHarness.isEnabled() else { return }
         if let reason = LiveCodexHarness.prerequisiteFailure() {

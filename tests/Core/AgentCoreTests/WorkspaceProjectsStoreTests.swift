@@ -66,8 +66,10 @@ struct WorkspaceProjectsStoreTests {
 
     @Test("addExistingProject registers an external path and is idempotent")
     func addExistingIdempotent() async throws {
-        let store = makeStore()
+        let fs = InMemoryFileSystem()
+        let store = makeStore(fs: fs)
         let external = URL(fileURLWithPath: "/elsewhere/lib")
+        try fs.createDirectory(at: external, withIntermediates: true)
         let a = try await store.addExistingProject(url: external, projectType: .codex, in: workspace)
         let b = try await store.addExistingProject(url: external, projectType: .codex, in: workspace)
         #expect(a == b)
@@ -276,17 +278,63 @@ struct WorkspaceProjectsStoreTests {
         let api = workspace.appendingPathComponent("api")
         try fs.createDirectory(at: workspace, withIntermediates: true)
         try fs.createDirectory(at: api, withIntermediates: true)
-        let catalog = [
-            WorkspaceProjectsStore.ProjectRef(path: workspace.path, displayName: "ws", projectType: .claudeCode),
-            WorkspaceProjectsStore.ProjectRef(path: api.path, displayName: "api", projectType: .codex),
-        ]
-        try WorkspaceLocalStateStore.save(projects: catalog, to: workspace, fileSystem: fs)
+        let rootRef = WorkspaceProjectsStore.ProjectRef(path: workspace.path, displayName: "ws", projectType: .claudeCode)
+        let apiRef = WorkspaceProjectsStore.ProjectRef(path: api.path, displayName: "api", projectType: .codex)
+        try ProjectLocalStateStore.save(ref: rootRef, fileSystem: fs)
+        try ProjectLocalStateStore.save(ref: apiRef, fileSystem: fs)
+        try WorkspaceLocalStateStore.save(projects: [rootRef, apiRef], to: workspace, fileSystem: fs)
 
         let store = WorkspaceProjectsStore(environment: env, fileSystem: fs)
         await store.load()
         let projects = await store.projects(for: workspace)
         #expect(projects.map(\.path) == [workspace.path, api.path])
         #expect(projects.last?.projectType == .codex)
+    }
+
+    @Test("projects(for:) drops catalog rows without project.json and prunes workspace.json")
+    func dropsStaleCatalogRows() async throws {
+        let fs = InMemoryFileSystem()
+        let env = FakeEnvironment()
+        let api = workspace.appendingPathComponent("api")
+        let ghost = workspace.appendingPathComponent("ghost")
+        try fs.createDirectory(at: workspace, withIntermediates: true)
+        try fs.createDirectory(at: api, withIntermediates: true)
+        try fs.createDirectory(at: ghost, withIntermediates: true)
+        let apiRef = WorkspaceProjectsStore.ProjectRef(path: api.path, displayName: "api", projectType: .codex)
+        let ghostRef = WorkspaceProjectsStore.ProjectRef(path: ghost.path, displayName: "ghost", projectType: .claudeCode)
+        try ProjectLocalStateStore.save(ref: apiRef, fileSystem: fs)
+        try WorkspaceLocalStateStore.save(projects: [apiRef, ghostRef], to: workspace, fileSystem: fs)
+
+        let store = WorkspaceProjectsStore(environment: env, fileSystem: fs)
+        await store.load()
+        let projects = await store.projects(for: workspace)
+
+        #expect(projects.map(\.path) == [api.path])
+        let local = WorkspaceLocalStateStore.load(from: workspace, fileSystem: fs)
+        #expect(local?.projects.map(\.path) == [api.path])
+    }
+
+    @Test("markActiveWorkspace does not wipe an on-disk workspace.json catalog")
+    func markActiveDoesNotWipeWorkspaceLocalCatalog() async throws {
+        let fs = InMemoryFileSystem()
+        let env = FakeEnvironment()
+        let api = workspace.appendingPathComponent("api")
+        try fs.createDirectory(at: workspace, withIntermediates: true)
+        try fs.createDirectory(at: api, withIntermediates: true)
+        let catalog = [
+            WorkspaceProjectsStore.ProjectRef(path: api.path, displayName: "api", projectType: .claudeCode),
+        ]
+        try ProjectLocalStateStore.save(ref: catalog[0], fileSystem: fs)
+        try WorkspaceLocalStateStore.save(projects: catalog, to: workspace, fileSystem: fs)
+
+        let store = WorkspaceProjectsStore(environment: env, fileSystem: fs)
+        await store.load()
+        try await store.markActiveWorkspace(workspace)
+
+        let local = WorkspaceLocalStateStore.load(from: workspace, fileSystem: fs)
+        #expect(local?.projects.map(\.path) == [api.path])
+        #expect(await store.activeWorkspaceURL()?.path == workspace.path)
+        #expect(await store.resolveProjectType(for: workspace) == nil)
     }
 
     @Test("saveModels writes per-adapter file and preserves project catalog")
@@ -413,6 +461,12 @@ struct WorkspaceProjectsStoreTests {
         {"schemaVersion":2,"workspaces":[{"workspacePath":"\(workspace.path)","projects":[{"path":"\(workspace.path)","displayName":"ws","projectType":{"claudeCode":{}}}]}]}
         """
         try fs.writeAtomically(Data(v2.utf8), to: url)
+        let rootRef = WorkspaceProjectsStore.ProjectRef(
+            path: workspace.path,
+            displayName: "ws",
+            projectType: .claudeCode
+        )
+        try ProjectLocalStateStore.save(ref: rootRef, fileSystem: fs)
         let store = WorkspaceProjectsStore(environment: env, fileSystem: fs)
         await store.load()
         #expect(await store.activeWorkspaceURL() == nil)

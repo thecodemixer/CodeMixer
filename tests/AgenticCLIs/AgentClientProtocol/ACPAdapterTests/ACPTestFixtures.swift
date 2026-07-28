@@ -8,11 +8,12 @@ struct ACPDecoderFixture {
     let workspace: URL
     let state: ACPClientState
     let decoder: ACPEventDecoder
-    let sessionIndex: ACPSessionIndex
     let fileSystem: InMemoryFileSystem
     let clock: FakeClock
     let random: FakeRandomSource
     let customAgentID: String
+    let metadata: SessionMetadataRecorder
+    let backgroundEvents: BackgroundSessionEventRecorder
 
     init(workspace: URL = TestPaths.underTemporary("acp-ws"),
          customAgentID: String = "test-agent",
@@ -24,19 +25,22 @@ struct ACPDecoderFixture {
         self.clock = FakeClock()
         self.random = FakeRandomSource()
         self.state = ACPClientState()
-        let environment = FakeEnvironment()
-        self.sessionIndex = ACPSessionIndex(
-            environment: environment,
-            fileSystem: fileSystem,
-            clock: clock
-        )
+        let metadata = SessionMetadataRecorder()
+        let backgroundEvents = BackgroundSessionEventRecorder()
+        self.metadata = metadata
+        self.backgroundEvents = backgroundEvents
         self.decoder = ACPEventDecoder(
             state: state,
-            sessionIndex: sessionIndex,
             fileAccess: ACPFileAccess(workspace: workspace, fileSystem: fileSystem),
             terminals: ACPTerminalSession(workspace: workspace, random: random),
             clock: clock,
-            random: random
+            random: random,
+            recordBackgroundSessionEvents: { batch in
+                await backgroundEvents.record(batch)
+            },
+            updateSessionMetadata: { update in
+                await metadata.record(update)
+            }
         )
         let context = LaunchContext(
             workspace: workspace,
@@ -71,6 +75,30 @@ struct ACPDecoderFixture {
             result: .object(["sessionId": .string(id)]),
             error: nil
         ))
+    }
+}
+
+actor BackgroundSessionEventRecorder {
+    private var batches: [BackgroundSessionEventBatch] = []
+
+    func record(_ batch: BackgroundSessionEventBatch) {
+        batches.append(batch)
+    }
+
+    func snapshot() -> [BackgroundSessionEventBatch] {
+        batches
+    }
+}
+
+actor SessionMetadataRecorder {
+    private var updates: [SessionMetadataUpdate] = []
+
+    func record(_ update: SessionMetadataUpdate) {
+        updates.append(update)
+    }
+
+    func snapshot() -> [SessionMetadataUpdate] {
+        updates
     }
 }
 

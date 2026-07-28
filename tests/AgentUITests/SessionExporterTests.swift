@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import AgentUI
+import AgentCore
 import AgentProtocol
 
 @Suite("SessionExporter — pure transcript export")
@@ -58,6 +59,20 @@ struct SessionExporterTests {
 
         let html = try #require(String(data: SessionExporter.html(msgs), encoding: .utf8))
         #expect(html.contains("<div class=\"action\">Mode: Think</div>"))
+    }
+
+    @Test("Domain snapshot messages export the same roles as live UI rows")
+    func domainSnapshotExportMatchesUIShape() throws {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let messages: [SnapshotService.SnapshotMessage] = [
+            .init(role: .user, text: "Hello", timestamp: now),
+            .init(role: .action, text: "Mode: Think", timestamp: now),
+            .init(role: .assistant, text: "World", timestamp: now),
+        ]
+        let md = try #require(String(data: SessionExporter.markdown(messages), encoding: .utf8))
+        #expect(md.contains("**You:** Hello"))
+        #expect(md.contains("*Mode: Think*"))
+        #expect(md.contains("World"))
     }
 
     private func messages() -> [EngineViewModel.Message] {

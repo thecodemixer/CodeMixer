@@ -14,21 +14,11 @@ extension AgentEngine {
     /// Park the active runtime without killing its transport.
     func parkActive() async {
         guard let key = activeKey, var runtime = runtimes[key] else { return }
-        cancelStartupSubmitRecovery()
-        cancelResumeStartupWatchdog()
-        cancelResumePromptReadyWait()
-        resumeStartupState = .inactive
-        finishResumeStartupGate()
         await stopFSWatcher()
         await heartbeat?.endTurn()
         heartbeat = nil
-        startupSubmitRecoveryArmed = false
-        startupSubmitRecoveryState = .disarmed
-        promptAcceptance = .idle
         currentTurnID = nil
         runtime.boundSessionID = currentSessionID
-        runtime.transcript = transcript
-        runtime.changedFiles = changedFiles
         runtime.lastActivatedAt = seams.clock.now()
         // Keep forwarding/bell tasks on the runtime; clear engine mirrors so
         // activate can rebind without closing the child.
@@ -75,10 +65,6 @@ extension AgentEngine {
         eventForwardingTask = runtime.forwardingTask
         bellTask = runtime.bellTask
         currentTurnID = nil
-        promptAcceptance = .idle
-        cancelStartupSubmitRecovery()
-        startupSubmitRecoveryArmed = false
-        resumeStartupState = .inactive
 
         let monitor = HeartbeatActivityMonitor(clock: seams.clock) { [weak self] tick in
             await self?.onHeartbeat(tick)
@@ -87,8 +73,8 @@ extension AgentEngine {
 
         let targetSession = resumeSessionID ?? runtime.boundSessionID
         let reactivatingSameSession = targetSession == runtime.boundSessionID
-        transcript = reactivatingSameSession ? runtime.transcript : []
-        changedFiles = reactivatingSameSession ? runtime.changedFiles : []
+        transcript = []
+        changedFiles = []
         currentSessionID = targetSession
         state = .running(sessionID: targetSession)
         runtime.lastActivatedAt = seams.clock.now()
@@ -96,52 +82,92 @@ extension AgentEngine {
 
         await startFSWatcher(workspace: runtime.workspace)
 
-        let handshakeGate = runtime.adapter.capabilities.contains(.sessionHandshakeGate)
-        let needsAdapterReload = reactivatingSameSession
-            && !hasCachedConversation(runtime)
-            && resumeSessionID != nil
+        if let targetSession {
+            await restoreHistory(for: SessionTranscriptKey(
+                projectRoot: runtime.workspace,
+                namespace: runtime.adapter.historyNamespace,
+                sessionID: targetSession
+            ))
+        }
         if let resumeSessionID,
-           (resumeSessionID != runtime.boundSessionID || needsAdapterReload),
-           let bytes = runtime.adapter.encodeResumeSession(sessionID: resumeSessionID),
-           !bytes.isEmpty {
+           resumeSessionID != runtime.boundSessionID {
+            guard let bytes = runtime.adapter.encodeResumeSession(sessionID: resumeSessionID),
+                  !bytes.isEmpty else {
+                log.warning("pool activate missing encodeResumeSession; refusing warm path")
+                return false
+            }
             currentSessionID = resumeSessionID
             if var updated = runtimes[key] {
                 updated.boundSessionID = resumeSessionID
-                updated.transcript = []
-                updated.changedFiles = []
-                updated.replayEvents = []
                 runtimes[key] = updated
             }
             do {
                 try await runtime.transport.write(bytes)
                 log.notice("pool activate + in-process resume session=\(resumeSessionID, privacy: .public)")
+                // Interactive PTYs (Claude `/resume`) often do not re-emit
+                // SessionStart; unlock from the resume write. ACP/Codex still
+                // publish sessionStarted → sessionPromptReady after load/resume.
+                if case .interactiveTerminal = runtime.adapter.transportDescriptor {
+                    await markSessionPromptReady(resumeSessionID)
+                }
             } catch {
                 log.warning("pool activate resume write failed: \(String(describing: error), privacy: .public)")
                 return false
             }
-            await bus.publish(.sessionStarted(sessionID: handshakeGate ? "" : resumeSessionID,
-                                              model: nil,
-                                              cwd: runtime.workspace))
-        } else {
-            await bus.publish(.sessionStarted(sessionID: targetSession ?? "",
-                                              model: nil,
-                                              cwd: runtime.workspace))
-            if reactivatingSameSession {
-                await replayCachedConversation(runtime)
-            }
+        } else if reactivatingSameSession, let targetSession {
+            await markSessionPromptReady(targetSession)
         }
         await publishRuntimePoolChanged()
         return true
     }
 
+    /// New Chat on a live pooled process (`session/new`, Codex thread start,
+    /// Claude `/clear`). Never used to decide cold spawn — that only happens
+    /// when the project has no pool slot yet.
+    func applyWarmNewSession() async -> Bool {
+        guard let key = activeKey, var runtime = runtimes[key] else { return false }
+        guard let bytes = runtime.adapter.encodeCommand(.newSession), !bytes.isEmpty else {
+            return false
+        }
+        transcript = []
+        changedFiles = []
+        currentTurnID = nil
+        await heartbeat?.endTurn()
+        currentSessionID = nil
+        runtime.boundSessionID = nil
+        runtimes[key] = runtime
+        state = .running(sessionID: nil)
+        do {
+            try await runtime.transport.write(bytes)
+            // Interactive PTYs (Claude `/clear`) typically do not re-emit
+            // SessionStart; mint a local session id and unlock. ACP/Codex
+            // publish sessionStarted → sessionPromptReady for the new thread.
+            if case .interactiveTerminal = runtime.adapter.transportDescriptor {
+                let localID = seams.random.uuid().uuidString
+                currentSessionID = localID
+                if var updated = runtimes[key] {
+                    updated.boundSessionID = localID
+                    runtimes[key] = updated
+                }
+                state = .running(sessionID: localID)
+                await markSessionPromptReady(localID)
+            }
+            return true
+        } catch {
+            return false
+        }
+    }
+
     private func applyInProcessSessionSwitch(resumeSessionID: String?) async -> Bool {
         guard let key = activeKey, var runtime = runtimes[key] else { return false }
         guard let resumeSessionID else { return true }
-        if runtime.boundSessionID == resumeSessionID, hasCachedConversation(runtime) {
-            await bus.publish(.sessionStarted(sessionID: resumeSessionID,
-                                              model: nil,
-                                              cwd: runtime.workspace))
-            await replayCachedConversation(runtime)
+        await restoreHistory(for: SessionTranscriptKey(
+            projectRoot: runtime.workspace,
+            namespace: runtime.adapter.historyNamespace,
+            sessionID: resumeSessionID
+        ))
+        if runtime.boundSessionID == resumeSessionID {
+            await markSessionPromptReady(resumeSessionID)
             return true
         }
         guard let bytes = runtime.adapter.encodeResumeSession(sessionID: resumeSessionID),
@@ -151,52 +177,19 @@ extension AgentEngine {
         transcript = []
         changedFiles = []
         currentTurnID = nil
-        promptAcceptance = .idle
-        cancelStartupSubmitRecovery()
         await heartbeat?.endTurn()
         currentSessionID = resumeSessionID
         runtime.boundSessionID = resumeSessionID
-        runtime.transcript = []
-        runtime.changedFiles = []
-        runtime.replayEvents = []
         runtimes[key] = runtime
         state = .running(sessionID: resumeSessionID)
         do {
             try await runtime.transport.write(bytes)
-            let handshakeGate = runtime.adapter.capabilities.contains(.sessionHandshakeGate)
-            await bus.publish(.sessionStarted(sessionID: handshakeGate ? "" : resumeSessionID,
-                                              model: nil,
-                                              cwd: runtime.workspace))
+            if case .interactiveTerminal = runtime.adapter.transportDescriptor {
+                await markSessionPromptReady(resumeSessionID)
+            }
             return true
         } catch {
             return false
-        }
-    }
-
-    private func hasCachedConversation(_ runtime: AgentRuntime) -> Bool {
-        !runtime.replayEvents.isEmpty || !runtime.transcript.isEmpty
-    }
-
-    private func replayCachedConversation(_ runtime: AgentRuntime) async {
-        guard runtime.replayEvents.isEmpty else {
-            for event in runtime.replayEvents {
-                await bus.publish(event)
-            }
-            return
-        }
-        for message in runtime.transcript {
-            switch message.role {
-            case .user:
-                await bus.publish(.userTurn(id: seams.random.uuid().uuidString,
-                                            text: message.text))
-            case .assistant:
-                await bus.publish(.assistantText(id: seams.random.uuid().uuidString,
-                                                 blockID: seams.random.uuid().uuidString,
-                                                 text: message.text,
-                                                 isFinal: true))
-            case .action:
-                break
-            }
         }
     }
 
@@ -239,11 +232,6 @@ extension AgentEngine {
             workspace = nil
             currentSessionID = nil
             currentTurnID = nil
-            promptAcceptance = .idle
-            cancelStartupSubmitRecovery()
-            cancelResumeStartupWatchdog()
-            cancelResumePromptReadyWait()
-            finishResumeStartupGate()
             await stopFSWatcher()
             await heartbeat?.endTurn()
             heartbeat = nil

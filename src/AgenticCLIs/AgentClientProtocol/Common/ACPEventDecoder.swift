@@ -10,7 +10,7 @@ import AgentProtocol
 /// extensions in this directory — `+Session` (open/list/resume a session and
 /// finalize a prompt turn), `+Dashboard` (initialize bootstrap, dashboard URL,
 /// and the session-metadata bookkeeping — archived/overview/needsAttention —
-/// that feeds `sessionIndexChanged`/`sessionAttentionChanged`), `+Streaming`
+/// that feeds `sessionAttentionChanged`), `+Streaming`
 /// (`session/update` notifications: message/thought chunks, tool call
 /// lifecycle, foreign-session caching), `+Permission` (permission-request
 /// server calls), and `+ReverseRPC` (the remaining agent-initiated server
@@ -30,24 +30,27 @@ public actor ACPEventDecoder {
     /// `+Permission`/`+ReverseRPC` extensions in the other files in this
     /// directory.
     let state: ACPClientState
-    let sessionIndex: any ACPSessionIndexing
     let fileAccess: ACPFileAccess
     let terminals: ACPTerminalSession
     let clock: any AgentClock
     let random: any RandomSource
+    let recordBackgroundSessionEvents: @Sendable (BackgroundSessionEventBatch) async -> Void
+    let updateSessionMetadata: @Sendable (SessionMetadataUpdate) async -> Void
 
     public init(state: ACPClientState,
-                sessionIndex: any ACPSessionIndexing,
                 fileAccess: ACPFileAccess,
                 terminals: ACPTerminalSession,
                 clock: any AgentClock,
-                random: any RandomSource) {
+                random: any RandomSource,
+                recordBackgroundSessionEvents: @escaping @Sendable (BackgroundSessionEventBatch) async -> Void = { _ in },
+                updateSessionMetadata: @escaping @Sendable (SessionMetadataUpdate) async -> Void = { _ in }) {
         self.state = state
-        self.sessionIndex = sessionIndex
         self.fileAccess = fileAccess
         self.terminals = terminals
         self.clock = clock
         self.random = random
+        self.recordBackgroundSessionEvents = recordBackgroundSessionEvents
+        self.updateSessionMetadata = updateSessionMetadata
     }
 
     public func decode(_ incoming: ACPIncoming) async -> Batch {
@@ -71,15 +74,4 @@ public actor ACPEventDecoder {
         return String(decoding: data, as: UTF8.self)
     }
 
-    /// Non-private: shared by `+Dashboard`'s `sessionInfoUpdate` and
-    /// `+Permission`'s background-session attention prompt.
-    func sessionTitle(sessionID: String,
-                      customAgentID: String,
-                      workspace: URL) async -> String? {
-        let summaries = await sessionIndex.summaries(
-            workspace: workspace,
-            customAgentID: customAgentID
-        )
-        return summaries.first(where: { $0.id == sessionID })?.title
-    }
 }

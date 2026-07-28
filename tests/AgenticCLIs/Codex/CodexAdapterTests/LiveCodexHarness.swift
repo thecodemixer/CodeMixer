@@ -1,5 +1,5 @@
 import Foundation
-import AgentCore
+@testable import AgentCore
 import AgentProtocol
 import Codex
 import AgentTestSupport
@@ -49,8 +49,7 @@ struct LiveCodexHarness {
         let finalAssistantTextCount: Int
     }
 
-    /// Seed → shutdown → `thread/resume` — mirrors opening an existing Codex
-    /// session in the sidebar (history replay + follow-up prompt).
+    /// Seed → shutdown → local history restore + `thread/resume`, then follow-up.
     struct ResumeLoadResult: Sendable {
         let priorThreadID: String
         let reloadedEvents: [AgentEvent]
@@ -201,6 +200,32 @@ struct LiveCodexHarness {
             Task { await engine.bus.unsubscribe(sub.id) }
         }
 
+        await engine.restoreHistory(for: SessionTranscriptKey(
+            projectRoot: configuration.workspace,
+            namespace: adapter.historyNamespace,
+            sessionID: threadID
+        ))
+        let historyReady = await liveCodexPollUntil(timeout: .seconds(5)) {
+            let user = await sink.containsUserTurn(matching: configuration.prompt)
+            let assistant = await sink.containsFinalAssistantText(
+                matching: configuration.expectedFinalSubstring
+            )
+            return user && assistant
+        }
+        let sawUser = await sink.containsUserTurn(matching: configuration.prompt)
+        let sawAssistant = await sink.containsFinalAssistantText(
+            matching: configuration.expectedFinalSubstring
+        )
+        guard historyReady else {
+            let events = await sink.snapshot()
+            await engine.shutdown(reason: .naturalExit)
+            throw LiveCodexHarnessError.historyLoadTimedOut(
+                events: events,
+                threadID: threadID,
+                detail: "missing local user/assistant (user=\(sawUser), assistant=\(sawAssistant))"
+            )
+        }
+
         try await engine.start(adapter: adapter,
                                workspace: configuration.workspace,
                                resumeSessionID: threadID)
@@ -211,23 +236,6 @@ struct LiveCodexHarness {
         guard sawThread else {
             await engine.shutdown(reason: .naturalExit)
             throw LiveCodexHarnessError.threadStartTimedOut
-        }
-
-        let historyReady = await liveCodexPollUntil(timeout: configuration.assistantTextTimeout) {
-            let user = await sink.containsUserTurn(matching: configuration.prompt)
-            let assistant = await sink.containsFinalAssistantText(matching: configuration.expectedFinalSubstring)
-            return user && assistant
-        }
-        let sawUser = await sink.containsUserTurn(matching: configuration.prompt)
-        let sawAssistant = await sink.containsFinalAssistantText(matching: configuration.expectedFinalSubstring)
-        guard historyReady else {
-            let events = await sink.snapshot()
-            await engine.shutdown(reason: .naturalExit)
-            throw LiveCodexHarnessError.historyLoadTimedOut(
-                events: events,
-                threadID: threadID,
-                detail: "missing replayed user/assistant (user=\(sawUser), assistant=\(sawAssistant))"
-            )
         }
 
         try await engine.send(.sendPrompt(text: followUpPrompt, attachments: []))

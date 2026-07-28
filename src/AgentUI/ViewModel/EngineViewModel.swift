@@ -63,6 +63,24 @@ public enum CustomACPRestartPhase: Equatable {
     case awaitingDashboard
 }
 
+/// One source of truth for history visibility and prompt readiness.
+public enum SessionActivation: Equatable {
+    case idle
+    case restoringHistory(sessionID: String)
+    case awaitingAdapter(sessionID: String)
+    case ready(sessionID: String)
+    case failed(sessionID: String, message: String)
+
+    var isReady: Bool {
+        switch self {
+        case .idle, .ready:
+            return true
+        case .restoringHistory, .awaitingAdapter, .failed:
+            return false
+        }
+    }
+}
+
 /// `@MainActor` `@Observable` projection of the engine's event stream into
 /// SwiftUI-readable state.
 ///
@@ -163,25 +181,12 @@ public final class EngineViewModel {
     /// In Mode B includes the loopback GUI; in Mode A counts external peers only.
     /// See `docs/architecture.md` §4.1 and `Remote/AgentRemoteControl/README.md`.
     public internal(set) var connectedRemoteClients: Int = 0
-    public internal(set) var isSwitchingSession: Bool = false
-    /// Active session was restored from Codemixer's project cache because the
-    /// ACP agent reported that it no longer owns the session.
-    public internal(set) var cachedTranscriptLoadedSessionID: String?
-    var composerGateState: ComposerGateState = .unlocked
-    /// Holds the composer closed briefly after opening a saved session so the
-    /// first prompt cannot race Claude's resume/startup TUI.
-    var isComposerLockedForSessionResume: Bool { composerGateState.isLocked }
-    /// True while the composer lock was armed by `.sessionHandshakeGate`
-    /// (Cursor / ACP). History replay must not clear this — only SessionStart.
-    internal var isComposerLockedForSessionHandshake: Bool { composerGateState.isHandshake }
-    /// Same-project warm `session/load` (process already live) — shorter hard
-    /// unlock and "Loading session…" copy instead of cold-spawn messaging.
-    var isWarmSessionSwitch: Bool { composerGateState.isWarmSessionSwitch }
-    /// Claude Code resume has two clocks: the UI can replay JSONL history
-    /// quickly, while the live `claude --resume` PTY may still be painting
-    /// history and not yet accepting input. While true, replayed content may
-    /// end the visual switch state but must not unlock the composer.
-    internal var isComposerWaitingForClaudeCodeResume: Bool { composerGateState.waitsForClaudeCodeResume }
+    public internal(set) var sessionActivation: SessionActivation = .idle
+    public var isSwitchingSession: Bool {
+        if case .restoringHistory = sessionActivation { return true }
+        return false
+    }
+    var isComposerLockedForSessionResume: Bool { !sessionActivation.isReady }
     public internal(set) var sessionTokens: Int = 0
     public internal(set) var sessionCostUSD: Double?
     public internal(set) var appearancePrefs: AppearancePrefs = .init()
@@ -251,11 +256,6 @@ public final class EngineViewModel {
     /// from the adapter capabilities.
     public var supportsResumableSessions: Bool = true
 
-    /// Agent-agnostic session lister, injected by the app shell (resolves the
-    /// adapter via `AdapterRegistry` so `AgentUI` never imports a concrete
-    /// adapter). Returns `[]` for agents without resumable sessions.
-    public var sessionLister: (@Sendable (URL) async -> [SessionSummary])?
-
     /// Agent-agnostic Workspace→Projects store, injected by the app shell.
     public var workspaceProjects: WorkspaceProjectsStore?
 
@@ -317,9 +317,10 @@ public final class EngineViewModel {
     var deltaTimestamps: [Date] = []
     var streamingStartedAt: Date?
     var stalledToastTask: Task<Void, Never>?
+    var sessionHandshakeTimeoutTask: Task<Void, Never>?
+    /// Bumped whenever a handshake wait starts; timeouts ignore stale generations.
+    var sessionHandshakeGeneration = 0
     var removedProjectUndoTask: Task<Void, Never>?
-    var sessionSwitchingTask: Task<Void, Never>?
-    var composerResumeUnlockTask: Task<Void, Never>?
     var adapterCapabilitiesGeneration = 0
     var stalledToastFiredThisTurn = false
     var isAwaitingFirstReplyForPrompt = false
@@ -327,6 +328,7 @@ public final class EngineViewModel {
     var dedupUserText: String?
     var dedupArmedAt: Date?
     var dedupDropsRemaining: Int = 0
+    var snapshotWaiters: [SnapshotKind: CheckedContinuation<Data, any Error>] = [:]
 
     var echoWindowSeconds: TimeInterval {
         TimeInterval(ActivityTiming.userTurnEchoWindow.components.seconds)
@@ -387,6 +389,31 @@ public final class EngineViewModel {
 
     /// Clears the pending export after the app shell has presented a save panel.
     public func clearPendingExport() { pendingExport = nil }
+
+    /// Loads the durable conversation projection from the engine transcript
+    /// repository (or engine mirror when no session key is bound).
+    public func fetchConversationSnapshot() async throws -> SnapshotService.ConversationSnapshot {
+        let payload: Data = try await withCheckedThrowingContinuation { continuation in
+            if let existing = snapshotWaiters.removeValue(forKey: .conversation) {
+                existing.resume(throwing: CancellationError())
+            }
+            snapshotWaiters[.conversation] = continuation
+            Task { [engine] in
+                do {
+                    try await engine.send(.requestSnapshot(.conversation))
+                } catch {
+                    await MainActor.run {
+                        if let waiter = self.snapshotWaiters.removeValue(forKey: .conversation) {
+                            waiter.resume(throwing: error)
+                        }
+                    }
+                }
+            }
+        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(SnapshotService.ConversationSnapshot.self, from: payload)
+    }
 
     #if DEBUG
     /// Seed navigator state directly for previews/tests (DEBUG only).
@@ -465,6 +492,7 @@ public final class EngineViewModel {
     public enum ModelCatalogLoadError: Error, LocalizedError, Sendable {
         case adapterUnavailable(AgentID)
         case emptyCatalog(String)
+        case probeTimedOut(String)
 
         public var errorDescription: String? {
             switch self {
@@ -472,6 +500,8 @@ public final class EngineViewModel {
                 return "No adapter is registered for \(id.rawValue)."
             case .emptyCatalog(let name):
                 return "\(name) returned no models. Check that the CLI is installed and authenticated."
+            case .probeTimedOut(let name):
+                return "\(name) model discovery timed out. Check that the CLI is installed and authenticated."
             }
         }
     }
@@ -574,20 +604,16 @@ public extension EngineViewModel {
     /// Per-project adapter capability snapshot resolved for the navigator.
     struct ProjectCapabilities: Sendable, Hashable {
         var supportsResumableSessions: Bool
-        var requiresSessionHandshakeGate: Bool
         var supportsOverviewDashboard: Bool
 
         init(supportsResumableSessions: Bool,
-             requiresSessionHandshakeGate: Bool,
              supportsOverviewDashboard: Bool = false) {
             self.supportsResumableSessions = supportsResumableSessions
-            self.requiresSessionHandshakeGate = requiresSessionHandshakeGate
             self.supportsOverviewDashboard = supportsOverviewDashboard
         }
 
         static let none = ProjectCapabilities(
             supportsResumableSessions: false,
-            requiresSessionHandshakeGate: false,
             supportsOverviewDashboard: false
         )
     }
@@ -628,10 +654,6 @@ public extension EngineViewModel {
 
         func supportsResumableSessions(for path: String) -> Bool? {
             entry(for: path)?.supportsResumableSessions
-        }
-
-        func requiresSessionHandshakeGate(for path: String) -> Bool {
-            entry(for: path)?.requiresSessionHandshakeGate ?? false
         }
 
         private func entry(for path: String) -> ProjectCapabilities? {

@@ -121,9 +121,14 @@ extension Bootstrap {
         pendingConfigure = .addExisting(info)
     }
 
-    /// Opens a folder after resolving its project type from project-local state
-    /// or the workspace index. If neither knows the mode, presents the
-    /// configure sheet instead of guessing.
+    /// Opens a folder as a workspace.
+    ///
+    /// When the folder itself carries a project type (`.codemixer/project.json`
+    /// or an app-support index hit), treat it as a single-project workspace and
+    /// seed the root. Otherwise adopt a workspace shell — including workspaces
+    /// that already list child projects in `.codemixer/workspace.json`. Never
+    /// ask for a project type on Open Workspace; Add Existing still configures
+    /// untyped folders.
     func openWorkspace(_ url: URL,
                        resumeSessionID: String?,
                        preferFreshAgentProcess: Bool = false) async {
@@ -141,29 +146,18 @@ extension Bootstrap {
                                 preferFreshAgentProcess: preferFreshAgentProcess)
             return
         }
-        // Empty workspace shell: adopted via New Workspace with no projects yet.
-        if let store = viewModel?.workspaceProjects {
-            let existing = await store.projects(for: url)
-            if existing.isEmpty {
-                isPreparingWorkspace = true
-                defer { isPreparingWorkspace = false }
-                do {
-                    guard let lifecycle = workspaceLifecycle else { return }
-                    try await lifecycle.openEmptyWorkspace(url)
-                    workspace = url
-                } catch {
-                    startupError = error.localizedDescription
-                    workspace = nil
-                    workspaceLifecycle?.abortOpen()
-                    try? await store.clearActiveWorkspace()
-                }
-                return
-            }
+        isPreparingWorkspace = true
+        defer { isPreparingWorkspace = false }
+        do {
+            guard let lifecycle = workspaceLifecycle else { return }
+            try await lifecycle.openEmptyWorkspace(url)
+            workspace = url
+        } catch {
+            startupError = error.localizedDescription
+            workspace = nil
+            workspaceLifecycle?.abortOpen()
+            try? await viewModel?.workspaceProjects?.clearActiveWorkspace()
         }
-        pendingConfigure = .openWorkspace(
-            .existingFolder(url, preferFreshAgentProcess: preferFreshAgentProcess),
-            resumeSessionID: resumeSessionID
-        )
     }
 
     func confirmPendingProjectConfiguration(_ info: ProjectDraft) async {
@@ -266,6 +260,10 @@ extension Bootstrap {
             }
             await viewModel?.prepareProjectOpen(url: url, projectType: projectType)
             await viewModel?.reloadProjects(rootProjectType: projectType)
+            if let resumeSessionID {
+                viewModel?.beginSessionSwitch(projectPath: url.path,
+                                              sessionID: resumeSessionID)
+            }
             viewModel?.openProject(path: url.path, resumeSessionID: resumeSessionID)
             try? await viewModel?.workspaceProjects?.markActiveWorkspace(url)
             Task { await configureSlashCommands(for: url, mode: projectType) }
@@ -312,9 +310,12 @@ extension Bootstrap {
             // initialize/auth/session-new cannot race an early send.
             await viewModel?.prepareProjectOpen(url: url, projectType: projectType)
             await viewModel?.reloadProjects(rootProjectType: projectType)
-            try await engine.start(adapter: adapter,
-                                   workspace: url,
-                                   resumeSessionID: resumeSessionID)
+            if let resumeSessionID {
+                viewModel?.beginSessionSwitch(projectPath: url.path,
+                                              sessionID: resumeSessionID)
+            }
+            try await engine.send(.openProject(path: url.path,
+                                               resumeSessionID: resumeSessionID))
             viewModel?.supportsResumableSessions = adapter.capabilities.contains(.resumableSessions)
             viewModel?.availableModels = adapter.availableModels()
             viewModel?.availableAgentModes = adapter.availableAgentModes()

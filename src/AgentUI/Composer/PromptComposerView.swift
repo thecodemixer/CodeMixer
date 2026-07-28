@@ -201,13 +201,16 @@ public struct PromptComposerView: View {
     }
 
     private var promptPlaceholder: String {
-        if model.isComposerLockedForSessionResume {
-            if model.isWarmSessionSwitch {
-                return "Loading session…"
-            }
-            return "Starting session…"
+        switch model.sessionActivation {
+        case .restoringHistory:
+            return "Restoring conversation…"
+        case .awaitingAdapter:
+            return "Connecting agent…"
+        case .failed:
+            return "Agent unavailable"
+        case .idle, .ready:
+            return isEditMode ? "Edit your message…" : "Ask…"
         }
-        return isEditMode ? "Edit your message…" : "Ask…"
     }
 
     private func handleDraftChange(_: String, _ new: String) {

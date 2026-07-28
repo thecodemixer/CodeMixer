@@ -106,12 +106,18 @@ private struct Line: Identifiable {
         case .agentDashboard(let u, let title):
             let label = title.map { "\($0) " } ?? ""
             (kind, body, tint) = ("dashboard", "\(label)\(u.absoluteString)", Theme.signal.info)
-        case .sessionIndexChanged(let path):
-            (kind, body, tint) = ("sessions", path.path, Theme.text.tertiary)
         case .sessionAttentionChanged(let id, let title, let flag):
             (kind, body, tint) = ("attention", "\(title) (\(id)) \(flag)", Theme.signal.warning)
-        case .cachedTranscriptLoaded(let id):
-            (kind, body, tint) = ("cached", id, Theme.signal.info)
+        case .sessionHistoryRestored(let id):
+            (kind, body, tint) = ("history", id, Theme.signal.info)
+        case .sessionPromptReady(let id):
+            (kind, body, tint) = ("ready", id, Theme.signal.success)
+        case .sessionsListed(let path, let sessions):
+            (kind, body, tint) = ("sessions", "\(path.path): \(sessions.count)", Theme.text.tertiary)
+        case .historyImportProgress(let path, let completed, let total):
+            (kind, body, tint) = ("import", "\(path.lastPathComponent): \(completed)/\(total)", Theme.signal.info)
+        case .historyImportFinished(let path, let imported, let failed):
+            (kind, body, tint) = ("imported", "\(path.lastPathComponent): \(imported), \(failed) failed", Theme.signal.info)
         case .sessionPhaseChanged(let id, let phase):
             (kind, body, tint) = ("phase", "\(id): \(phase.label) (#\(phase.ordinal))", Theme.signal.info)
         }

@@ -39,6 +39,16 @@ enum WireAgentErrorCoding {
         case .permissionTimeout(let promptID, let action):
             context[.promptID] = promptID.uuidString
             context[.action] = action.wireValue
+        case .historyWriteFailed(let path, let detail),
+             .historyLoadFailed(let path, let detail):
+            context[.path] = path
+            context[.detail] = detail
+        case .historyJournalLocked(let sessionID, let ownerPID):
+            context[.sessionID] = sessionID
+            context[.ownerPID] = ownerPID.map(String.init)
+        case .sessionReadinessFailed(let sessionID, let detail):
+            context[.sessionID] = sessionID
+            context[.detail] = detail
         case .internalInvariant(let detail):
             context[.detail] = detail
         case .unsupportedOperation(let detail):
@@ -101,6 +111,18 @@ enum WireAgentErrorCoding {
                 return invalidContext(code, field: .action)
             }
             return .permissionTimeout(promptID: promptID, action: action)
+        case .historyWriteFailed:
+            return .historyWriteFailed(path: ctx[.path] ?? "",
+                                       detail: ctx[.detail] ?? wire.message)
+        case .historyLoadFailed:
+            return .historyLoadFailed(path: ctx[.path] ?? "",
+                                      detail: ctx[.detail] ?? wire.message)
+        case .historyJournalLocked:
+            return .historyJournalLocked(sessionID: ctx[.sessionID] ?? "",
+                                         ownerPID: Int32(ctx[.ownerPID] ?? ""))
+        case .sessionReadinessFailed:
+            return .sessionReadinessFailed(sessionID: ctx[.sessionID] ?? "",
+                                           detail: ctx[.detail] ?? wire.message)
         case .internalInvariant:
             return .internalInvariant(detail: ctx[.detail] ?? wire.message)
         case .unsupportedOperation:

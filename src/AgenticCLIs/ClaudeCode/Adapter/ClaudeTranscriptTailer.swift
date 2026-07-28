@@ -21,6 +21,7 @@ public actor ClaudeTranscriptTailer {
     private let fileSystem: any FileSystem
     private let clock: any AgentClock
     private let random: any RandomSource
+    private let skipExistingRecords: Bool
     private var userTurnReplayActive: Bool
     private let log = Logger(subsystem: AppIdentity.logSubsystem, category: "ClaudeTranscriptTailer")
     private var sessionID: String?
@@ -29,6 +30,7 @@ public actor ClaudeTranscriptTailer {
     private var transcriptTools: [String: TranscriptTool] = [:]
     private var fileOffsets: [String: Int] = [:]
     private var partialLines: [String: String] = [:]
+    private var initializedFiles: Set<String> = []
     private var watchTask: Task<Void, Never>?
     private var continuation: AsyncStream<AgentEvent>.Continuation?
     private var assistantTextEmitted = false
@@ -37,6 +39,7 @@ public actor ClaudeTranscriptTailer {
                 workspace: URL,
                 initialSessionID: String? = nil,
                 replayUserTurns: Bool = true,
+                skipExistingRecords: Bool = false,
                 fileSystem: any FileSystem = SystemFileSystem(),
                 clock: any AgentClock = SystemClock(),
                 random: any RandomSource = SystemRandomSource()) {
@@ -44,6 +47,7 @@ public actor ClaudeTranscriptTailer {
         self.workspace = workspace
         self.sessionID = initialSessionID
         self.userTurnReplayActive = replayUserTurns
+        self.skipExistingRecords = skipExistingRecords
         self.fileSystem = fileSystem
         self.clock = clock
         self.random = random
@@ -76,6 +80,25 @@ public actor ClaudeTranscriptTailer {
     /// on Stop hooks when the JSONL transcript already surfaced the reply.
     public func hasEmittedAssistantText() -> Bool {
         assistantTextEmitted
+    }
+
+    /// Decodes one complete vendor transcript for the add-existing-project
+    /// catalog import. A fresh tailer instance must be used per session so
+    /// tool-use/result correlation cannot leak between journals.
+    func importedEvents(from data: Data) -> [AgentEvent] {
+        guard let text = String(data: data, encoding: .utf8) else { return [] }
+        userTurnReplayActive = true
+        var output: [AgentEvent] = []
+        for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
+            guard let lineData = line.data(using: .utf8),
+                  let record = Self.decodeRecord(from: lineData) else {
+                continue
+            }
+            let id = record.uuid
+                ?? "\(record.type.rawValue)-\(record.toolUseID ?? "")-\(output.count)"
+            output.append(contentsOf: events(from: record, recordID: id))
+        }
+        return output
     }
 
     public func start() -> AsyncStream<AgentEvent> {
@@ -167,6 +190,11 @@ public actor ClaudeTranscriptTailer {
         let key = url.path
         let previousOffset = fileOffsets[key] ?? 0
         guard let currentSize = try? fileSystem.byteCount(at: url) else { return false }
+        if skipExistingRecords, initializedFiles.insert(key).inserted {
+            fileOffsets[key] = currentSize
+            partialLines.removeValue(forKey: key)
+            return false
+        }
         let offset = currentSize < previousOffset ? 0 : previousOffset
         if offset == 0 { partialLines.removeValue(forKey: key) }
         guard let data = try? fileSystem.readData(at: url, fromOffset: offset),

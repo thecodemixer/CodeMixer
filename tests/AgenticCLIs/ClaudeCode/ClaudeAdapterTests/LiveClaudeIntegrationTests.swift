@@ -45,6 +45,25 @@ struct LiveClaudeIntegrationTests {
         #expect(result.finalAssistantText?.localizedCaseInsensitiveContains(configuration.expectedFinalSubstring) == true)
         #expect(result.finalAssistantTextCount == 1)
 
+        let trustRequests = result.events.filter {
+            if case .permissionRequest(let prompt) = $0 {
+                return prompt.toolName == ClaudeInputEncoding.workspaceTrustToolName
+            }
+            return false
+        }
+        let trustAutoAllows = result.events.filter {
+            if case .permissionAlreadyResolved(_, let by) = $0 {
+                return by == "adapter-auto"
+            }
+            return false
+        }
+        // Engine must swallow Claude folder-trust via adapter.autoAllowDecision —
+        // the prompt must not reach bus subscribers as permissionRequest.
+        #expect(trustRequests.isEmpty)
+        print(
+            "live Claude trust: workspace=\(configuration.workspace.path) adapterAuto=\(trustAutoAllows.count) surfacedRequests=\(trustRequests.count)"
+        )
+
         if let markers = result.billingMarkers {
             #expect(markers.isSubscriptionCLIPath)
             #expect(markers.entrypoint == "cli")
@@ -54,7 +73,7 @@ struct LiveClaudeIntegrationTests {
         }
     }
 
-    @Test("resumed interactive session still emits assistantText on the next prompt")
+    @Test("local history restores before resumed Claude answers the next prompt")
     func resumedInteractivePTYTurn() async throws {
         guard LiveClaudeHarness.isEnabled() else { return }
         if let reason = LiveClaudeHarness.prerequisiteFailure() {

@@ -157,19 +157,6 @@ public final class CodexTwin: AgentAdapter {
         )
     }
 
-    public func listResumableSessions(workspace: URL) async -> [SessionSummary] {
-        [
-            SessionSummary(
-                id: configuration.threadID,
-                agentID: .codex,
-                workspace: workspace,
-                title: "Codex twin session",
-                lastActivity: clock.now(),
-                messageCount: 1
-            ),
-        ]
-    }
-
     public func resumeArgvAddition(sessionID: String) -> [String] { [] }
 
     public func availableModels() -> [AgentModelOption] {

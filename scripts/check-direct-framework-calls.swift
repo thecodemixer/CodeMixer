@@ -24,6 +24,7 @@ let patterns: [String] = [
     #"UNUserNotificationCenter\.current\(\)"#,
     #"NetService\("#,
     #"URLSession\.shared|URLSession\("#,
+    #"sqlite3_(open|open_v2|prepare|prepare_v2|bind|step|column|finalize|close)"#,
 ]
 
 // Path fragments that mark a file as an allowed wrapper site.

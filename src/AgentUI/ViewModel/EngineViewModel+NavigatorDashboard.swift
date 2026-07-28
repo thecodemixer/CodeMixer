@@ -38,8 +38,7 @@ extension EngineViewModel {
         sessionID = nil
         clearConversationState()
         refreshPermissionActivity()
-        endSessionSwitch()
-        unlockComposerForSessionResume()
+        clearSessionActivation()
         status = .idle
         activity = .idle
         clearFolderBrowserSurface()
@@ -75,7 +74,6 @@ extension EngineViewModel {
         guard !isRestartingCustomACPCLI else { return }
 
         let target = URL(fileURLWithPath: projectPath).standardizedFileURL
-        endSessionSwitch()
         workspace = target
         sessionID = nil
         clearConversationState()
@@ -89,9 +87,7 @@ extension EngineViewModel {
         customACPRestartPhase = .tearingDown
         applyAdapterCapabilities(forProjectPath: target.path)
         detailPane = supportsOverviewDashboard(forProjectPath: target.path) ? .dashboard : .conversation
-        if projectNeedsSessionHandshakeGate(path: target.path) {
-            lockComposerForSessionHandshake()
-        }
+        noteAdapterPending()
 
         Task { @MainActor [weak self] in
             await self?.performCustomACPCLIRestart(projectPath: target.path)

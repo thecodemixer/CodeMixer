@@ -12,15 +12,6 @@ import ClaudeCode
 @Suite("AgentEngine — command matrix", .serialized)
 struct AgentEngineCommandTests {
 
-    /// PTY-TUI mock wired to Claude's input-row classifier (engine stays
-    /// vendor-agnostic; tests supply the adapter heuristic).
-    private func ptyTUIAdapter() -> RecordingMockAdapter {
-        RecordingMockAdapter(
-            capabilities: .ptyTUIFallback,
-            terminalInputClassifier: ClaudeTerminalInputClassification.classify
-        )
-    }
-
     // MARK: Conversation
 
     @Test("start strips billing-poison env before PTY spawn")
@@ -125,17 +116,16 @@ struct AgentEngineCommandTests {
                                                 in: h.workspace)
         let codex = RoutingTestAdapter(
             id: .codex,
-            descriptor: .stdioJSONRPC,
-            sessions: [
-                SessionSummary(id: "thread-1",
-                               agentID: .codex,
-                               workspace: URL(fileURLWithPath: ref.path),
-                               title: "Codex thread",
-                               lastActivity: Date(),
-                               messageCount: 1),
-            ]
+            descriptor: .stdioJSONRPC
         )
         await AdapterRegistry.shared.register(codex)
+        try await h.engine.transcriptRepository.registerSession(
+            "thread-1",
+            namespace: AgentID.codex.rawValue,
+            agentID: .codex,
+            in: URL(fileURLWithPath: ref.path),
+            title: "Codex thread"
+        )
 
         try await h.engine.send(.openProject(path: ref.path, resumeSessionID: "thread-1"))
 
@@ -166,8 +156,8 @@ struct AgentEngineCommandTests {
         await h.shutdown()
     }
 
-    @Test("openProject warm-resumes handshake agents without respawning the process")
-    func openProjectWarmResumeSkipsRespawn() async throws {
+    @Test("openProject resumes on the live process without respawn")
+    func openProjectResumeUsesWarmProcess() async throws {
         let capture = CapturingTransportFactory()
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("codemixer-warm-\(UUID().uuidString)", isDirectory: true)
@@ -191,6 +181,36 @@ struct AgentEngineCommandTests {
         try await engine.send(.openProject(path: ref.path, resumeSessionID: "sess-B"))
         #expect(capture.descriptors.count == 1)
         #expect(adapter.resumeCalls == ["sess-B"])
+
+        await engine.shutdown(reason: .naturalExit)
+    }
+
+    @Test("openProject pool resume failure does not cold-respawn")
+    func openProjectPoolResumeFailureDoesNotRespawn() async throws {
+        let capture = CapturingTransportFactory()
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("codemixer-pool-resume-fail-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let fs = InMemoryFileSystem()
+        let env = FakeEnvironment(home: root)
+        let store = WorkspaceProjectsStore(environment: env, fileSystem: fs)
+        let adapter = NoResumeHandshakeAdapter()
+        await AdapterRegistry.shared.register(adapter)
+        let ref = try await store.createProject(name: "acp",
+                                                projectType: .cursorCLI,
+                                                in: root)
+
+        let seams = Seams.fake(environment: env, fileSystem: fs)
+        let engine = AgentEngine(seams: seams, transportFactory: capture.makeTransport)
+        await engine.bootstrap()
+        try await engine.start(adapter: adapter,
+                               workspace: URL(fileURLWithPath: ref.path))
+        #expect(capture.descriptors.count == 1)
+
+        await #expect(throws: AgentError.self) {
+            try await engine.send(.openProject(path: ref.path, resumeSessionID: "sess-B"))
+        }
+        #expect(capture.descriptors.count == 1)
 
         await engine.shutdown(reason: .naturalExit)
     }
@@ -479,6 +499,40 @@ struct AgentEngineCommandTests {
         await h.shutdown()
     }
 
+    @Test("adapter auto-allow permission is applied without surfacing to the UI")
+    func adapterAutoAllowPermission() async throws {
+        let transport = ScriptedTransport()
+        let toolName = "WorkspaceTrust"
+        let adapter = RecordingMockAdapter(
+            permissionDelivery: .writePTY(Data("1\r".utf8)),
+            autoAllowToolNames: [toolName]
+        )
+        let h = try await EngineHarness.make(adapter: adapter, transport: transport)
+        let prompt = PermissionPrompt(
+            toolName: toolName,
+            summary: "Trust this workspace?",
+            argumentsSummary: h.workspace.path,
+            requestedAt: Date()
+        )
+        h.adapter.emit(.permissionRequest(prompt: prompt))
+        try await Task.sleep(for: .milliseconds(80))
+
+        let events = await h.collectedSoFar()
+        #expect(events.contains {
+            if case .permissionAlreadyResolved(let id, let by) = $0 {
+                return id == prompt.id && by == "adapter-auto"
+            }
+            return false
+        })
+        #expect(!events.contains {
+            if case .permissionRequest = $0 { return true }
+            return false
+        })
+        #expect(await transport.writtenData() == [Data("1\r".utf8)])
+        #expect(h.adapter.recorded.contains(.permissionResponse(.allow, promptID: prompt.id)))
+        await h.shutdown()
+    }
+
     @Test("respondToPermission writePTY delivery propagates PTY write failure")
     func respondToPermissionWritePTYFailurePropagates() async throws {
         let transport = ScriptedTransport(writeSteps: [.fail(.writeFailed(errno: 5))])
@@ -702,255 +756,8 @@ struct AgentEngineCommandTests {
         }
         let json = try #require(String(data: payload, encoding: .utf8))
         #expect(json.contains("\"role\":\"action\""))
-        #expect(json.contains("Slash command: \\/help") || json.contains("Slash command: /help"))
-        await h.shutdown()
-    }
-
-    // MARK: Resume startup watchdog
-
-    @Test("resumed sessions without a live SessionStart reuse stalled-turn events")
-    func resumedSessionStartupStalls() async throws {
-        let clock = FakeClock()
-        let adapter = ptyTUIAdapter()
-        let h = try await EngineHarness.make(clock: clock,
-                                             adapter: adapter,
-                                             resumeSessionID: "old-session")
-
-        try await spinUntil(clock: clock, target: 1, timeout: .seconds(2))
-        clock.advance(by: ActivityTiming.resumedSessionStartupStallTimeout + .milliseconds(1))
-        try await Task.sleep(for: .milliseconds(40))
-
-        let events = await h.collectedSoFar()
-        #expect(events.contains {
-            if case .activityStateChanged(.probablyStuck) = $0 { return true }
-            return false
-        })
-        #expect(events.contains {
-            if case .noEventGap(_, let elapsed) = $0 {
-                return elapsed > ActivityTiming.probablyStuckThreshold
-            }
-            return false
-        })
-        await h.shutdown()
-    }
-
-    @Test("ready resumed prompt cancels the resume startup watchdog")
-    func readyResumePromptCancelsWatchdog() async throws {
-        let clock = FakeClock()
-        let transport = ScriptedTransport()
-        let adapter = ptyTUIAdapter()
-        let h = try await EngineHarness.make(clock: clock,
-                                             adapter: adapter,
-                                             resumeSessionID: "old-session",
-                                             transport: transport)
-
-        try await spinUntil(clock: clock, target: 1, timeout: .seconds(2))
-        await transport.emit("❯\u{00A0}\n? for shortcuts\n")
-        #expect(h.adapter.emit(.sessionStarted(sessionID: "old-session",
-                                              model: nil,
-                                              cwd: h.workspace)))
-        try await spinUntil(clock: clock, target: 2, timeout: .seconds(2))
-        clock.advance(by: ActivityTiming.resumePromptReadySettleDelay)
-        let sendTask = Task {
-            try await h.engine.send(.sendPrompt(text: "ready", attachments: []))
-        }
-        for _ in 0..<3 {
-            clock.advance(by: ActivityTiming.resumePromptReadyPollInterval)
-            try await Task.sleep(for: .milliseconds(40))
-        }
-        try await sendTask.value
-        #expect(await transport.writtenTexts() == ["ready"])
-        clock.advance(by: ActivityTiming.resumedSessionStartupStallTimeout + .milliseconds(1))
-        try await Task.sleep(for: .milliseconds(40))
-
-        let events = await h.collectedSoFar()
-        #expect(!events.contains {
-            if case .noEventGap(_, let elapsed) = $0 {
-                return elapsed > ActivityTiming.probablyStuckThreshold
-            }
-            return false
-        })
-        #expect(!events.contains {
-            if case .activityStateChanged(.probablyStuck) = $0 { return true }
-            return false
-        })
-        await h.shutdown()
-    }
-
-    @Test("resumed prompt waits for Claude's ready prompt before writing PTY bytes")
-    func resumedPromptWaitsForClaudeReadyPrompt() async throws {
-        let clock = FakeClock()
-        let transport = ScriptedTransport()
-        let adapter = ptyTUIAdapter()
-        let h = try await EngineHarness.make(clock: clock,
-                                             adapter: adapter,
-                                             resumeSessionID: "old-session",
-                                             transport: transport)
-
-        let sendTask = Task {
-            try await h.engine.send(.sendPrompt(text: "held", attachments: []))
-        }
-        defer { sendTask.cancel() }
-        try await spinUntil(clock: clock, target: 1, timeout: .seconds(2))
-        try await Task.sleep(for: .milliseconds(40))
-
-        #expect(await transport.writtenData().isEmpty)
-        #expect((await h.collectedSoFar()).contains {
-            if case .userTurn(_, let text) = $0 { return text == "held" }
-            return false
-        })
-
-        #expect(h.adapter.emit(.sessionStarted(sessionID: "old-session",
-                                              model: nil,
-                                              cwd: h.workspace)))
-        try await spinUntil(clock: clock, target: 2, timeout: .seconds(2))
-        try await Task.sleep(for: .milliseconds(40))
-        #expect(await transport.writtenData().isEmpty)
-
-        await transport.emit("❯\u{00A0}\n? for shortcuts\n")
-        clock.advance(by: ActivityTiming.resumePromptReadySettleDelay)
-        for _ in 0..<6 {
-            clock.advance(by: ActivityTiming.resumePromptReadyPollInterval)
-            try await Task.sleep(for: .milliseconds(20))
-        }
-
-        #expect(await transport.writtenTexts() == ["held"])
-        try await sendTask.value
-        await h.shutdown()
-    }
-
-    @Test("resumed prompt releases shortly after SessionStart when prompt scrape misses")
-    func resumedPromptReleasesAfterSessionStartFallback() async throws {
-        let clock = FakeClock()
-        let transport = ScriptedTransport()
-        let adapter = ptyTUIAdapter()
-        let h = try await EngineHarness.make(clock: clock,
-                                             adapter: adapter,
-                                             resumeSessionID: "old-session",
-                                             transport: transport)
-
-        let sendTask = Task {
-            try await h.engine.send(.sendPrompt(text: "released after hook", attachments: []))
-        }
-        defer { sendTask.cancel() }
-        try await spinUntil(clock: clock, target: 1, timeout: .seconds(2))
-
-        #expect(h.adapter.emit(.sessionStarted(sessionID: "old-session",
-                                              model: nil,
-                                              cwd: h.workspace)))
-        try await spinUntil(clock: clock, target: 2, timeout: .seconds(2))
-        #expect(await transport.writtenData().isEmpty)
-
-        clock.advance(by: ActivityTiming.resumedSessionPostSessionStartFallback + .milliseconds(1))
-        try await Task.sleep(for: .milliseconds(40))
-        try await sendTask.value
-
-        #expect(await transport.writtenTexts() == ["released after hook"])
-        await h.shutdown()
-    }
-
-    @Test("new TUI session first prompt waits for Claude's ready prompt")
-    func newTUISessionPromptWaitsForClaudeReadyPrompt() async throws {
-        let clock = FakeClock()
-        let transport = ScriptedTransport()
-        let adapter = ptyTUIAdapter()
-        let h = try await EngineHarness.make(clock: clock, adapter: adapter, transport: transport)
-
-        let sendTask = Task {
-            try await h.engine.send(.sendPrompt(text: "fresh held", attachments: []))
-        }
-        defer { sendTask.cancel() }
-        try await spinUntil(clock: clock, target: 1, timeout: .seconds(2))
-        try await Task.sleep(for: .milliseconds(40))
-
-        #expect(await transport.writtenData().isEmpty)
-
-        #expect(h.adapter.emit(.sessionStarted(sessionID: "new-session",
-                                              model: nil,
-                                              cwd: h.workspace)))
-        try await spinUntil(clock: clock, target: 2, timeout: .seconds(2))
-        await transport.emit("❯\u{00A0}\n? for shortcuts\n")
-        clock.advance(by: ActivityTiming.resumePromptReadySettleDelay)
-        for _ in 0..<6 {
-            clock.advance(by: ActivityTiming.resumePromptReadyPollInterval)
-            try await Task.sleep(for: .milliseconds(20))
-        }
-
-        #expect(await transport.writtenTexts() == ["fresh held"])
-        try await sendTask.value
-        await h.shutdown()
-    }
-
-    @Test("startup timeout does not release prompt while permission is pending")
-    func startupTimeoutDoesNotReleasePromptWhilePermissionPending() async throws {
-        let clock = FakeClock()
-        let transport = ScriptedTransport()
-        let adapter = ptyTUIAdapter()
-        let h = try await EngineHarness.make(clock: clock, adapter: adapter, transport: transport)
-
-        let sendTask = Task {
-            try await h.engine.send(.sendPrompt(text: "blocked by trust", attachments: []))
-        }
-        let prompt = PermissionPrompt(toolName: "WorkspaceTrust",
-                                      summary: "Trust this workspace?",
-                                      argumentsSummary: h.workspace.path,
-                                      requestedAt: clock.now())
-        #expect(h.adapter.emit(.permissionRequest(prompt: prompt)))
-
-        // Wait until the engine has ingested the permission into pending state
-        // before advancing the resume-startup watchdog — otherwise the stall
-        // handler can race ahead of the adapter event fan-out.
-        try await waitUntil(timeout: .seconds(2)) {
-            await h.collectedSoFar().contains {
-                if case .permissionRequest(let p) = $0 { return p.id == prompt.id }
-                return false
-            }
-        }
-        try await spinUntil(clock: clock, target: 1, timeout: .seconds(2))
-        clock.advance(by: ActivityTiming.resumeStartupStallTimeout + .milliseconds(1))
-        try await Task.sleep(for: .milliseconds(40))
-
-        #expect(await transport.writtenData().isEmpty)
-        sendTask.cancel()
-        await h.shutdown()
-    }
-
-    @Test("resumed prompt releases after resume startup timeout")
-    func resumedPromptReleasesAfterStartupTimeout() async throws {
-        let clock = FakeClock()
-        let transport = ScriptedTransport()
-        let adapter = ptyTUIAdapter()
-        let h = try await EngineHarness.make(clock: clock,
-                                             adapter: adapter,
-                                             resumeSessionID: "old-session",
-                                             transport: transport)
-
-        let sendTask = Task {
-            try await h.engine.send(.sendPrompt(text: "released", attachments: []))
-        }
-        defer { sendTask.cancel() }
-        try await spinUntil(clock: clock, target: 1, timeout: .seconds(2))
-        try await Task.sleep(for: .milliseconds(40))
-
-        #expect(await transport.writtenData().isEmpty)
-        clock.advance(by: ActivityTiming.resumedSessionStartupStallTimeout + .milliseconds(1))
-        try await Task.sleep(for: .milliseconds(40))
-        try await sendTask.value
-
-        #expect(await transport.writtenTexts() == ["released"])
-        let events = await h.collectedSoFar()
-        // A prompt already waiting on the gate must not get the empty-session
-        // stall affordance — that was lighting "Agent may be stalled" on send.
-        #expect(!events.contains {
-            if case .activityStateChanged(.probablyStuck) = $0 { return true }
-            return false
-        })
-        #expect(!events.contains {
-            if case .noEventGap(_, let elapsed) = $0 {
-                return elapsed > ActivityTiming.probablyStuckThreshold
-            }
-            return false
-        })
+        #expect(json.contains("Slash command"))
+        #expect(json.contains("\\/help") || json.contains("/help"))
         await h.shutdown()
     }
 
@@ -1032,318 +839,6 @@ struct AgentEngineCommandTests {
             "❯",
             "? for shortcuts"
         ]) == .ready)
-    }
-
-    // MARK: Startup submit recovery (missed-Enter safety net)
-
-    @Test("startup submit recovery re-sends Enter when first prompt stays unsubmitted")
-    func startupSubmitRecoveryResendsEnterWhenUnsubmitted() async throws {
-        let clock = FakeClock()
-        let transport = ScriptedTransport()
-        let adapter = ptyTUIAdapter()
-        let h = try await EngineHarness.make(clock: clock,
-                                             adapter: adapter,
-                                             resumeSessionID: "old-session",
-                                             transport: transport)
-
-        try await spinUntil(clock: clock, target: 1, timeout: .seconds(2))
-        await transport.emit("❯\u{00A0}\n? for shortcuts\n")
-        #expect(h.adapter.emit(.sessionStarted(sessionID: "old-session",
-                                              model: nil,
-                                              cwd: h.workspace)))
-        try await spinUntil(clock: clock, target: 2, timeout: .seconds(2))
-        clock.advance(by: ActivityTiming.resumePromptReadySettleDelay)
-        let sendTask = Task {
-            try await h.engine.send(.sendPrompt(text: "stuck", attachments: []))
-        }
-        for _ in 0..<3 {
-            clock.advance(by: ActivityTiming.resumePromptReadyPollInterval)
-            try await Task.sleep(for: .milliseconds(40))
-        }
-        try await sendTask.value
-        #expect(await transport.writtenTexts() == ["stuck"])
-
-        // Simulate the prompt still sitting in the input row (Enter swallowed).
-        await transport.emit("❯ stuck\n? for shortcuts\n")
-        try await Task.sleep(for: .milliseconds(40))
-        clock.advance(by: ActivityTiming.startupSubmitRecoveryDelay + .milliseconds(1))
-        try await waitUntil(timeout: .seconds(2)) {
-            await transport.writtenTexts() == ["stuck", "\r"]
-        }
-
-        #expect(await transport.writtenTexts() == ["stuck", "\r"])
-        await h.shutdown()
-    }
-
-    @Test("startup submit recovery sends no Enter when first prompt was accepted")
-    func startupSubmitRecoveryStaysQuietWhenAccepted() async throws {
-        let clock = FakeClock()
-        let transport = ScriptedTransport()
-        let adapter = ptyTUIAdapter()
-        let h = try await EngineHarness.make(clock: clock,
-                                             adapter: adapter,
-                                             resumeSessionID: "old-session",
-                                             transport: transport)
-
-        try await spinUntil(clock: clock, target: 1, timeout: .seconds(2))
-        await transport.emit("❯\u{00A0}\n? for shortcuts\n")
-        #expect(h.adapter.emit(.sessionStarted(sessionID: "old-session",
-                                              model: nil,
-                                              cwd: h.workspace)))
-        try await spinUntil(clock: clock, target: 2, timeout: .seconds(2))
-        clock.advance(by: ActivityTiming.resumePromptReadySettleDelay)
-        let sendTask = Task {
-            try await h.engine.send(.sendPrompt(text: "accepted", attachments: []))
-        }
-        for _ in 0..<3 {
-            clock.advance(by: ActivityTiming.resumePromptReadyPollInterval)
-            try await Task.sleep(for: .milliseconds(40))
-        }
-        try await sendTask.value
-        #expect(await transport.writtenTexts() == ["accepted"])
-
-        // Hook echo confirms Claude accepted the prompt, so recovery cancels.
-        #expect(h.adapter.emit(.userTurn(id: "old-session", text: "accepted")))
-        await transport.emit("❯\u{00A0}\n? for shortcuts\n")
-        try await Task.sleep(for: .milliseconds(40))
-        clock.advance(by: ActivityTiming.startupSubmitRecoveryDelay + .milliseconds(1))
-        try await Task.sleep(for: .milliseconds(80))
-
-        #expect(await transport.writtenTexts() == ["accepted"])
-        await h.shutdown()
-    }
-
-    @Test("startup submit recovery re-sends prompt when first write was swallowed")
-    func startupSubmitRecoveryResendsPromptWhenSwallowed() async throws {
-        let clock = FakeClock()
-        let transport = ScriptedTransport()
-        let adapter = ptyTUIAdapter()
-        let h = try await EngineHarness.make(clock: clock,
-                                             adapter: adapter,
-                                             resumeSessionID: "old-session",
-                                             transport: transport)
-
-        try await spinUntil(clock: clock, target: 1, timeout: .seconds(2))
-        await transport.emit("❯\u{00A0}\n? for shortcuts\n")
-        #expect(h.adapter.emit(.sessionStarted(sessionID: "old-session",
-                                              model: nil,
-                                              cwd: h.workspace)))
-        try await spinUntil(clock: clock, target: 2, timeout: .seconds(2))
-        clock.advance(by: ActivityTiming.resumePromptReadySettleDelay)
-        let sendTask = Task {
-            try await h.engine.send(.sendPrompt(text: "swallowed", attachments: []))
-        }
-        defer { sendTask.cancel() }
-        for _ in 0..<3 {
-            clock.advance(by: ActivityTiming.resumePromptReadyPollInterval)
-            try await Task.sleep(for: .milliseconds(40))
-        }
-        try await sendTask.value
-        #expect(await transport.writtenTexts() == ["swallowed"])
-
-        // Claude dropped the first write and returned to an empty prompt without
-        // emitting UserPromptSubmit / assistant activity.
-        await transport.emit("❯\u{00A0}\n? for shortcuts\n")
-        try await Task.sleep(for: .milliseconds(40))
-        clock.advance(by: ActivityTiming.startupSubmitRecoveryDelay + .milliseconds(1))
-        try await waitUntil(timeout: .seconds(2)) {
-            await transport.writtenTexts() == ["swallowed", "swallowed"]
-        }
-
-        #expect(await transport.writtenTexts() == ["swallowed", "swallowed"])
-        await h.shutdown()
-    }
-
-    @Test("startup submit recovery ignores historical userTurn replay")
-    func startupSubmitRecoveryIgnoresHistoricalUserTurns() async throws {
-        let clock = FakeClock()
-        let transport = ScriptedTransport()
-        let adapter = ptyTUIAdapter()
-        let h = try await EngineHarness.make(clock: clock,
-                                             adapter: adapter,
-                                             resumeSessionID: "old-session",
-                                             transport: transport)
-
-        try await spinUntil(clock: clock, target: 1, timeout: .seconds(2))
-        await transport.emit("❯\u{00A0}\n? for shortcuts\n")
-        #expect(h.adapter.emit(.sessionStarted(sessionID: "old-session",
-                                              model: nil,
-                                              cwd: h.workspace)))
-        try await spinUntil(clock: clock, target: 2, timeout: .seconds(2))
-        clock.advance(by: ActivityTiming.resumePromptReadySettleDelay)
-        let sendTask = Task {
-            try await h.engine.send(.sendPrompt(text: "live prompt", attachments: []))
-        }
-        defer { sendTask.cancel() }
-        for _ in 0..<3 {
-            clock.advance(by: ActivityTiming.resumePromptReadyPollInterval)
-            try await Task.sleep(for: .milliseconds(40))
-        }
-        try await sendTask.value
-        #expect(await transport.writtenTexts() == ["live prompt"])
-
-        // Late transcript replay must not cancel recovery for the live send,
-        // even if a historical turn has the same text as the prompt.
-        #expect(h.adapter.emit(.userTurn(id: "hist-1", text: "old message from history")))
-        #expect(h.adapter.emit(.userTurn(id: "hist-2", text: "live prompt")))
-        await transport.emit("❯\u{00A0}\n? for shortcuts\n")
-        try await Task.sleep(for: .milliseconds(40))
-        clock.advance(by: ActivityTiming.startupSubmitRecoveryDelay + .milliseconds(1))
-        try await waitUntil(timeout: .seconds(2)) {
-            await transport.writtenTexts() == ["live prompt", "live prompt"]
-        }
-
-        #expect(await transport.writtenTexts() == ["live prompt", "live prompt"])
-        await h.shutdown()
-    }
-
-    @Test("startup submit recovery rewrites the full prompt at most once")
-    func startupSubmitRecoveryRewritesFullPromptAtMostOnce() async throws {
-        let clock = FakeClock()
-        let transport = ScriptedTransport()
-        let adapter = ptyTUIAdapter()
-        let h = try await EngineHarness.make(clock: clock,
-                                             adapter: adapter,
-                                             resumeSessionID: "old-session",
-                                             transport: transport)
-
-        try await spinUntil(clock: clock, target: 1, timeout: .seconds(2))
-        await transport.emit("❯\u{00A0}\n? for shortcuts\n")
-        #expect(h.adapter.emit(.sessionStarted(sessionID: "old-session",
-                                              model: nil,
-                                              cwd: h.workspace)))
-        try await spinUntil(clock: clock, target: 2, timeout: .seconds(2))
-        clock.advance(by: ActivityTiming.resumePromptReadySettleDelay)
-        let sendTask = Task {
-            try await h.engine.send(.sendPrompt(text: "persist", attachments: []))
-        }
-        defer { sendTask.cancel() }
-        for _ in 0..<3 {
-            clock.advance(by: ActivityTiming.resumePromptReadyPollInterval)
-            try await Task.sleep(for: .milliseconds(40))
-        }
-        try await sendTask.value
-        #expect(await transport.writtenTexts() == ["persist"])
-
-        // First recovery tick may rewrite once when the empty ready row means
-        // the original write was swallowed.
-        await transport.emit("❯\u{00A0}\n? for shortcuts\n")
-        try await Task.sleep(for: .milliseconds(40))
-        clock.advance(by: ActivityTiming.startupSubmitRecoveryDelay + .milliseconds(1))
-        try await waitUntil(timeout: .seconds(2)) {
-            await transport.writtenTexts() == ["persist", "persist"]
-        }
-
-        // A later ready tick must NOT dump a third copy — that became a second
-        // Claude turn (duplicate prompt + duplicate reply) when the first
-        // write was merely late to accept.
-        await transport.emit("❯\u{00A0}\n? for shortcuts\n")
-        try await Task.sleep(for: .milliseconds(40))
-        clock.advance(by: ActivityTiming.startupSubmitRecoveryDelay + .milliseconds(1))
-        try await Task.sleep(for: .milliseconds(80))
-        #expect(await transport.writtenTexts() == ["persist", "persist"])
-
-        // Once Claude accepts (live UserPromptSubmit hook), recovery stops.
-        #expect(h.adapter.emit(.userTurn(id: "old-session", text: "persist")))
-        try await Task.sleep(for: .milliseconds(40))
-        clock.advance(by: ActivityTiming.startupSubmitRecoveryDelay + .milliseconds(1))
-        try await Task.sleep(for: .milliseconds(80))
-
-        #expect(await transport.writtenTexts() == ["persist", "persist"])
-        await h.shutdown()
-    }
-
-    @Test("startup submit recovery never full-resends after seeing unsubmitted text")
-    func startupSubmitRecoveryEnterOnlyAfterUnsubmitted() async throws {
-        let clock = FakeClock()
-        let transport = ScriptedTransport()
-        let adapter = ptyTUIAdapter()
-        let h = try await EngineHarness.make(clock: clock,
-                                             adapter: adapter,
-                                             resumeSessionID: "old-session",
-                                             transport: transport)
-
-        try await spinUntil(clock: clock, target: 1, timeout: .seconds(2))
-        await transport.emit("❯\u{00A0}\n? for shortcuts\n")
-        #expect(h.adapter.emit(.sessionStarted(sessionID: "old-session",
-                                              model: nil,
-                                              cwd: h.workspace)))
-        try await spinUntil(clock: clock, target: 2, timeout: .seconds(2))
-        clock.advance(by: ActivityTiming.resumePromptReadySettleDelay)
-        let sendTask = Task {
-            try await h.engine.send(.sendPrompt(text: "stuck", attachments: []))
-        }
-        defer { sendTask.cancel() }
-        for _ in 0..<3 {
-            clock.advance(by: ActivityTiming.resumePromptReadyPollInterval)
-            try await Task.sleep(for: .milliseconds(40))
-        }
-        try await sendTask.value
-        #expect(await transport.writtenTexts() == ["stuck"])
-
-        // Prompt is on-screen; recovery should only press Enter.
-        await transport.emit("❯ stuck\n? for shortcuts\n")
-        try await Task.sleep(for: .milliseconds(40))
-        clock.advance(by: ActivityTiming.startupSubmitRecoveryDelay + .milliseconds(1))
-        try await waitUntil(timeout: .seconds(2)) {
-            let texts = await transport.writtenTexts()
-            return texts.count >= 2 && texts.last == "\r"
-        }
-
-        // After Claude clears to ready (acceptance in flight, hook late), do
-        // not rewrite the whole prompt — that would start a second turn.
-        await transport.emit("❯\u{00A0}\n? for shortcuts\n")
-        try await Task.sleep(for: .milliseconds(40))
-        clock.advance(by: ActivityTiming.startupSubmitRecoveryDelay + .milliseconds(1))
-        try await Task.sleep(for: .milliseconds(80))
-        let texts = await transport.writtenTexts()
-        #expect(texts.filter { $0 == "stuck" }.count == 1)
-        await h.shutdown()
-    }
-
-    @Test("startup submit recovery retries while TUI is still painting")
-    func startupSubmitRecoveryRetriesWhilePainting() async throws {
-        let clock = FakeClock()
-        let transport = ScriptedTransport()
-        let adapter = ptyTUIAdapter()
-        let h = try await EngineHarness.make(clock: clock,
-                                             adapter: adapter,
-                                             resumeSessionID: "old-session",
-                                             transport: transport)
-
-        try await spinUntil(clock: clock, target: 1, timeout: .seconds(2))
-        #expect(h.adapter.emit(.sessionStarted(sessionID: "old-session",
-                                              model: nil,
-                                              cwd: h.workspace)))
-        try await spinUntil(clock: clock, target: 2, timeout: .seconds(2))
-
-        let sendTask = Task {
-            try await h.engine.send(.sendPrompt(text: "paint wait", attachments: []))
-        }
-        defer { sendTask.cancel() }
-        // Release via post-SessionStart fallback — no ready-prompt scrape yet.
-        clock.advance(by: ActivityTiming.resumedSessionPostSessionStartFallback + .milliseconds(1))
-        try await Task.sleep(for: .milliseconds(40))
-        try await sendTask.value
-        #expect(await transport.writtenTexts() == ["paint wait"])
-
-        // First recovery tick sees neither ready nor unsubmitted — keep waiting.
-        await transport.emit("Loading history…\n")
-        try await Task.sleep(for: .milliseconds(40))
-        clock.advance(by: ActivityTiming.startupSubmitRecoveryDelay + .milliseconds(1))
-        try await Task.sleep(for: .milliseconds(40))
-        #expect(await transport.writtenTexts() == ["paint wait"])
-
-        // Later the empty prompt appears; recovery should still resend.
-        await transport.emit("❯\u{00A0}\n? for shortcuts\n")
-        try await Task.sleep(for: .milliseconds(40))
-        clock.advance(by: ActivityTiming.startupSubmitRecoveryDelay + .milliseconds(1))
-        try await waitUntil(timeout: .seconds(2)) {
-            await transport.writtenTexts() == ["paint wait", "paint wait"]
-        }
-
-        #expect(await transport.writtenTexts() == ["paint wait", "paint wait"])
-        await h.shutdown()
     }
 
     // MARK: Permission auto-deny timeout
@@ -1619,6 +1114,12 @@ struct EngineHarness {
         try await engine.start(adapter: adapter,
                                workspace: workspace,
                                resumeSessionID: resumeSessionID)
+        #expect(adapter.emit(.sessionStarted(
+            sessionID: resumeSessionID ?? "test-session",
+            model: nil,
+            cwd: workspace
+        )))
+        try await Task.sleep(for: .milliseconds(20))
         let sub = await engine.bus.subscribe()
         let collector = EventCollector()
         Task { await collector.ingest(sub.stream) }
@@ -1661,19 +1162,14 @@ final class RoutingTestAdapter: AgentAdapter, @unchecked Sendable {
     let id: AgentID
     let displayName: String
     let iconSymbol = "ant"
-    let capabilities: AgentCapabilities
+    let capabilities: AgentCapabilities = [.resumableSessions]
     let transportDescriptor: AgentTransportDescriptor
     let slashCommandCatalog: [SlashCommand] = []
-    private let sessions: [SessionSummary]
 
-    init(id: AgentID,
-         descriptor: AgentTransportDescriptor,
-         sessions: [SessionSummary] = []) {
+    init(id: AgentID, descriptor: AgentTransportDescriptor) {
         self.id = id
         self.displayName = id.rawValue
         self.transportDescriptor = descriptor
-        self.sessions = sessions
-        self.capabilities = sessions.isEmpty ? [] : [.resumableSessions]
     }
 
     func locateBinary(env: ResolvedEnvironment) async throws -> URL {
@@ -1703,10 +1199,6 @@ final class RoutingTestAdapter: AgentAdapter, @unchecked Sendable {
 
     func enumerateProjectCommands(workspace: URL) async -> [SlashCommand] { [] }
 
-    func listResumableSessions(workspace: URL) async -> [SessionSummary] {
-        sessions.filter { $0.workspace.path == workspace.path }
-    }
-
     func resumeArgvAddition(sessionID: String) -> [String] { [] }
 }
 
@@ -1715,7 +1207,7 @@ final class WarmHandshakeAdapter: AgentAdapter, @unchecked Sendable {
     let id: AgentID = .cursorCLI
     let displayName = "Warm Handshake"
     let iconSymbol = "ant"
-    let capabilities: AgentCapabilities = [.sessionHandshakeGate, .resumableSessions]
+    let capabilities: AgentCapabilities = [.resumableSessions]
     let transportDescriptor: AgentTransportDescriptor = .agentClientProtocol
     let slashCommandCatalog: [SlashCommand] = []
     private let lock = NSLock()
@@ -1730,6 +1222,14 @@ final class WarmHandshakeAdapter: AgentAdapter, @unchecked Sendable {
     }
     func encodeUserPrompt(_ text: String) -> Data { Data(text.utf8) }
     func cancelSequence() -> Data { Data() }
+    func encodeCommand(_ command: AgentCommand) -> Data? {
+        switch command {
+        case .newSession:
+            return Data("session/new".utf8)
+        default:
+            return nil
+        }
+    }
     func encodeResumeSession(sessionID: String) -> Data? {
         lock.lock(); resumeCalls.append(sessionID); lock.unlock()
         return Data("session/load:\(sessionID)".utf8)
@@ -1739,7 +1239,33 @@ final class WarmHandshakeAdapter: AgentAdapter, @unchecked Sendable {
         .writePTY(Data())
     }
     func enumerateProjectCommands(workspace: URL) async -> [SlashCommand] { [] }
-    func listResumableSessions(workspace: URL) async -> [SessionSummary] { [] }
+    func resumeArgvAddition(sessionID: String) -> [String] { [] }
+}
+
+/// Cursor-shaped adapter that cannot encode in-process resume (activate must fail).
+final class NoResumeHandshakeAdapter: AgentAdapter, @unchecked Sendable {
+    let id: AgentID = .cursorCLI
+    let displayName = "No Resume Handshake"
+    let iconSymbol = "ant"
+    let capabilities: AgentCapabilities = [.resumableSessions]
+    let transportDescriptor: AgentTransportDescriptor = .agentClientProtocol
+    let slashCommandCatalog: [SlashCommand] = []
+
+    func locateBinary(env: ResolvedEnvironment) async throws -> URL { SystemPaths.cat }
+    func defaultEnvOverrides() -> [String: String] { [:] }
+    func buildLaunchArgv(context: LaunchContext) -> [String] { ["cat"] }
+    func authStatus(env: ResolvedEnvironment) async -> AuthStatus { .authenticated(account: nil) }
+    func makeEventStream(inputs: AgentInputs) -> AsyncStream<AgentEvent> {
+        AsyncStream { $0.finish() }
+    }
+    func encodeUserPrompt(_ text: String) -> Data { Data(text.utf8) }
+    func cancelSequence() -> Data { Data() }
+    func encodeResumeSession(sessionID: String) -> Data? { nil }
+    func encodePermissionResponse(_ decision: PermissionDecision,
+                                  for prompt: PermissionPrompt) -> PermissionResponseDelivery {
+        .writePTY(Data())
+    }
+    func enumerateProjectCommands(workspace: URL) async -> [SlashCommand] { [] }
     func resumeArgvAddition(sessionID: String) -> [String] { [] }
 }
 

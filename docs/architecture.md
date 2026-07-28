@@ -122,7 +122,7 @@ The engine must run identically inside the GUI app and inside a no-SwiftUI daemo
 Adding `Cursor CLI` / `Gemini CLI` / `OpenCode` / `Copilot` must be a sibling target conforming to `AgentAdapter` — no edits to `AgentCore`, `AgentUI`, or `AgentProtocol`. This forces:
 
 - All Claude-specific knowledge is quarantined in `AgenticCLIs/ClaudeCode` (`ClaudeCode` target).
-- `AgentAdapter` is a complete protocol covering binary discovery, transport descriptor, env, auth, event sourcing, bootstrap bytes, user input/command encoding, permission responses, slash commands, and session listing.
+- `AgentAdapter` is a complete protocol covering binary discovery, transport descriptor, env, auth, event sourcing, bootstrap bytes, user input/command encoding, permission responses, slash commands, and one-shot vendor catalog import.
 - `AgentCapabilities` is an OptionSet that lets adapters declare which signal sources they use.
 
 ### 3.6 Remote-controllable
@@ -405,26 +405,30 @@ public enum AgentEvent: Sendable {
     case stopped(reason: StopReason)
     case error(AgentError)
     case agentDashboard(url: URL, title: String?)
-    case sessionIndexChanged(projectPath: URL)
     case sessionAttentionChanged(sessionID: String, title: String, needsAttention: Bool)
+    case sessionHistoryRestored(sessionID: String)
+    case sessionPromptReady(sessionID: String)
+    case sessionsListed(projectPath: URL, sessions: [SessionSummary])
+    case historyImportProgress(projectPath: URL, completed: Int, total: Int)
+    case historyImportFinished(projectPath: URL, imported: Int, failed: Int)
     case sessionPhaseChanged(sessionID: String, phase: SessionPhase)
     // Out-of-band (also on the bus): speakBubbleRequested, fileReverted,
     // prefsChanged, appearancePrefChanged, snapshotReady, clientAction
 }
 ```
 
-Streaming `session/update` chunks that carry a foreign `sessionId` (not the foreground session) are dropped. Background `session/request_permission` prompts are parked per-session and re-emitted as `permissionRequest` after that session’s `session/load`.
+Streaming `session/update` chunks that carry a foreign `sessionId` are routed to `AgentInputs.recordBackgroundSessionEvents` and persisted without entering the foreground UI. Background `session/request_permission` prompts are parked per-session and re-emitted as `permissionRequest` after that session’s `session/load`.
 
 ### Categorical roles
 
 | Role | Cases |
 | --- | --- |
-| **Session lifecycle** | `sessionStarted`, `engineRestarted`, `stopped`, `error` |
+| **Session lifecycle** | `sessionStarted`, `sessionHistoryRestored`, `sessionPromptReady`, `sessionsListed`, `historyImportProgress`, `historyImportFinished`, `engineRestarted`, `stopped`, `error` |
 | **Conversation** | `userTurn`, `textDelta`, `assistantText`, `thinkingChunk`, `thinkingComplete`, `clientAction` |
 | **Tool execution** | `toolStart`, `toolProgress`, `toolEnd` |
 | **Permissions** | `permissionRequest`, `permissionAlreadyResolved` (optional `PermissionPrompt.options` for custom ACP buttons); parked until load when for a background session |
 | **Activity & ambient** | `statusPhraseChanged`, `activityStateChanged`, `noEventGap`, `authURL` (legacy wire; adapters use `authenticationRequired` errors for setup), `bell`, `fileTouched`, `usage` |
-| **Custom ACP surfaces** | `agentDashboard(url:title:)` (WebView URL + optional title from `_meta`), `sessionIndexChanged`, `sessionAttentionChanged`, `sessionPhaseChanged` (file-level pipeline phase — see §35) |
+| **Custom ACP surfaces** | `agentDashboard(url:title:)` (WebView URL + optional title from `_meta`), `sessionAttentionChanged`, `sessionPhaseChanged` (file-level pipeline phase — see §35) |
 | **Out-of-band** | `speakBubbleRequested`, `fileReverted`, `prefsChanged`, `appearancePrefChanged`, `snapshotReady` |
 
 A consumer that knows nothing else can render a complete conversation by folding these events. New event cases require: (a) wire DTO in `AgentEventWire`, (b) `WireCodec` round-trip, (c) `RemoteParityTests` coverage, (d) a UI consumer or an explicit decision that none is wanted.
@@ -436,7 +440,7 @@ Agent-affecting UI intents that are **not** user prompts (composer mode changes,
 - Appear as centered system rows in the live conversation pane and in Codemixer conversation snapshot exports (`role: "action"`).
 - Fan out on the bus to remote clients in the **current process**.
 - Are **never** written into agent-owned stores (Claude JSONL, Codex threads, Cursor sessions).
-- Are **not** restored when a session is reopened/resumed from the agent's transcript — that is a known limitation until Codemixer grows a durable conversation log of its own.
+- Are persisted in Codemixer's project-local `SessionTranscript` and restored with the rest of the visible conversation.
 
 Do not inject fake `.userTurn`s or PTY prompt text to make these visible; adapters keep encoding the underlying commands as today.
 
@@ -616,9 +620,6 @@ public protocol AgentAdapter: Sendable {
     // 5. Event ingestion
     func makeEventStream(inputs: AgentInputs) -> AsyncStream<AgentEvent>
 
-    // 5b. Optional TUI input-row classification (`.ptyTUIFallback` adapters)
-    func classifyTerminalInput(rows: [String]) -> TerminalInputState
-
     // 6. Sending input
     func encodeUserPrompt(_ text: String) -> Data
     func cancelSequence() -> Data
@@ -642,8 +643,13 @@ public protocol AgentAdapter: Sendable {
     // 10. Agent modes (composer bottom-bar mode dropdown)
     func availableAgentModes() -> [AgentModeOption]
 
-    // 11. Resume / session listing
-    func listResumableSessions(workspace: URL) async -> [SessionSummary]
+    // 11. Project-local history and vendor import
+    var historyNamespace: String { get }
+    func importSessionCatalog(
+        workspace: URL,
+        env: ResolvedEnvironment,
+        progress: @escaping @Sendable (Int, Int) async -> Void
+    ) async throws -> [ImportedSession]
     func resumeArgvAddition(sessionID: String) -> [String]
 }
 ```
@@ -678,7 +684,10 @@ id). Custom projects contribute no shipping catalog.
 
 Bootstrap sets `isPreparingWorkspace` while create/open awaits catalog warm;
 `RootView` keeps the loading spinner up until that flag clears. Project create /
-add is `async` and blocks the New Project sheet until `ensureModels` succeeds.
+add registers the project, refreshes the navigator list, and opens it without
+waiting on a live model probe — probes are bounded by
+`ModelCatalogTiming.probeTimeout` inside `loadModels` so a hung CLI cannot
+leave the New Project sheet on “Creating…”.
 
 ### Agent modes are provider-owned, not UI-hardcoded
 
@@ -715,7 +724,6 @@ public struct AgentCapabilities: OptionSet, Sendable {
     public static let ptyTUIFallback       = AgentCapabilities(rawValue: 1 << 3)
     public static let permissionPrompts    = AgentCapabilities(rawValue: 1 << 5)
     public static let resumableSessions    = AgentCapabilities(rawValue: 1 << 6)
-    public static let sessionHandshakeGate = AgentCapabilities(rawValue: 1 << 7)
 }
 ```
 
@@ -725,13 +733,13 @@ Transport is deliberately not a capability. The engine reads
 
 - `.hooksOverUDS` → start `HookServer`, plumb the socket into `AgentInputs`.
 - `.transcriptJSONL` → adapter is responsible for tailing; engine just provides `sessionID` hot stream.
-- `.ptyTUIFallback` → adapter consumes `inputs.terminal` snapshots and may
-  override `classifyTerminalInput(rows:)` so the engine can gate resume writes /
-  recover swallowed first prompts without vendor glyphs in `AgentCore`.
+- `.ptyTUIFallback` → adapter consumes `inputs.terminal` snapshots for
+  vendor-specific auth, status, and file-change fallbacks. Prompt readiness is
+  event-driven through the adapter's honest `sessionStarted` event.
 - `.permissionPrompts` → `PermissionResponseDelivery` is honored.
 - `.resumableSessions` → enables the *Sessions* picker.
-- `.sessionHandshakeGate` → UI keeps the composer locked until a non-empty `sessionStarted` (ACP initialize/auth/session-new); same-project New Chat prefers `.newSession` over respawning. Opening a saved ACP/Cursor session on an already-live process warm-loads via `session/load` (no binary respawn). Conversation history prefers ACP `session/load` wire replay; when the agent streams nothing (Cursor today), Codemixer restores from a local turn cache in `ACPSessionIndex`. Cursor does not implement `session/list`.
-- **Sticky agent process pool** — `AgentEngine` keeps one live CLI per `(projectPath, agentID, AgentInstanceIdentity)` (`.shared` or `.dedicated(UUID)`). Switching projects parks the prior process instead of killing it; returning activates the parked slot. Claude, Codex, and ACP all warm-switch sessions in-process on that slot (`/resume` + `/clear`, `thread/resume` / `thread/start`, `session/load`). Advanced → “Launch new agent instance” sets `preferFreshAgentProcess` so opens replace the project’s slot. `closeSession` tears down the active slot only; `shutdown()` clears the whole pool.
+- **Session activation** → `AgentEngine` restores `SessionTranscript` first and publishes `sessionHistoryRestored`; the composer remains locked until the adapter's real `sessionStarted` has been observed and the engine publishes `sessionPromptReady`. ACP history chunks received during `session/load` are discarded because the project-local transcript is authoritative.
+- **Parked agent process pool** — `AgentEngine` keeps one live CLI per `(projectPath, agentID, AgentInstanceIdentity)` (`.shared` or `.dedicated(UUID)`) so a background project can continue emitting durable events while another project is selected. First open cold-starts into the pool (optional bootstrap session bind when no slot exists yet). **Session resume is pool-only for every adapter**: if a live slot already exists, `openProject` activates it and switches via `encodeResumeSession` (`session/load` / `thread/resume` / `/resume`) — it never tears down and cold-spawns to resume. **New Chat is also pool-only when a slot exists**: in-process `.newSession` (`session/new` / thread start / `/clear`); cold spawn only if the project has no live agent yet. Returning to a parked project activates the live slot. Advanced → “Launch new agent instance” uses a dedicated identity (`preferFreshAgentProcess`). `closeSession` tears down the active slot only; `shutdown()` clears the whole pool.
 
 ### `PermissionResponseDelivery`
 
@@ -852,21 +860,20 @@ shutdown(reason:)
 
 ```swift
 public actor AgentEngine: AgentEngineCommandPort {
-    public let bus: MulticastEventBus
+    public nonisolated let bus: MulticastEventBus
     private var adapter: (any AgentAdapter)?
     private var state: EngineState
-    private var transport: (any AgentTransport)?
-    private var hookServer: HookServer?
-    private var fsWatcher: FSEventsWatcher?
-    private var fsWatcherTask: Task<Void, Never>?
+    private var runtimes: [AgentRuntimeKey: AgentRuntime]
+    private var activeKey: AgentRuntimeKey?
+    private var workspace: URL?
     private var currentSessionID: String?
-    private var turnState: TurnState
-    private var promptAcceptance: PromptAcceptanceState
+    private var sessionActivationState: SessionActivationState
     private var sessionTeardownState: SessionTeardownState
-    private var resumeStartupState: ResumeStartupState
-    private var startupSubmitRecoveryState: StartupSubmitRecoveryState
+    private let transcriptRepository: SessionTranscriptRepository
+    private var transcript: [SnapshotService.SnapshotMessage]
+    private var changedFiles: [ChangedFile]
+    private var pendingTranscriptEvents: [AgentEvent]
     private var pendingPermissions: [UUID: PermissionPrompt]
-    private var lastUserBubbleID: UUID?
     private var heartbeat: HeartbeatActivityMonitor?
     private var phraseResolver: StatusPhraseResolver
 }
@@ -877,9 +884,12 @@ public actor AgentEngine: AgentEngineCommandPort {
 - Render anything.
 - Speak Claude's hook JSON schema.
 - Decide auto-approval policy (that's a higher service).
-- Maintain conversation history (clients fold the bus stream themselves).
+- Read vendor history during ordinary listing or session activation. Adapters
+  perform a one-shot import only when an existing project is added.
 
-The engine is small on purpose. Most logic lives in adapters and clients.
+The engine owns orchestration, project-local transcript durability, and
+activation ordering. Vendor protocol logic stays in adapters; visual reduction
+stays in clients.
 
 ---
 
@@ -1219,29 +1229,46 @@ EngineViewModel → DiffPanelView
 
 ## 20. Persistence model
 
-Codemixer persists almost nothing itself. The agent writes JSONL transcripts; the user's `.git` directory carries diff state; the system Keychain carries pairing secrets. The small remainder lives in:
+Codemixer owns a project-local semantic transcript for every session. Agent-owned stores are import sources and adapter-state resume mechanisms, never the UI's live history source. The user's `.git` directory carries diff state; the system Keychain carries pairing secrets. Persistent state lives in:
 
 ```
 ~/Library/Application Support/com.codecave.Codemixer/
 ├── sessions.json        # recent projects (SessionStore)
 ├── workspaces.json      # Workspace→Projects navigator model
 ├── prefs.json           # appearance + auto-approval rules (PrefsStore)
-├── acp-sessions.json    # ACP session index + turn cache (Cursor / bare ACP)
 └── (Keychain)           # paired-device token hashes, TLS P12 password
 <project>/.codemixer/
 ├── project.json         # project type + display name
-├── acp/<customAgentID>/ # Custom ACP only: sessions-index.json + transcripts/*.jsonl
+├── history/
+│   ├── index.json       # derived, store-owned session catalog
+│   ├── .gitignore       # history is local workspace state
+│   └── <namespace>/<session>.jsonl[.lock]
+├── acp/<customAgentID>/ # retired Custom ACP format; one-shot import source only
 └── workspace-*.json     # per-adapter model catalogs (when used as workspace root)
 ~/Library/Caches/Codemixer/uploads/<sessionID>/<uuid>   # attachment staging
 ~/Library/LaunchAgents/com.codecave.Codemixer.daemon.plist  # if LaunchAgent installed
 ```
 
-**Custom ACP exception:** project-local Codemixer-owned JSONL under
-`.codemixer/acp/<id>/transcripts/` dual-writes the same turn cache used for
-empty `session/load` replay. Custom CLIs often have no vendor transcript; this
-is intentional and does not replace ACP `session/load` / `session/resume` as
-the agent-state resume path. Cursor continues to use app-support
-`acp-sessions.json` only.
+`SessionTranscript` is the domain aggregate: ordered user, assistant, thinking,
+tool, phase, file, and client-action blocks plus the session's changed files.
+`SessionTranscriptRepository` is the sole mutation/listing authority. It maps
+durable `AgentEvent`s to `TranscriptMutation`s, batches non-terminal stream
+updates, immediately flushes boundaries, owns per-journal writer locks, and
+rebuilds a corrupt `index.json` from journals. `ProjectSessionTranscriptStore`
+is a private stateless JSONL/file-system implementation.
+
+When an existing project is added, the selected adapter runs
+`importSessionCatalog` once. Claude reads vendor JSONL, Cursor reads
+`~/.cursor/chats/<md5(path)>/<chat>/store.db` metadata and visible message
+leaves through the read-only wrapper in `Cursor/External/SQLiteReader.swift`,
+Codex reads rollout JSONL under `CODEX_HOME`, and Custom ACP reads its retired
+project-local session catalog. The repository folds each imported transcript
+with identity indexes, appends one journal batch per session, and commits the
+derived catalog once after the complete import; large catalogs do not rewrite
+the growing index for every event or session. Imported sessions are then
+indistinguishable from sessions created in Codemixer. No periodic
+vendor rescan occurs; sessions created outside Codemixer after add are
+intentionally invisible.
 ### Stores
 
 | Store | File | On decode failure |
@@ -1250,6 +1277,7 @@ the agent-state resume path. Cursor continues to use app-support
 | `SessionStore` | `sessions.json` | Empty recents list; record `sessionsQuietReset` |
 | `WorkspaceProjectsStore` | `workspaces.json` | If `schemaVersion` > supported: keep in-memory defaults + `workspacesSchemaTooNew`; otherwise quiet-reset + `workspacesQuietReset` |
 | `PairedDeviceStore` | Keychain | Quiet-reset paired devices + `pairedDevicesQuietReset` |
+| `ProjectSessionTranscriptStore` | `<project>/.codemixer/history/` | Ignore an incomplete final JSONL record; reject malformed interior records; rebuild a corrupt derived index from journals |
 
 There is **no** `PrefsMigrator` or forward migration pipeline. Unreadable or unsupported files reset to defaults **silently** — no toast, no blocking dialog. Recovery actions are journaled in `SilentDiagnostics` (see below).
 
@@ -1286,13 +1314,16 @@ public actor WorkspaceProjectsStore {
 }
 ```
 
-It contains **no** Claude/terminal specifics — sessions are not modelled here; they flow through `AgentAdapter.listResumableSessions`, so the navigator works for Claude, Codex, and custom ACP (local `ACPSessionIndex`) alike. Adapters without `.resumableSessions` show *New Chat only*. Navigation actions in `EngineViewModel` (`newChat`, `openSession`) route through the wire `AgentCommand`s `.newSession` / `.openProject`, so the GUI, remote clients, and CLI all reach the same behavior. Sidebar visibility is GUI chrome persisted through `AppearancePrefs` (never on the wire, never `UserDefaults`).
+It contains **no** Claude/terminal specifics. Session listing comes from `SessionTranscriptRepository` via `AgentCommand.listSessions` and `AgentEvent.sessionsListed`; adapters are consulted only for the one-shot add-existing-project import and for new live work. Adapters without `.resumableSessions` show *New Chat only*. Navigation actions in `EngineViewModel` (`newChat`, `openSession`) route through the wire `AgentCommand`s `.newSession` / `.openProject`, so the GUI, remote clients, and CLI all reach the same behavior. Sidebar visibility is GUI chrome persisted through `AppearancePrefs` (never on the wire, never `UserDefaults`).
 
 `ProjectType` itself never resolves an adapter — that's `ProjectAgentRouter.resolveAdapter(projectType:sessionAgentID:preferredForNewChat:)`, which special-cases `.custom` (routes through `CustomAgentAdapterFactories`) and otherwise looks up `AgentID` and asks `AdapterRegistry`. Pinned single-agent types (`.claudeCode`, `.codex`, `.cursorCLI`) don't hand-maintain a second `AgentID` switch; they resolve through `SupportedBuiltInAgent.shipping` (`Core/AgentCore/Persistence/SupportedBuiltInAgent.swift`), the same catalog that drives the New/Configure Project pickers. Adding a shipping CLI means extending that one catalog, not every switch that used to enumerate agents by hand.
 
 ### Atomic writes
 
-Every persisted file uses the temp + `rename(2)` pattern in `SystemFileSystem.writeAtomically`. Power-loss or crash never leaves a half-written file.
+Snapshot and index files use the temp + `rename(2)` pattern in
+`SystemFileSystem.writeAtomically`. Transcript journals append newline-delimited
+records; recovery ignores an incomplete final record but rejects corruption in
+the committed prefix.
 
 ### `SilentDiagnostics` — quiet recovery journal
 
@@ -1443,10 +1474,8 @@ A native Mac app that spawns child processes, opens TTYs, watches arbitrary file
 
 ### What we never do
 
-- Store user prompts on disk outside the JSONL transcripts the agent itself writes
-  (**exception:** Custom ACP project store under `<project>/.codemixer/acp/<id>/`,
-  and the Cursor/ACP local turn cache in `acp-sessions.json` / project index,
-  for empty `session/load` replay — see §20).
+- Store user prompts outside the agent's own transcript or Codemixer's
+  gitignored `<project>/.codemixer/history/` journals.
 - Send any telemetry of any kind.
 - Embed an analytics SDK.
 - Use third-party crash reporters.
@@ -1609,6 +1638,7 @@ Architecture survives review through **local scripts** and the pre-merge checkli
 | `scripts/check-a11y.swift` | Icon-only controls have accessibility metadata. |
 | `scripts/regen-coverage-manifest.swift --check` | Public API surface matches `CoverageManifest.swift`. |
 | `scripts/check-package-layout.swift` | Test suite layout matches `Package.swift`. |
+| `scripts/check-no-personal-paths.swift` | No macOS home-directory paths in sources or docs. |
 | `scripts/check-test-runtime.swift` | Per-suite runtime budgets (pipe `swift test` output). |
 | Pre-merge review checklist | Human gate in `code-style.md` §26 and `docs/reference/templates/pr.template.md`. |
 
@@ -1618,6 +1648,7 @@ Architecture survives review through **local scripts** and the pre-merge checkli
 swift build && swift test --no-parallel
 scripts/check-package-layout.swift
 scripts/check-no-swiftui-imports.swift
+scripts/check-no-personal-paths.swift
 scripts/check-direct-framework-calls.swift
 scripts/check-a11y.swift
 scripts/regen-coverage-manifest.swift --check
@@ -1641,17 +1672,19 @@ Three canonical walkthroughs. Reading them in order is the fastest way to intern
     loopback `RemoteEngineClient` that wraps a WSS connection — either way,
     the same AgentEngineCommandPort.)
 4. AgentEngine actor receives the command:
+     - guard sessionActivationState is `.ready`
      - lastUserBubbleID = seams.random.uuid()
      - bytes = adapter.encodeUserPrompt("fix the test failure")  // for Claude: text + "\r"
+     - transcriptRepository.record(.userTurn(...))
      - await bus.publish(.userTurn(id: ..., text: ...))
-     - turnState = .active(id: lastUserBubbleID)
-     - promptAcceptance = .awaiting(prompt: ...)
+     - currentTurnID = lastUserBubbleID
      - heartbeat.startTurn(...)
-     - await pty.write(bytes)
+     - await transport.write(bytes)
 5. PTYHost writes bytes to the master FD.
 6. The kernel delivers them to Claude's slave PTY; Ink TUI displays them.
 7. Claude begins processing, emits "user_prompt_submit" hook to our UDS.
-8. ClaudeAdapter decodes the hook envelope, ignores it (already published).
+8. ClaudeAdapter decodes the hook echo; transcript aggregation and UI
+   reconciliation deduplicate the already-published user turn.
 9. Claude streams the assistant's thinking, then chat blocks, into its
    transcript JSONL. ClaudeTranscriptTailer reads new lines.
 10. Tailer emits AgentEvent.thinkingChunk(...) per delta.

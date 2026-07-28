@@ -1,5 +1,6 @@
 import UniformTypeIdentifiers
 import AgentUI
+import AgentCore
 
 extension Bootstrap {
     // MARK: - Session export
@@ -8,14 +9,17 @@ extension Bootstrap {
 
     func exportSession(as format: ExportFormat) {
         guard let model = viewModel else { return }
-        let data = buildExport(model.messages, format: format)
-        let (ext, type) = exportExtension(format)
-        guard let url = DesktopActions.savePanel(nameField: "session.\(ext)",
-                                                 allowedTypes: [type]) else { return }
-        try? data.write(to: url)
+        Task { @MainActor in
+            guard let snapshot = try? await model.fetchConversationSnapshot() else { return }
+            let data = buildExport(snapshot.messages, format: format)
+            let (ext, type) = exportExtension(format)
+            guard let url = DesktopActions.savePanel(nameField: "session.\(ext)",
+                                                     allowedTypes: [type]) else { return }
+            try? data.write(to: url)
+        }
     }
 
-    private func buildExport(_ messages: [EngineViewModel.Message],
+    private func buildExport(_ messages: [SnapshotService.SnapshotMessage],
                              format: ExportFormat) -> Data {
         switch format {
         case .markdown:

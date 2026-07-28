@@ -72,6 +72,7 @@ let requiredDirectories = [
     "src/AgenticCLIs/AgentClientProtocol/digital-twin/Twin",
     "src/AgenticCLIs/ACPCLIs/Cursor/Adapter",
     "src/AgenticCLIs/ACPCLIs/Cursor/Common",
+    "src/AgenticCLIs/ACPCLIs/Cursor/External",
     "src/AgenticCLIs/ACPCLIs/Custom/Adapter",
     "src/AgenticCLIs/ACPCLIs/Custom/Common",
     "tests/AgenticCLIs/ClaudeCode",

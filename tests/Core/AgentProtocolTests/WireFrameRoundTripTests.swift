@@ -129,7 +129,8 @@ struct WireFrameRoundTripTests {
     func wireVersionStable() {
         #expect(WireVersion.v1.rawValue == 1)
         #expect(WireVersion.v2.rawValue == 2)
-        #expect(WireVersion.current.rawValue == WireVersion.v2.rawValue)
+        #expect(WireVersion.v3.rawValue == 3)
+        #expect(WireVersion.current == .v3)
     }
 
     /// Round-trip via re-encoding: encode → decode → encode, compare bytes.

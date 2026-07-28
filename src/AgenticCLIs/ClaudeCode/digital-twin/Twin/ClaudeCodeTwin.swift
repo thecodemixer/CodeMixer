@@ -220,7 +220,7 @@ public final class ClaudeCodeTwin: AgentAdapter, @unchecked Sendable {
         case .workspaceTrust:
             continuation.yield(.permissionRequest(prompt: PermissionPrompt(
                 id: runtime.uuid(),
-                toolName: "WorkspaceTrust",
+                toolName: ClaudeInputEncoding.workspaceTrustToolName,
                 summary: "Trust this workspace?",
                 argumentsSummary: "{}",
                 requestedAt: runtime.now()
@@ -276,34 +276,23 @@ public final class ClaudeCodeTwin: AgentAdapter, @unchecked Sendable {
         ClaudeInputEncoding.userPrompt(text)
     }
 
-    public func classifyTerminalInput(rows: [String]) -> TerminalInputState {
-        ClaudeTerminalInputClassification.classify(rows)
-    }
-
     public func cancelSequence() -> Data {
         ClaudeInputEncoding.cancelSequence()
     }
 
     public func encodePermissionResponse(_ decision: PermissionDecision,
                                          for prompt: PermissionPrompt) -> PermissionResponseDelivery {
-        ClaudeInputEncoding.permissionResponse(decision)
+        ClaudeInputEncoding.permissionResponse(decision, for: prompt)
+    }
+
+    public func autoAllowDecision(for prompt: PermissionPrompt) -> PermissionDecision? {
+        ClaudeInputEncoding.autoAllowDecision(for: prompt)
     }
 
     // MARK: - Slash commands & sessions
 
     public var slashCommandCatalog: [SlashCommand] { ClaudeCodeTwinSlashCommands.builtIn }
     public func enumerateProjectCommands(workspace: URL) async -> [SlashCommand] { [] }
-
-    public func listResumableSessions(workspace: URL) async -> [SessionSummary] {
-        [
-            SessionSummary(id: configuration.sessionID,
-                           agentID: .claudeCode,
-                           workspace: workspace,
-                           title: "Twin session",
-                           lastActivity: configuration.runtime.now(),
-                           messageCount: 0),
-        ]
-    }
 
     public func resumeArgvAddition(sessionID: String) -> [String] {
         ["--resume", sessionID]

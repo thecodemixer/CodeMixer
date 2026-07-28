@@ -5,12 +5,9 @@ import Foundation
 ///
 /// Distinct from `.userTurn`: actions are *not* injected as prompts into the
 /// agent CLI, and they are *not* written into Claude/Codex/Cursor session
-/// stores. They live on the event bus, in the live conversation UI, and in
-/// Codemixer's in-memory conversation snapshot for the current process only.
-///
-/// Known limitation: after reopen/resume, history is replayed from the agent's
-/// own transcript — ClientAction rows from a previous Codemixer process do not
-/// reappear.
+/// stores. They live on the event bus and in Codemixer's project-local
+/// `SessionTranscript`, so reopen/resume and conversation snapshots preserve
+/// them without mutating vendor history.
 public struct ClientAction: Sendable, Codable, Hashable, Identifiable {
     public enum Kind: String, Sendable, Codable, Hashable {
         case mode

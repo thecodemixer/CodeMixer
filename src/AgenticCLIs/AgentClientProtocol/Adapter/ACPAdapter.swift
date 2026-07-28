@@ -11,9 +11,9 @@ public final class ACPAdapter: AgentAdapter {
     public let capabilities: AgentCapabilities = [
         .permissionPrompts,
         .resumableSessions,
-        .sessionHandshakeGate,
     ]
     public var transportDescriptor: AgentTransportDescriptor { .agentClientProtocol }
+    public var historyNamespace: String { ref.id }
 
     private let ref: CustomAgentRef
     private let environment: any AgentEnvironment
@@ -21,14 +21,12 @@ public final class ACPAdapter: AgentAdapter {
     private let clock: any AgentClock
     private let random: any RandomSource
     private let state: ACPClientState
-    private let sessionIndex: any ACPSessionIndexing
 
     public init(ref: CustomAgentRef,
                 environment: any AgentEnvironment = SystemEnvironment(),
                 fileSystem: any FileSystem = SystemFileSystem(),
                 clock: any AgentClock = SystemClock(),
-                random: any RandomSource = SystemRandomSource(),
-                sessionIndex: (any ACPSessionIndexing)? = nil) {
+                random: any RandomSource = SystemRandomSource()) {
         self.ref = ref
         self.displayName = ref.displayName
         self.environment = environment
@@ -36,11 +34,6 @@ public final class ACPAdapter: AgentAdapter {
         self.clock = clock
         self.random = random
         self.state = ACPClientState()
-        self.sessionIndex = sessionIndex ?? ACPSessionIndex(
-            environment: environment,
-            fileSystem: fileSystem,
-            clock: clock
-        )
     }
 
     public func locateBinary(env: ResolvedEnvironment) async throws -> URL {
@@ -72,11 +65,12 @@ public final class ACPAdapter: AgentAdapter {
         let terminals = ACPTerminalSession(workspace: inputs.workspace, random: random)
         let decoder = ACPEventDecoder(
             state: state,
-            sessionIndex: sessionIndex,
             fileAccess: fileAccess,
             terminals: terminals,
             clock: clock,
-            random: random
+            random: random,
+            recordBackgroundSessionEvents: inputs.recordBackgroundSessionEvents,
+            updateSessionMetadata: inputs.updateSessionMetadata
         )
         return AsyncStream(
             bufferingPolicy: .bufferingNewest(StreamBufferDefaults.adapterEvents)
@@ -117,27 +111,7 @@ public final class ACPAdapter: AgentAdapter {
     }
 
     public func encodeUserPrompt(_ text: String) -> Data {
-        let data = ACPInputEncoding.userPrompt(text, state: state)
-        if let sessionID = state.sessionID(),
-           let context = state.currentContext() {
-            // Persist user turns on a detached task is fine for title/index
-            // freshness, but assistant caching in `finalizePromptTurn` must
-            // await — see ACPEventDecoder+Session.
-            Task {
-                await sessionIndex.recordTurn(
-                    sessionID: sessionID,
-                    customAgentID: context.customAgentID,
-                    title: text
-                )
-                await sessionIndex.appendConversationTurn(
-                    sessionID: sessionID,
-                    customAgentID: context.customAgentID,
-                    role: .user,
-                    text: text
-                )
-            }
-        }
-        return data
+        ACPInputEncoding.userPrompt(text, state: state)
     }
 
     public func cancelSequence() -> Data {
@@ -207,8 +181,20 @@ public final class ACPAdapter: AgentAdapter {
 
     public func enumerateProjectCommands(workspace: URL) async -> [SlashCommand] { [] }
 
-    public func listResumableSessions(workspace: URL) async -> [SessionSummary] {
-        await sessionIndex.summaries(workspace: workspace, customAgentID: ref.id)
+    public func importSessionCatalog(
+        workspace: URL,
+        env _: ResolvedEnvironment,
+        progress: @escaping @Sendable (Int, Int) async -> Void
+    ) async throws -> [ImportedSession] {
+        let importer = ACPSessionCatalogImporter(
+            fileSystem: fileSystem,
+            clock: clock,
+            random: random
+        )
+        let sessions = try importer.sessions(workspace: workspace,
+                                             customAgentID: ref.id)
+        await progress(sessions.count, sessions.count)
+        return sessions
     }
 
     public func availableModels() -> [AgentModelOption] {

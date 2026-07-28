@@ -71,6 +71,8 @@ Codemixer/
 | The orchestrator | `Core/AgentCore/Engine/AgentEngine.swift`, `AgentEngine+Commands.swift` |
 | Engine state reduction | `Core/AgentCore/Engine/AgentEngine.swift` (`EngineState`), `AgentUI/ViewModel/EngineViewModel.swift` |
 | Conversation/diff snapshots for late clients | `Core/AgentCore/Engine/SnapshotService.swift` |
+| Durable project-local conversation domain + listing | `Core/AgentCore/Conversation/{SessionTranscript,TranscriptEntry,TranscriptMutation,SessionTranscriptRepository}*.swift` |
+| Transcript JSONL/index persistence | `Core/AgentCore/Persistence/{ProjectSessionTranscriptStore,StoredSessionRecord}*.swift` |
 | Git file/hunk revert | `Core/AgentCore/Engine/GitReverter.swift` |
 | Hook UDS server | `Core/AgentCore/Hooks/HookServer.swift` |
 | FSEvents watcher | `Core/AgentCore/FS/FSEventsWatcher.swift` |
@@ -81,7 +83,7 @@ Codemixer/
 | Activity heartbeat | `Core/AgentCore/Activity/HeartbeatActivityMonitor.swift` |
 | Prefs / sessions / appearance persistence | `Core/AgentCore/Persistence/{PrefsStore,SessionStore,AppearancePrefs}.swift` |
 | Agent-agnostic Workspace→Projects model + persistence | `Core/AgentCore/Persistence/{WorkspaceProjectsStore,ProjectType,ProjectAgentRouter,ProjectLocalState,WorkspaceLocalState,WorkspaceAdapterLocalState}.swift` (per-adapter model caches in `workspace-<AgentID>.json`) |
-| Core framework wrappers (Process, Keychain, FSEvents) | `Core/AgentCore/External/{ProcessRunner,KeychainStore,FSEventsStream}.swift` |
+| Core framework wrappers (Process, process liveness, Keychain, FSEvents) | `Core/AgentCore/External/{ProcessRunner,ProcessInspector,KeychainStore,FSEventsStream}.swift` |
 | Product constants (ports, identity, timing, buffers, paths) | `Core/AgentCore/{RemoteDefaults,RemoteAuthTiming,DaemonDefaults,AppIdentity,ActivityTiming,StreamBufferDefaults}.swift`, `Core/AgentCore/Paths/{AppSupportPaths,SystemPaths,ProjectPaths}.swift` |
 | DI seams | `Core/AgentCore/Seams/{Clock,RandomSource,Environment,FileSystem,Seams}.swift` |
 | Claude binary lookup | `AgenticCLIs/ClaudeCode/Adapter/ClaudeBinaryLocator.swift` |
@@ -89,7 +91,7 @@ Codemixer/
 | Claude hook installer | `AgenticCLIs/ClaudeCode/Adapter/ClaudeHookSettings.swift` |
 | Claude hook decoder | `AgenticCLIs/ClaudeCode/Adapter/ClaudeHookDecoder.swift` |
 | Claude transcript tailer | `AgenticCLIs/ClaudeCode/Adapter/ClaudeTranscriptTailer.swift` |
-| Claude resumable-session lister (title, count, git branch) | `AgenticCLIs/ClaudeCode/Common/ClaudeSessionLister.swift` |
+| Claude one-shot session catalog importer | `AgenticCLIs/ClaudeCode/Common/ClaudeSessionCatalogImporter.swift` |
 | Claude slash commands | `AgenticCLIs/ClaudeCode/Adapter/ClaudeSlashCommands.swift` |
 | Claude TUI scrape fallback | `AgenticCLIs/ClaudeCode/Adapter/ClaudeTUIFallback.swift` |
 | Claude adapter top-level | `AgenticCLIs/ClaudeCode/Adapter/ClaudeAdapter.swift` |
@@ -98,14 +100,16 @@ Codemixer/
 | Codex binary lookup | `AgenticCLIs/Codex/Adapter/CodexBinaryLocator.swift` |
 | Codex adapter top-level | `AgenticCLIs/Codex/Adapter/CodexAdapter.swift` |
 | Codex App Server protocol helpers | `AgenticCLIs/Codex/Common/*.swift` |
+| Codex one-shot session catalog importer | `AgenticCLIs/Codex/Common/CodexSessionCatalogImporter.swift` |
 | Codex digital twin | `AgenticCLIs/Codex/digital-twin/Twin/CodexTwin.swift` |
 | Live Codex harness (opt-in tests) | `tests/AgenticCLIs/Codex/CodexAdapterTests/LiveCodexHarness.swift` — docs in `tests/AgenticCLIs/README.md` |
 | ACP adapter top-level | `AgenticCLIs/AgentClientProtocol/Adapter/ACPAdapter.swift` |
-| ACP framing / codec / session index / reverse FS+terminal | `AgenticCLIs/AgentClientProtocol/Common/*.swift` |
-| ACP dashboard / attention / parked permissions | `ACPEventDecoder` (`agentDashboard`, `sessionIndexChanged`, `sessionAttentionChanged`); background `session/request_permission` parks until `session/load` |
+| ACP framing / codec / catalog import / reverse FS+terminal | `AgenticCLIs/AgentClientProtocol/Common/*.swift` |
+| ACP dashboard / attention / parked permissions | `ACPEventDecoder` (`agentDashboard`, `sessionAttentionChanged`); background `session/request_permission` parks until `session/load` |
 | ACP reverse-terminal process wrapper | `AgenticCLIs/AgentClientProtocol/External/ACPTerminalProcess.swift` |
 | ACP digital twin | `AgenticCLIs/AgentClientProtocol/digital-twin/Twin/ACPTwin.swift` |
 | Shipping ACP CLIs (Cursor) | `AgenticCLIs/ACPCLIs/Cursor/` — `CursorACPAdapter`, binary locator, mode commands |
+| Cursor catalog import + SQLite wrapper | `AgenticCLIs/ACPCLIs/Cursor/{Common,External}/` |
 | Custom ACP CLIs | `AgenticCLIs/ACPCLIs/Custom/` — `CustomACPAdapter` + `CustomACPAdapterFactory`; project `.codemixer/acp/<id>/` |
 | Custom ACP factory registration | `CustomACPAdapterFactory` (Bootstrap/daemon); bare `ACPCustomAgentAdapterFactory` for unit tests |
 | Live ACP harness (opt-in tests) | `tests/AgenticCLIs/AgentClientProtocol/ACPAdapterTests/LiveACPHarness.swift` — docs in `tests/AgenticCLIs/README.md` |
@@ -213,6 +217,7 @@ tests/
 | Child reaping | `Core/AgentCoreTests/ChildReaperTests.swift` |
 | AgentCommand dispatch, transport bytes, write-failure propagation | `Core/AgentCoreTests/AgentEngineCommandTests.swift` |
 | Engine integration (end-to-end) | `Core/AgentCoreTests/EngineIntegrationTests.swift` |
+| Local transcript aggregation, repository, store, and activation | `Core/AgentCoreTests/{SessionTranscriptTests,SessionTranscriptRepositoryTests,ProjectSessionTranscriptStoreTests,AgentEngineSessionHistoryTests}.swift` |
 | Conversation/diff snapshots | `Core/AgentCoreTests/SnapshotServiceTests.swift` |
 | Terminal engine snapshots | `Core/AgentCoreTests/TerminalEngineTests.swift` |
 | Multicast bus replay + live fan-out | `Core/AgentCoreTests/MulticastEventBusTests.swift` |
@@ -236,7 +241,7 @@ tests/
 | Hook installer idempotence | `AgenticCLIs/ClaudeCode/ClaudeAdapterTests/HookInstallerTests.swift` |
 | Hook decoder + transcript tailer | `AgenticCLIs/ClaudeCode/ClaudeAdapterTests/{ClaudeHookDecoderTests,TranscriptTailerTests,TranscriptTruncationTests}.swift` |
 | Adapter event stream + binary locator | `AgenticCLIs/ClaudeCode/ClaudeAdapterTests/{ClaudeAdapterEventStreamTests,ClaudeBinaryLocatorTests}.swift` |
-| Slash commands + session lister | `AgenticCLIs/ClaudeCode/ClaudeAdapterTests/{ClaudeSlashCommandsTests,ClaudeSessionListerTests}.swift` |
+| Slash commands + catalog import | `AgenticCLIs/ClaudeCode/ClaudeAdapterTests/{ClaudeSlashCommandsTests,ClaudeSessionCatalogImporterTests}.swift` |
 | TUI fallback gating | `AgenticCLIs/ClaudeCode/ClaudeAdapterTests/{TUIFallbackTests,TUIFallbackGateTests}.swift` |
 | Twin decoder parity (adapter + twin) | `AgenticCLIs/ClaudeCode/{ClaudeAdapterTests,ClaudeCodeTwinTests}/TwinDecoderParityTests.swift` |
 | Fake-claude spawned integration | `AgenticCLIs/ClaudeCode/ClaudeAdapterTests/FakeClaudeIntegrationTests.swift` |
@@ -300,7 +305,9 @@ tests/
 
 Use `ClientAction` + `AgentCommand.recordClientAction` (see `Core/AgentProtocol/ClientAction.swift`). Prefer `EngineViewModel.selectAgentMode` / `selectModel` / `setPermissionMode` / `activateSlashCommand` / `respondToPermission` / `startNewSession` / `compactContext` / `recordAndSend` rather than inventing a second local-only history store.
 
-**Do not** write markers into Claude/Codex/Cursor session files. **Known limitation:** action rows are live-session + export only; they do not reappear after reopen/resume from the agent's transcript.
+**Do not** write markers into Claude/Codex/Cursor session files. Action rows are
+persisted in Codemixer's project-local `SessionTranscript`, so they reappear on
+reopen/resume without mutating vendor history.
 
 ### Add a new adapter (e.g. CursorCLI)
 
@@ -330,6 +337,7 @@ Full recipe in `docs/reference/patterns/plugin-adapter-protocol.md`. Canonical m
 - One `@Suite` per behaviour; suite name reads like a sentence.
 - `@Test` names also read like sentences.
 - Inject fakes from `AgentTestSupport` — never read the real clock, random, env, or filesystem.
+- **Live/opt-in probes** (`Live*Harness`, `LiveGUIPathProbeTests`, `LiveRuntimePoolProbeTests`) must take workspace/project paths from env vars (`CODEMIXER_LIVE_*`) or neutral placeholders (`/path/to/…`, `$HOME/…`, `/workspace/…` fixtures). Never commit a real macOS home-directory path. After adding or editing paths in tests or docs, run `swift scripts/check-no-personal-paths.swift`.
 
 ### Add or edit a script in `scripts/`
 
@@ -417,6 +425,7 @@ Validation before merge:
 swift build && swift test --no-parallel
 swift scripts/check-package-layout.swift
 swift scripts/check-no-swiftui-imports.swift
+swift scripts/check-no-personal-paths.swift
 swift scripts/check-direct-framework-calls.swift
 swift scripts/check-a11y.swift
 swift scripts/regen-coverage-manifest.swift --check
@@ -427,7 +436,7 @@ swift test --no-parallel 2>&1 | scripts/check-test-runtime.swift   # per-suite r
 `ln -sf ../../scripts/pre-commit.swift .git/hooks/pre-commit`. See
 [`scripts/README.md`](scripts/README.md) for the full catalog.
 
-Docs must match `RemoteDefaults` for ports and TLS policy. Do not hardcode paths outside the owners above.
+Docs must match `RemoteDefaults` for ports and TLS policy. Do not hardcode paths outside the owners above. Machine-specific home-directory paths in sources or docs are forbidden — live probes use env vars; run `swift scripts/check-no-personal-paths.swift` before merge (also listed in the merge gate below).
 
 ---
 
@@ -463,6 +472,7 @@ These will break the build, the tests, or a future-you's review.
 - Tests that depend on the real clock, real random, real filesystem, or real network unless explicitly justified (PTY spawn against `/bin/echo` is the exception).
 - Tests that share state across suites.
 - Tests with sleeps longer than a few milliseconds — use `FakeClock.advance(by:)`.
+- **Machine-specific paths in tests or docs** — a contributor's macOS home-directory path, leaked workspace fixtures, or hardcoded live-probe fallbacks. Use `CODEMIXER_LIVE_*` env vars or neutral placeholders; enforced by `scripts/check-no-personal-paths.swift`.
 
 ---
 
@@ -529,6 +539,7 @@ Walk the §26 checklist from `code-style.md`. The short version:
 - [ ] Public surface has doc comments; non-obvious decisions have rationale comments.
 - [ ] No new literal colors / fonts / spacing in SwiftUI views.
 - [ ] No new direct calls to `Date()`, `UUID()`, `getenv`, `FileManager.default` from engine/adapter code.
+- [ ] No macOS home-directory paths in sources or docs (`swift scripts/check-no-personal-paths.swift`).
 - [ ] No new `@MainActor` outside `AgentUI`.
 - [ ] No emojis in source.
 - [ ] Commit message is imperative, ≤ 72 chars subject line, body explains *why*.

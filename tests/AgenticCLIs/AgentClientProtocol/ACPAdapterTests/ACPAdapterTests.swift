@@ -14,10 +14,9 @@ struct ACPAdapterTests {
         #expect(adapter.transportDescriptor == .agentClientProtocol)
     }
 
-    @Test("ACP adapter declares sessionHandshakeGate")
-    func sessionHandshakeGateCapability() {
+    @Test("ACP adapter declares resumable sessions")
+    func resumableSessionsCapability() {
         let adapter = makeAdapter()
-        #expect(adapter.capabilities.contains(.sessionHandshakeGate))
         #expect(adapter.capabilities.contains(.resumableSessions))
     }
 
@@ -107,11 +106,6 @@ struct ACPAdapterTests {
         let id = JSONValue.number(1)
         let decoder = ACPEventDecoder(
             state: state,
-            sessionIndex: ACPSessionIndex(
-                environment: FakeEnvironment(),
-                fileSystem: fs,
-                clock: clock
-            ),
             fileAccess: ACPFileAccess(
                 workspace: TestPaths.underTemporary("acp-ws"),
                 fileSystem: fs
@@ -158,11 +152,6 @@ struct ACPAdapterTests {
         )
         let decoder = ACPEventDecoder(
             state: state,
-            sessionIndex: ACPSessionIndex(
-                environment: FakeEnvironment(),
-                fileSystem: fs,
-                clock: clock
-            ),
             fileAccess: ACPFileAccess(
                 workspace: TestPaths.underTemporary("acp-ws"),
                 fileSystem: fs
@@ -214,11 +203,6 @@ struct ACPAdapterTests {
         )
         let decoder = ACPEventDecoder(
             state: state,
-            sessionIndex: ACPSessionIndex(
-                environment: FakeEnvironment(),
-                fileSystem: fs,
-                clock: clock
-            ),
             fileAccess: ACPFileAccess(
                 workspace: TestPaths.underTemporary("acp-ws"),
                 fileSystem: fs
@@ -262,11 +246,6 @@ struct ACPAdapterTests {
         )
         let decoder = ACPEventDecoder(
             state: state,
-            sessionIndex: ACPSessionIndex(
-                environment: FakeEnvironment(),
-                fileSystem: fs,
-                clock: clock
-            ),
             fileAccess: ACPFileAccess(
                 workspace: TestPaths.underTemporary("acp-ws"),
                 fileSystem: fs
@@ -329,11 +308,6 @@ struct ACPAdapterTests {
         )
         let decoder = ACPEventDecoder(
             state: state,
-            sessionIndex: ACPSessionIndex(
-                environment: FakeEnvironment(),
-                fileSystem: fs,
-                clock: clock
-            ),
             fileAccess: ACPFileAccess(
                 workspace: TestPaths.underTemporary("acp-ws"),
                 fileSystem: fs
@@ -389,11 +363,6 @@ struct ACPAdapterTests {
         )
         let decoder = ACPEventDecoder(
             state: state,
-            sessionIndex: ACPSessionIndex(
-                environment: FakeEnvironment(),
-                fileSystem: fs,
-                clock: clock
-            ),
             fileAccess: ACPFileAccess(
                 workspace: TestPaths.underTemporary("acp-ws"),
                 fileSystem: fs
@@ -459,80 +428,6 @@ struct ACPAdapterTests {
         )
         let text = batch.replies.map { String(decoding: $0, as: UTF8.self) }.joined()
         #expect(text.contains("path-outside-workspace") || text.contains("error"))
-    }
-
-    @Test("session index records and lists summaries")
-    func sessionIndex() async {
-        let env = FakeEnvironment()
-        let fs = InMemoryFileSystem()
-        let clock = FakeClock()
-        let index = ACPSessionIndex(environment: env, fileSystem: fs, clock: clock)
-        let workspace = TestPaths.underTemporary("acp-ws")
-        await index.recordSession(
-            id: "s1",
-            customAgentID: "gemini",
-            workspace: workspace,
-            title: "Hello"
-        )
-        let summaries = await index.summaries(workspace: workspace, customAgentID: "gemini")
-        #expect(summaries.count == 1)
-        #expect(summaries.first?.id == "s1")
-        #expect(summaries.first?.title == "Hello")
-
-        await index.appendConversationTurn(
-            sessionID: "s1",
-            customAgentID: "gemini",
-            role: .user,
-            text: "hi"
-        )
-        await index.appendConversationTurn(
-            sessionID: "s1",
-            customAgentID: "gemini",
-            role: .thinking,
-            text: "hmm"
-        )
-        await index.appendToolTurn(
-            sessionID: "s1",
-            customAgentID: "gemini",
-            toolCallID: "t-1",
-            name: "Read",
-            success: true,
-            outputSummary: "ok",
-            inputJSON: #"{"path":"a.swift"}"#
-        )
-        await index.appendConversationTurn(
-            sessionID: "s1",
-            customAgentID: "gemini",
-            role: .assistant,
-            text: "hello"
-        )
-        let replay = await index.localHistoryEvents(
-            sessionID: "s1",
-            customAgentID: "gemini",
-            random: FakeRandomSource()
-        )
-        #expect(replay.contains {
-            if case .thinkingChunk(_, let delta) = $0 { return delta == "hmm" }
-            return false
-        })
-        #expect(replay.contains {
-            if case .thinkingComplete = $0 { return true }
-            return false
-        })
-        #expect(replay.contains {
-            if case .toolStart(let id, let name, _, _) = $0 {
-                return id == "t-1" && name == "Read"
-            }
-            return false
-        })
-        #expect(replay.contains {
-            if case .toolEnd(let id, true, let output, _) = $0 {
-                return id == "t-1" && output.summary == "ok"
-            }
-            return false
-        })
-        let after = await index.summaries(workspace: workspace, customAgentID: "gemini")
-        #expect(after.first?.messageCount == 2)
     }
 
     @Test("permission mapping prefers reject_always for deny when available")
@@ -657,10 +552,15 @@ struct ACPAdapterTests {
         #expect(text.isEmpty)
     }
 
-    @Test("listResumableSessions is empty before any session is recorded")
-    func listResumableSessionsEmpty() async {
+    @Test("session catalog import is empty before any session is recorded")
+    func sessionCatalogImportEmpty() async throws {
         let adapter = makeAdapter()
-        let sessions = await adapter.listResumableSessions(workspace: TestPaths.underTemporary("acp-ws"))
+        let sessions = try await adapter.importSessionCatalog(
+            workspace: TestPaths.underTemporary("acp-ws"),
+            env: ResolvedEnvironment(variables: [:],
+                                     shell: URL(fileURLWithPath: "/bin/zsh")),
+            progress: { _, _ in }
+        )
         #expect(sessions.isEmpty)
     }
 

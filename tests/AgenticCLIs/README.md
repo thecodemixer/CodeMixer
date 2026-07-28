@@ -221,7 +221,6 @@ Tests live under `tests/AgenticCLIs/AgentClientProtocol/`.
 | `ACPAdapterTests/ACPInputEncodingTests.swift` | Bootstrap, session open, prompts, cancel, auth |
 | `ACPAdapterTests/ACPEventDecoderTests.swift` | Session lifecycle, streaming, tools, permissions |
 | `ACPAdapterTests/ACPReverseRPCTests.swift` | Reverse filesystem + terminal RPC handlers |
-| `ACPAdapterTests/ACPSessionIndexTests.swift` | Resumable session persistence and listing |
 | `ACPAdapterTests/ACPAdapterStreamTests.swift` | Adapter `makeEventStream` integration |
 | `ACPAdapterTests/FakeACPIntegrationTests.swift` | Suite `AgentEngine + ACPAdapter + fake-acp` (spawned stdio path) |
 | `ACPAdapterTests/LiveACPHarness.swift` | Reusable opt-in driver against a real ACP agent server |
@@ -254,7 +253,7 @@ CODEMIXER_LIVE_ACP=1 CODEMIXER_LIVE_ACP_BIN=/path/to/agent \
 
 # Cursor Agent ACP server
 CODEMIXER_LIVE_ACP=1 \
-  CODEMIXER_LIVE_ACP_BIN=/Users/hari/.local/bin/cursor-agent \
+  CODEMIXER_LIVE_ACP_BIN=$HOME/.local/bin/cursor-agent \
   CODEMIXER_LIVE_ACP_ARGS=acp \
   swift test --no-parallel --filter LiveACPIntegrationTests
 ```
@@ -282,12 +281,15 @@ Built-in Cursor adapter over ACP (`cursor-agent acp`). Modes use ACP
 | --- | --- |
 | `ACPCLIs/CursorACPCLITests/CursorACPAdapterTests.swift` | Identity, locator, mode encoding |
 | `ACPCLIs/CursorACPCLITests/FakeCursorACPIntegrationTests.swift` | Engine + Cursor + `fake-acp` mode switches |
-| `ACPCLIs/CursorACPCLITests/LiveCursorACPHarness.swift` | Opt-in live driver + mode probe + two-turn warm latency + fresh-process `session/load` history |
-| `ACPCLIs/CursorACPCLITests/LiveCursorACPIntegrationTests.swift` | Live suite (second turn faster; load replays prior turns) |
+| `ACPCLIs/CursorACPCLITests/LiveCursorACPHarness.swift` | Opt-in live driver + mode probe + two-turn warm latency |
+| `ACPCLIs/CursorACPCLITests/LiveCursorACPIntegrationTests.swift` | Live suite for prompt and mode behavior |
 
 Same-project Cursor session switches warm-load via `session/load` on the live `cursor-agent` process (no ~20s respawn). Cold open (first spawn / project change) still pays initialize/auth.
 
-Cursor / ACP history: prefer wire replay from `session/load` (`user_message_chunk` / `agent_thought_chunk` / `tool_call` / `agent_message_chunk`). Cursor currently returns modes/models without streaming history, so Codemixer also keeps a local turn cache in `ACPSessionIndex` (user / thinking / tool / assistant) and restores it when the load stream is empty. The sidebar session list is driven by that same index (Cursor has no `session/list`).
+Cursor / ACP visible history and sidebar listing come from AgentCore's
+project-local `SessionTranscriptRepository`. `session/load` restores agent state;
+any vendor history chunks during that handshake are deliberately suppressed.
+Cursor's SQLite catalog is parsed once when an existing project is added.
 
 ```bash
 swift build --product fake-acp
@@ -309,14 +311,13 @@ CODEMIXER_LIVE_CURSOR_ACP=1 \
 ## Custom ACP CLI (`ACPCLIs` / `CustomACPCLITests`)
 
 Generic ACP wrapper for `ProjectType.custom` projects (`CustomACPAdapter` +
-`CustomACPAdapterFactory`). Modes come from the live session; sessions + JSONL
-live under `<project>/.codemixer/acp/<customAgentID>/`.
+`CustomACPAdapterFactory`). Modes come from the live session; sessions and
+visible history live under `<project>/.codemixer/history/`.
 
 | File | Role |
 | --- | --- |
 | `ACPCLIs/CustomACPCLITests/CustomACPAdapterTests.swift` | Identity, locator, modes, factory cache |
-| `ACPCLIs/CustomACPCLITests/ACPProjectSessionStoreTests.swift` | Project index, JSONL dual-write, app-support migrate |
-| `ACPCLIs/CustomACPCLITests/FakeCustomACPIntegrationTests.swift` | Engine + Custom + `fake-custom-acp` modes + store |
+| `ACPCLIs/CustomACPCLITests/FakeCustomACPIntegrationTests.swift` | Engine + Custom + `fake-custom-acp` modes + catalog import |
 | `ACPCLIs/CustomACPCLITests/LiveCustomACPHarness.swift` | Opt-in live driver |
 | `ACPCLIs/CustomACPCLITests/LiveCustomACPIntegrationTests.swift` | Live suite |
 

@@ -44,15 +44,10 @@ extension Bootstrap {
         model.availableAgentModes = []
         model.selectedAgentModeID = ""
 
-        // Session navigator wiring (agent-agnostic): the lister resolves the
-        // adapter via the registry so AgentUI never imports a concrete adapter.
         let projectsStore = WorkspaceProjectsStore(environment: Seams.live.environment,
                                                    fileSystem: Seams.live.fileSystem)
         await projectsStore.load()
         model.workspaceProjects = projectsStore
-        model.sessionLister = { url in
-            await Self.listSessions(for: url)
-        }
         model.supportsResumableSessions = true
         model.sidebarVisible = await engine.prefs.state().appearance.sidebarVisible
         model.hydrate(from: await engine.prefs.state())
@@ -126,34 +121,4 @@ extension Bootstrap {
         await ProjectAgentRouter.resolveAdapter(projectType: mode)
     }
 
-    static func listSessions(for url: URL) async -> [SessionSummary] {
-        var sessions: [SessionSummary] = []
-        var seen = Set<String>()
-
-        func append(_ batch: [SessionSummary]) {
-            for summary in batch {
-                let key = "\(summary.agentID.rawValue)::\(summary.id)"
-                guard seen.insert(key).inserted else { continue }
-                sessions.append(summary)
-            }
-        }
-
-        let adapters = await AdapterRegistry.shared.all()
-        for adapter in adapters where adapter.capabilities.contains(.resumableSessions) {
-            append(await adapter.listResumableSessions(workspace: url))
-        }
-
-        // Custom ACP adapters live in the factory cache, not AdapterRegistry.
-        if let local = ProjectLocalStateStore.load(
-            from: url,
-            fileSystem: Seams.live.fileSystem
-        ),
-           case .custom = local.projectType,
-           let adapter = await ProjectAgentRouter.resolveAdapter(projectType: local.projectType),
-           adapter.capabilities.contains(.resumableSessions) {
-            append(await adapter.listResumableSessions(workspace: url))
-        }
-
-        return sessions.sorted { $0.lastActivity > $1.lastActivity }
-    }
 }

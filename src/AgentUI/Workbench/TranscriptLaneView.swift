@@ -47,11 +47,6 @@ struct TranscriptLaneView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
 
-            if showsLoadedTranscriptBanner {
-                loadedTranscriptBanner
-                    .transition(.move(edge: .top).combined(with: .opacity))
-            }
-
             if autoScroll.showsPausedBanner, !isConversationEmpty {
                 pausedScrollBanner
                     .transition(.move(edge: .top).combined(with: .opacity))
@@ -59,8 +54,9 @@ struct TranscriptLaneView: View {
 
             if isConversationEmpty {
                 ConversationEmptyState(workspace: model.workspace,
-                                       isSwitchingSession: model.isSwitchingSession
-                                           || model.isComposerLockedForSessionResume)
+                                       hasWorkspaceProjects: !model.projects.isEmpty,
+                                       sessionActivation: model.sessionActivation,
+                                       historyUnavailable: importedHistoryIsUnavailable)
                     .background(Theme.surface.canvas)
                     .transition(.opacity)
             } else {
@@ -265,32 +261,7 @@ struct TranscriptLaneView: View {
         }
     }
 
-    // MARK: - Banners (unchanged from ConversationView)
-
-    private var showsLoadedTranscriptBanner: Bool {
-        guard let sessionID = model.sessionID else { return false }
-        return model.cachedTranscriptLoadedSessionID == sessionID
-    }
-
-    private var loadedTranscriptBanner: some View {
-        HStack(alignment: .firstTextBaseline, spacing: Theme.spacing.s8) {
-            Image(systemName: "doc.text.magnifyingglass")
-                .foregroundStyle(Theme.signal.info)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: Theme.spacing.s4) {
-                Text("Loaded transcript")
-                    .font(Theme.typography.label)
-                    .foregroundStyle(Theme.text.primary)
-                Text("The ACP agent no longer has this live session; showing Codemixer's cached history.")
-                    .font(Theme.typography.caption)
-                    .foregroundStyle(Theme.text.secondary)
-            }
-            Spacer(minLength: 0)
-        }
-        .infoBannerChrome()
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Loaded transcript. Showing Codemixer cached history because the ACP agent no longer has this live session.")
-    }
+    // MARK: - Banners
 
     private var pausedScrollBanner: some View {
         HStack(spacing: Theme.spacing.s8) {
@@ -370,6 +341,23 @@ struct TranscriptLaneView: View {
 
     private var isConversationEmpty: Bool {
         model.messages.isEmpty && model.activeToolCalls.isEmpty
+    }
+
+    private var importedHistoryIsUnavailable: Bool {
+        guard let sessionID = model.sessionID,
+              let projectPath = model.workspace?.standardizedFileURL.path,
+              let sessions = model.sessionsByProject[projectPath] else {
+            return false
+        }
+        guard let session = sessions.first(where: { $0.id == sessionID }) else {
+            return false
+        }
+        switch session.historyImportState {
+        case .imported:
+            return true
+        case .notNeeded, .importFailed:
+            return false
+        }
     }
 
     // MARK: - Search (unchanged from ConversationView)

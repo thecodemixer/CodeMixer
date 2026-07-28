@@ -1,5 +1,5 @@
-import Foundation
 @_exported import AgentProtocol
+import Foundation
 
 /// Authentication state for an adapter.
 public enum AuthStatus: Sendable, Hashable {
@@ -104,6 +104,12 @@ public struct SessionSummary: Sendable, Hashable, Identifiable {
     public let isOverview: Bool
     /// Last dashboard URL advertised for overview sessions, when known.
     public let overviewURL: URL?
+    /// Whether the vendor archived this session.
+    public let archived: Bool
+    /// Compacted or forked sessions remain visible but cannot be resumed.
+    public let supersededAt: Date?
+    /// Outcome of the one-shot vendor-history import.
+    public let historyImportState: HistoryImportState
 
     public init(id: String,
                 agentID: AgentID,
@@ -114,7 +120,10 @@ public struct SessionSummary: Sendable, Hashable, Identifiable {
                 gitBranch: String? = nil,
                 needsAttention: Bool = false,
                 isOverview: Bool = false,
-                overviewURL: URL? = nil) {
+                overviewURL: URL? = nil,
+                archived: Bool = false,
+                supersededAt: Date? = nil,
+                historyImportState: HistoryImportState = .notNeeded) {
         self.id = id
         self.agentID = agentID
         self.workspace = workspace
@@ -125,5 +134,66 @@ public struct SessionSummary: Sendable, Hashable, Identifiable {
         self.needsAttention = needsAttention
         self.isOverview = isOverview
         self.overviewURL = overviewURL
+        self.archived = archived
+        self.supersededAt = supersededAt
+        self.historyImportState = historyImportState
     }
+}
+
+/// Import state persisted beside a session summary.
+public enum HistoryImportState: String, Sendable, Codable, Hashable {
+    case notNeeded
+    case imported
+    case importFailed
+}
+
+/// One vendor session returned by the add-time catalog import.
+public struct ImportedSession: Sendable {
+    public let id: String
+    public let title: String?
+    public let lastActivity: Date?
+    public let gitBranch: String?
+    public let archived: Bool
+    public let isOverview: Bool
+    public let overviewURL: URL?
+    public let events: [AgentEvent]
+
+    public init(id: String,
+                title: String? = nil,
+                lastActivity: Date? = nil,
+                gitBranch: String? = nil,
+                archived: Bool = false,
+                isOverview: Bool = false,
+                overviewURL: URL? = nil,
+                events: [AgentEvent] = []) {
+        self.id = id
+        self.title = title
+        self.lastActivity = lastActivity
+        self.gitBranch = gitBranch
+        self.archived = archived
+        self.isOverview = isOverview
+        self.overviewURL = overviewURL
+        self.events = events
+    }
+}
+
+/// Fresh events emitted by an ACP session that is not currently foreground.
+public struct BackgroundSessionEventBatch: Sendable {
+    public let sessionID: String
+    public let events: [AgentEvent]
+
+    public init(sessionID: String, events: [AgentEvent]) {
+        self.sessionID = sessionID
+        self.events = events
+    }
+}
+
+/// Adapter-originated changes to session-list metadata.
+public enum SessionMetadataUpdate: Sendable {
+    case registered(sessionID: String, title: String?)
+    case markAsOverview(sessionID: String, url: URL?)
+    case unmarkAsOverview(sessionID: String)
+    case archived(sessionID: String)
+    case unarchived(sessionID: String)
+    case superseded(sessionID: String)
 }

@@ -122,7 +122,8 @@ public final class ClaudeAdapter: AgentAdapter, @unchecked Sendable {
             let tailer = ClaudeTranscriptTailer(claudeDirectory: environment.claudeDirectory,
                                                 workspace: inputs.workspace,
                                                 initialSessionID: inputs.resumeSessionID,
-                                                replayUserTurns: inputs.resumeSessionID != nil,
+                                                replayUserTurns: false,
+                                                skipExistingRecords: inputs.resumeSessionID != nil,
                                                 fileSystem: fileSystem,
                                                 clock: clock,
                                                 random: random)
@@ -312,10 +313,6 @@ public final class ClaudeAdapter: AgentAdapter, @unchecked Sendable {
 
     // MARK: - Input encoding
 
-    public func classifyTerminalInput(rows: [String]) -> TerminalInputState {
-        ClaudeTerminalInputClassification.classify(rows)
-    }
-
     public func encodeUserPrompt(_ text: String) -> Data {
         ClaudeInputEncoding.userPrompt(text)
     }
@@ -335,11 +332,11 @@ public final class ClaudeAdapter: AgentAdapter, @unchecked Sendable {
 
     public func encodePermissionResponse(_ decision: PermissionDecision,
                                          for prompt: PermissionPrompt) -> PermissionResponseDelivery {
-        if prompt.toolName == ClaudeTUIFallback.workspaceTrustToolName {
-            let key = decision == .deny ? "2\r" : "1\r"
-            return .writePTY(Data(key.utf8))
-        }
-        return ClaudeInputEncoding.permissionResponse(decision)
+        ClaudeInputEncoding.permissionResponse(decision, for: prompt)
+    }
+
+    public func autoAllowDecision(for prompt: PermissionPrompt) -> PermissionDecision? {
+        ClaudeInputEncoding.autoAllowDecision(for: prompt)
     }
 
     // MARK: - Slash commands & sessions
@@ -414,10 +411,21 @@ public final class ClaudeAdapter: AgentAdapter, @unchecked Sendable {
                                                      fileSystem: fileSystem)
     }
 
-    public func listResumableSessions(workspace: URL) async -> [SessionSummary] {
-        ClaudeSessionLister.summaries(workspace: workspace,
-                                      claudeDirectory: environment.claudeDirectory,
-                                      fileSystem: fileSystem)
+    public func importSessionCatalog(
+        workspace: URL,
+        env _: ResolvedEnvironment,
+        progress: @escaping @Sendable (Int, Int) async -> Void
+    ) async throws -> [ImportedSession] {
+        await ClaudeSessionCatalogImporter.importSessions(
+            workspace: workspace,
+            inputs: .init(
+                claudeDirectory: environment.claudeDirectory,
+                fileSystem: fileSystem,
+                clock: clock,
+                random: random
+            ),
+            progress: progress
+        )
     }
 
     public func resumeArgvAddition(sessionID: String) -> [String] {

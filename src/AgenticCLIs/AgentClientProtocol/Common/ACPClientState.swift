@@ -81,9 +81,6 @@ public final class ACPClientState: @unchecked Sendable {
     var currentModeIDStorage: String?
     var availableModelOptions: [AgentModelOption] = []
     var currentModelIDStorage: String?
-    var replayRole: ACPTurnRole?
-    var replayMessageID: String?
-    var replayText = ""
     var replayEventID: UUID?
     /// Live-turn thought accumulator (persisted on prompt finalize).
     var thoughtText = ""

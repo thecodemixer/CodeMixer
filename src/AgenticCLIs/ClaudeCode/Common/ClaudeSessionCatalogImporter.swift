@@ -1,5 +1,5 @@
-import Foundation
 import AgentCore
+import Foundation
 
 /// Derives rich `SessionSummary` metadata from Claude's on-disk transcript
 /// JSONL files.
@@ -10,7 +10,13 @@ import AgentCore
 /// title, lines are counted for an approximate `messageCount`, and a `cwd`/
 /// `gitBranch` field (when present) is captured. This is Claude-specific and
 /// stays behind the adapter seam.
-public enum ClaudeSessionLister {
+public enum ClaudeSessionCatalogImporter {
+    struct Inputs: Sendable {
+        let claudeDirectory: URL
+        let fileSystem: any FileSystem
+        let clock: any AgentClock
+        let random: any RandomSource
+    }
 
     /// Max bytes read from the head of each transcript when deriving a title.
     /// Titles come from the first user turn, which is always near the top.
@@ -42,6 +48,55 @@ public enum ClaudeSessionLister {
                                       gitBranch: meta.gitBranch)
             }
         }.sorted { $0.lastActivity > $1.lastActivity }
+    }
+
+    static func importSessions(
+        workspace: URL,
+        inputs: Inputs,
+        progress: @escaping @Sendable (Int, Int) async -> Void
+    ) async -> [ImportedSession] {
+        var urls: [URL] = []
+        var seenIDs: Set<String> = []
+        for directory in projectDirectories(for: workspace,
+                                            claudeDirectory: inputs.claudeDirectory) {
+            for url in (try? inputs.fileSystem.contentsOfDirectory(at: directory)) ?? []
+            where url.pathExtension == "jsonl" {
+                let id = url.deletingPathExtension().lastPathComponent
+                if seenIDs.insert(id).inserted {
+                    urls.append(url)
+                }
+            }
+        }
+        urls.sort { $0.lastPathComponent < $1.lastPathComponent }
+
+        var imported: [ImportedSession] = []
+        for (offset, url) in urls.enumerated() {
+            guard !Task.isCancelled else { break }
+            let id = url.deletingPathExtension().lastPathComponent
+            guard let data = try? inputs.fileSystem.readData(at: url) else {
+                await progress(offset + 1, urls.count)
+                continue
+            }
+            let metadata = metadata(at: url, fileSystem: inputs.fileSystem, data: data)
+            let fallback = (try? inputs.fileSystem.modificationDate(at: url)) ?? inputs.clock.now()
+            let tailer = ClaudeTranscriptTailer(
+                claudeDirectory: inputs.claudeDirectory,
+                workspace: workspace,
+                initialSessionID: id,
+                fileSystem: inputs.fileSystem,
+                clock: inputs.clock,
+                random: inputs.random
+            )
+            let events = await tailer.importedEvents(from: data)
+            imported.append(.init(id: id,
+                                  title: metadata.title,
+                                  lastActivity: lastActivity(in: data,
+                                                             fallback: fallback),
+                                  gitBranch: metadata.gitBranch,
+                                  events: events))
+            await progress(offset + 1, urls.count)
+        }
+        return imported
     }
 
     // MARK: - Head parse

@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 /// Errors raised by the `FileSystem` seam.
 ///
@@ -6,6 +7,7 @@ import Foundation
 /// programmatically — no need for the caller to parse strings.
 public enum FileSystemError: Error, Sendable, Equatable {
     case notFound(path: String)
+    case alreadyExists(path: String)
     case permissionDenied(path: String)
     case ioError(path: String, underlying: String)
     case notRegularFile(path: String)
@@ -22,6 +24,9 @@ public protocol FileSystem: Sendable {
     func readData(at url: URL) throws -> Data
     func readData(at url: URL, fromOffset offset: Int) throws -> Data
     func byteCount(at url: URL) throws -> Int
+    func append(_ data: Data, to url: URL) throws
+    /// Creates a file atomically only when no entry exists at the path.
+    func createExclusively(_ data: Data, at url: URL) throws
     func writeAtomically(_ data: Data, to url: URL) throws
     func move(from source: URL, to destination: URL) throws
     func remove(at url: URL) throws
@@ -103,6 +108,52 @@ public struct SystemFileSystem: FileSystem {
         } catch {
             throw FileSystemError.ioError(path: url.path,
                                           underlying: error.localizedDescription)
+        }
+    }
+
+    public func append(_ data: Data, to url: URL) throws {
+        do {
+            let handle = try FileHandle(forWritingTo: url)
+            defer { try? handle.close() }
+            try handle.seekToEnd()
+            try handle.write(contentsOf: data)
+        } catch let error as NSError where error.code == NSFileNoSuchFileError {
+            throw FileSystemError.notFound(path: url.path)
+        } catch let error as NSError where error.code == NSFileWriteNoPermissionError {
+            throw FileSystemError.permissionDenied(path: url.path)
+        } catch {
+            throw FileSystemError.ioError(path: url.path,
+                                          underlying: error.localizedDescription)
+        }
+    }
+
+    public func createExclusively(_ data: Data, at url: URL) throws {
+        let descriptor = open(url.path, O_WRONLY | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR)
+        guard descriptor >= 0 else {
+            if errno == EEXIST {
+                throw FileSystemError.alreadyExists(path: url.path)
+            }
+            if errno == EACCES {
+                throw FileSystemError.permissionDenied(path: url.path)
+            }
+            throw FileSystemError.ioError(path: url.path,
+                                          underlying: String(cString: strerror(errno)))
+        }
+        defer { close(descriptor) }
+        try data.withUnsafeBytes { buffer in
+            var written = 0
+            while written < buffer.count {
+                let result = Darwin.write(descriptor,
+                                          buffer.baseAddress?.advanced(by: written),
+                                          buffer.count - written)
+                guard result > 0 else {
+                    throw FileSystemError.ioError(
+                        path: url.path,
+                        underlying: String(cString: strerror(errno))
+                    )
+                }
+                written += result
+            }
         }
     }
 

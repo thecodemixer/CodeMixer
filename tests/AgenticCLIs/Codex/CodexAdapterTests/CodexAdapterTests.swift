@@ -4,10 +4,47 @@ import Testing
 import AgentCore
 import AgentProtocol
 import AgentTestSupport
-import Codex
+@testable import Codex
 
 @Suite("Codex adapter protocol contract")
 struct CodexAdapterTests {
+    @Test("catalog import preserves user, reasoning, tools, and assistant blocks")
+    func catalogImportPreservesVisibleBlocks() async throws {
+        let fileSystem = InMemoryFileSystem()
+        let workspace = TestPaths.underTemporary("codex-import-workspace")
+        let codexHome = TestPaths.underTemporary("codex-import-home")
+        let sessionsRoot = codexHome.appendingPathComponent("sessions", isDirectory: true)
+        try fileSystem.createDirectory(at: sessionsRoot, withIntermediates: true)
+        let sessions = sessionsRoot.appendingPathComponent("2026", isDirectory: true)
+        try fileSystem.createDirectory(at: sessions, withIntermediates: true)
+        let rollout = """
+        {"timestamp":"2026-07-28T06:00:00Z","type":"session_meta","payload":{"id":"thread-1","cwd":"\(workspace.path)"}}
+        {"timestamp":"2026-07-28T06:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"text":"Imported prompt"}]}}
+        {"timestamp":"2026-07-28T06:00:02Z","type":"response_item","payload":{"type":"reasoning","summary":[{"text":"Imported reasoning"}]}}
+        {"timestamp":"2026-07-28T06:00:03Z","type":"response_item","payload":{"type":"function_call","call_id":"call-1","name":"read_file","arguments":"{}"}}
+        {"timestamp":"2026-07-28T06:00:04Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call-1","output":"contents"}}
+        {"timestamp":"2026-07-28T06:00:05Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"text":"Imported reply"}]}}
+        """
+        try fileSystem.writeAtomically(
+            Data(rollout.utf8),
+            to: sessions.appendingPathComponent("rollout.jsonl")
+        )
+
+        let imported = try await CodexSessionCatalogImporter(
+            fileSystem: fileSystem,
+            clock: FakeClock()
+        ).sessions(workspace: workspace, codexHome: codexHome) { _, _ in }
+
+        let session = try #require(imported.first)
+        #expect(session.title == "Imported prompt")
+        #expect(session.events.contains { if case .thinkingChunk = $0 { true } else { false } })
+        #expect(session.events.contains { if case .toolStart("call-1", _, _, _) = $0 { true } else { false } })
+        #expect(session.events.contains { if case .toolEnd("call-1", _, _, _) = $0 { true } else { false } })
+        #expect(session.events.contains {
+            if case .assistantText(_, _, "Imported reply", true) = $0 { true } else { false }
+        })
+    }
+
     @Test("Launch argv always selects app-server stdio")
     func launchArgv() {
         let adapter = CodexAdapter()
@@ -64,8 +101,8 @@ struct CodexAdapterTests {
         #expect(!adapter.buildLaunchArgv(context: context).contains("thr_123"))
     }
 
-    @Test("Thread resume replays reconstructed turn history into Codemixer events")
-    func threadResumeReplaysHistory() async throws {
+    @Test("Thread resume confirms the session without replaying vendor history")
+    func threadResumeSuppressesVendorHistory() async throws {
         let adapter = CodexAdapter(
             environment: FakeEnvironment(),
             fileSystem: InMemoryFileSystem(),
@@ -87,32 +124,27 @@ struct CodexAdapterTests {
             workspace: context.workspace,
             sessionID: AsyncStream { $0.finish() }
         ))
-        var iterator = stream.makeAsyncIterator()
-
         outputContinuation.yield(Self.frame(
             #"{"id":2,"result":{"thread":{"id":"thread-1","turns":[{"id":"turn-1","items":[{"type":"userMessage","id":"u1","content":[{"type":"text","text":"hello"}]},{"type":"agentMessage","id":"a1","text":"hi there"}]}]}}}"#
         ))
-
-        guard case .sessionStarted(let id, _, _) = await iterator.next() else {
-            Issue.record("Expected sessionStarted")
-            return
-        }
-        #expect(id == "thread-1")
-
-        guard case .userTurn(_, let userText) = await iterator.next() else {
-            Issue.record("Expected userTurn")
-            return
-        }
-        #expect(userText == "hello")
-
-        guard case .assistantText(_, _, let assistantText, let isFinal) = await iterator.next() else {
-            Issue.record("Expected assistantText")
-            return
-        }
-        #expect(assistantText == "hi there")
-        #expect(isFinal)
-
         outputContinuation.finish()
+
+        var events: [AgentEvent] = []
+        for await event in stream {
+            events.append(event)
+        }
+        #expect(events.contains {
+            if case .sessionStarted("thread-1", _, _) = $0 { return true }
+            return false
+        })
+        #expect(!events.contains {
+            if case .userTurn = $0 { return true }
+            return false
+        })
+        #expect(!events.contains {
+            if case .assistantText = $0 { return true }
+            return false
+        })
     }
 
     @Test("Binary override wins over PATH and fallback directories")
@@ -357,34 +389,6 @@ struct CodexAdapterTests {
         #expect(automatic["id"]?.numberValue == 42)
         #expect(automatic["result"]?["decision"]?.stringValue == "allow")
         outputContinuation.finish()
-    }
-
-    @Test("Thread index persists Codex sessions and supersedes them")
-    func threadIndexPersistence() async {
-        let fileSystem = InMemoryFileSystem()
-        let environment = FakeEnvironment(home: TestPaths.fakeHome)
-        let workspace = TestPaths.underTemporary("project")
-        let first = CodexThreadIndex(
-            environment: environment,
-            fileSystem: fileSystem,
-            clock: FakeClock()
-        )
-        await first.recordThread(id: "thread-1", workspace: workspace)
-        await first.recordTurn(threadID: "thread-1", title: "Implement Codex support")
-
-        let reloaded = CodexThreadIndex(
-            environment: environment,
-            fileSystem: fileSystem,
-            clock: FakeClock()
-        )
-        let summaries = await reloaded.summaries(workspace: workspace)
-        #expect(summaries.count == 1)
-        #expect(summaries[0].agentID == .codex)
-        #expect(summaries[0].title == "Implement Codex support")
-        #expect(summaries[0].messageCount == 1)
-
-        await reloaded.supersede(threadID: "thread-1")
-        #expect(await reloaded.summaries(workspace: workspace).isEmpty)
     }
 
     @Test("Project and user markdown commands are enumerated")

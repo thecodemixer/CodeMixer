@@ -54,6 +54,24 @@ public final class InMemoryFileSystem: FileSystem, @unchecked Sendable {
         mtimes[url.path] = Date()
     }
 
+    public func append(_ data: Data, to url: URL) throws {
+        lock.lock(); defer { lock.unlock() }
+        guard files[url.path] != nil else {
+            throw FileSystemError.notFound(path: url.path)
+        }
+        files[url.path]?.append(data)
+        mtimes[url.path] = Date()
+    }
+
+    public func createExclusively(_ data: Data, at url: URL) throws {
+        lock.lock(); defer { lock.unlock() }
+        guard files[url.path] == nil, !directories.contains(url.path) else {
+            throw FileSystemError.alreadyExists(path: url.path)
+        }
+        files[url.path] = data
+        mtimes[url.path] = Date()
+    }
+
     public func move(from source: URL, to destination: URL) throws {
         lock.lock(); defer { lock.unlock() }
         let sourcePath = source.path

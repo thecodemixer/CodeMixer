@@ -7,38 +7,26 @@ extension EngineViewModel {
     /// Subsequent refreshes update the list silently (no skeleton) so the
     /// navigator doesn't flash on every session switch.
     public func loadSessions(for projectPath: String) {
-        guard supportsResumableSessions(forProjectPath: projectPath), sessionLister != nil else {
+        guard supportsResumableSessions(forProjectPath: projectPath) else {
             sessionsByProject[projectPath] = []
             return
         }
-        Task { @MainActor [weak self] in
-            await self?.reloadSessions(for: projectPath)
+        if sessionsByProject[projectPath] == nil {
+            loadingProjectPaths.insert(projectPath)
         }
+        send(.listSessions(path: projectPath))
     }
 
     /// Awaitable session list used by overview open paths so we do not mint a
     /// second control chat before the persisted overview row is known.
     @discardableResult
     public func reloadSessions(for projectPath: String) async -> [SessionSummary] {
-        guard supportsResumableSessions(forProjectPath: projectPath), let lister = sessionLister else {
+        guard supportsResumableSessions(forProjectPath: projectPath) else {
             sessionsByProject[projectPath] = []
             return []
         }
-        if sessionsByProject[projectPath] == nil {
-            loadingProjectPaths.insert(projectPath)
-        }
-        let url = URL(fileURLWithPath: projectPath)
-        let sessions = SessionNavigatorFiltering.preferringSingleOverview(await lister(url))
-        sessionsByProject[projectPath] = sessions
-        loadingProjectPaths.remove(projectPath)
-        // After migration Restart, archived chats disappear from the list — drop
-        // any leftover permission cards that belonged to those session ids.
-        let liveIDs = Set(sessions.map(\.id))
-        pendingPermissionsBySession = pendingPermissionsBySession.filter { key, _ in
-            key == Self.unscopedPermissionSessionKey || liveIDs.contains(key)
-        }
-        refreshPermissionActivity()
-        return sessions
+        loadSessions(for: projectPath)
+        return sessionsByProject[projectPath] ?? []
     }
 
     /// Open a specific resumable session of a project. Makes that project the
@@ -61,39 +49,14 @@ extension EngineViewModel {
         }
         if isCurrentSession(projectPath: projectPath, sessionID: id) {
             detailPane = .conversation
-            if !messages.isEmpty || !activeToolCalls.isEmpty {
-                return
-            }
+            return
         }
-        // Capabilities must be known before arming the composer lock — Cursor /
-        // ACP need the longer handshake gate, not the 3s resume unlock.
         applyAdapterCapabilities(forProjectPath: projectPath)
         // File / chat sessions always leave the dashboard WebView.
         detailPane = .conversation
-        // The session list carries the concrete agent for mixed projects. Use it
-        // to decide whether history replay is enough to unlock the composer.
-        // Claude Code is special because replayed history comes from JSONL,
-        // while the live `claude --resume` PTY can still be restoring.
-        let alreadyLiveOnProject = isLiveOnProject(projectPath)
-        beginSessionSwitch(projectPath: projectPath,
-                           sessionID: id,
-                           waitsForClaudeCodeResume: sessionResumeNeedsClaudeCodeReadiness(projectPath: projectPath,
-                                                                                           sessionID: id),
-                           isWarmACPSwitch: alreadyLiveOnProject)
+        beginSessionSwitch(projectPath: projectPath, sessionID: id)
         send(.openProject(path: projectPath, resumeSessionID: id))
         Task { await self.refreshLivePooledProjectPaths() }
-    }
-
-    /// True when this project already has a live agent process we can warm-switch
-    /// (dashboard up, a session already bound, or a parked pooled runtime).
-    private func isLiveOnProject(_ projectPath: String) -> Bool {
-        let target = URL(fileURLWithPath: projectPath).standardizedFileURL.path
-        if livePooledProjectPaths.contains(target) { return true }
-        let current = workspace.map {
-            URL(fileURLWithPath: $0.path).standardizedFileURL.path
-        }
-        guard current == target else { return false }
-        return sessionID != nil || dashboardURL != nil
     }
 
     /// Sync sidebar warm-hints with the engine process pool (active + parked).
@@ -114,7 +77,8 @@ extension EngineViewModel {
 
     /// Make `projectPath` the current project. For overview-capable agents,
     /// shows the dashboard by default. Folder projects open the browser.
-    /// Otherwise opens the most recent session when known.
+    /// Otherwise opens the most recent session when known; single-agent
+    /// projects with no listed sessions start a new chat.
     public func selectProject(path projectPath: String) {
         guard !projectPath.isEmpty else { return }
         if let project = projectRef(at: projectPath), project.projectType.isFolderBacked {
@@ -143,6 +107,20 @@ extension EngineViewModel {
         newChat(in: projectPath)
     }
 
+    /// After adopting a workspace shell with projects but no active project,
+    /// open the first concrete agent project (else first folder project) so the
+    /// workbench is not stuck on "No workspace open".
+    public func activateDefaultProjectIfNeeded() {
+        guard workspace == nil, !projects.isEmpty else { return }
+        if let agent = projects.first(where: { !$0.projectType.isFolderBacked }) {
+            selectProject(path: agent.path)
+            return
+        }
+        if let folder = projects.first {
+            selectProject(path: folder.path)
+        }
+    }
+
     public func newChatInCurrentProject() {
         guard let path = workspace?.path, !path.isEmpty else { return }
         if let project = projectRef(at: path), project.projectType.isFolderBacked {
@@ -153,24 +131,17 @@ extension EngineViewModel {
 
     /// Start a fresh chat in `projectPath`.
     ///
-    /// Claude / Codex always reopen with no resume id so the local conversation
-    /// and agent session stay aligned (Codex `.newSession` can no-op; Claude
-    /// `/clear` does not reliably clear Codemixer history).
-    ///
-    /// Cursor / ACP already have a live `cursor-agent acp` process after the
-    /// first open — reuse it via `.newSession` (`session/new`, ~3s) instead of
-    /// respawning the binary (~20s initialize/auth handshake).
+    /// Cold-starts only when this project has no live pooled agent. When the
+    /// agent is already pooled, the engine keeps the process and runs
+    /// `.newSession` in-process (Cursor `session/new`, Codex thread start,
+    /// Claude `/clear`).
     public func newChat(in projectPath: String) {
         guard !projectPath.isEmpty else { return }
         if let project = projectRef(at: projectPath), project.projectType.isFolderBacked {
             openFolderProject(project, relativePath: nil)
             return
         }
-        endSessionSwitch()
         let target = URL(fileURLWithPath: projectPath).standardizedFileURL
-        let alreadyOnProject = workspace.map {
-            URL(fileURLWithPath: $0.path).standardizedFileURL.path
-        } == target.path
         workspace = target
         sessionID = nil
         clearConversationState()
@@ -181,13 +152,12 @@ extension EngineViewModel {
         // browser or overview WebView.
         detailPane = .conversation
         applyAdapterCapabilities(forProjectPath: target.path)
-        if projectNeedsSessionHandshakeGate(path: target.path) {
-            lockComposerForSessionHandshake()
-            if alreadyOnProject {
-                startNewSession()
-                return
-            }
-        }
+        sessionActivation = .awaitingAdapter(sessionID: "")
+        // Cold only on the first spawn for this project; later New Chat reuses
+        // the pooled agent (Cursor session/new, etc.).
+        let handshake: SessionHandshakeKind =
+            livePooledProjectPaths.contains(target.path) ? .warm : .coldStart
+        armSessionHandshakeTimeout(handshake)
         send(.openProject(path: target.path, resumeSessionID: nil))
     }
 
@@ -247,7 +217,10 @@ extension EngineViewModel {
             gitBranch: existing.gitBranch,
             needsAttention: needsAttention,
             isOverview: existing.isOverview,
-            overviewURL: existing.overviewURL
+            overviewURL: existing.overviewURL,
+            archived: existing.archived,
+            supersededAt: existing.supersededAt,
+            historyImportState: existing.historyImportState
         )
         sessionsByProject[path] = sessions
     }
@@ -266,7 +239,10 @@ extension EngineViewModel {
                 gitBranch: existing.gitBranch,
                 needsAttention: false,
                 isOverview: existing.isOverview,
-                overviewURL: existing.overviewURL
+                overviewURL: existing.overviewURL,
+                archived: existing.archived,
+                supersededAt: existing.supersededAt,
+                historyImportState: existing.historyImportState
             )
         }
         sessionsByProject[projectPath] = sessions

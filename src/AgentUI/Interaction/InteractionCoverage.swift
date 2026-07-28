@@ -20,6 +20,8 @@ public enum InteractionCoverage {
         case runSlashCommand
         case respondToPermission
         case openProject
+        case listSessions
+        case importProjectHistory
         case closeSession
         case speakAssistantBubble
         case revertFile
@@ -42,6 +44,8 @@ public enum InteractionCoverage {
         .runSlashCommand,
         .respondToPermission,
         .openProject,
+        .listSessions,
+        .importProjectHistory,
         .closeSession,
         .speakAssistantBubble,
         .revertFile,

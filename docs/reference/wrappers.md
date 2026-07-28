@@ -1,6 +1,6 @@
 # External integration wrappers
 
-Every Apple/system framework call in Codemixer goes through a single wrapper class. Business code never imports `Foundation.Process`, `Security.SecItem*`, `CoreServices.FSEventStream*`, `Network.NWListener`/`NWConnection`, `AVFoundation`, `Speech`, `UserNotifications`, or `Foundation.NetService` directly.
+Every Apple/system framework call in Codemixer goes through a single wrapper class. Business code never imports `Foundation.Process`, `Security.SecItem*`, `CoreServices.FSEventStream*`, `Network.NWListener`/`NWConnection`, `AVFoundation`, `Speech`, `UserNotifications`, `Foundation.NetService`, or `SQLite3` directly.
 
 The two exceptions are themselves wrappers:
 
@@ -52,6 +52,21 @@ public actor ProcessRunner {
 
 **Lifetime**: each `run` is one-shot.
 **Threading**: actor; caller awaits.
+
+---
+
+## `ProcessInspector`
+
+**File**: `src/Core/AgentCore/External/ProcessInspector.swift`
+**Wraps**: `Darwin.getpid` and `Darwin.kill(pid, 0)`.
+**Consumers**:
+- `SessionTranscriptRepository` — writes the current PID into a transcript
+  journal lock and reclaims that lock only when its recorded owner is no longer
+  running.
+
+**Contract**: internal, synchronous value type exposing `currentPID` and
+`isRunning(_:)`. `EPERM` means the process exists but cannot be signalled, so it
+is treated as live.
 
 ---
 
@@ -113,6 +128,30 @@ public actor ACPTerminalProcess {
 **Lifetime**: one new process per `terminal/create` (not reused). Output is
 bounded; callers poll via `terminal/output` and tear down with `kill`/`release`.
 **Threading**: actor; process pipes are drained on a background queue.
+
+---
+
+## `SQLiteReader`
+
+**File**: `src/AgenticCLIs/ACPCLIs/Cursor/External/SQLiteReader.swift`
+**Wraps**: `SQLite3.sqlite3_*`
+**Consumers**:
+- `CursorSessionCatalogImporter` for the one-shot existing-project chat import.
+
+**Public API**:
+
+```swift
+protocol SQLiteReading: Sendable {
+    func rows(in databaseURL: URL,
+              query: String,
+              textBindings: [String]) throws -> [[String: Data]]
+}
+```
+
+**Lifetime**: one read-only SQLite connection per query. It may read Cursor's
+existing WAL so recently committed chats are visible, but cannot create or
+mutate database state.
+**Threading**: value type; each call owns its connection and statement.
 
 ---
 

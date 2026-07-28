@@ -5,7 +5,7 @@ import AgentProtocol
 
 /// Initialize-time dashboard bootstrap (`agentDashboard`, auth) and the
 /// session-metadata bookkeeping — archived / overview / needsAttention —
-/// that feeds `sessionIndexChanged` / `sessionAttentionChanged` for the
+/// that feeds `sessionAttentionChanged` for the
 /// session navigator's attention rollup. See `AgenticCLIs/README.md` and
 /// `AGENTS.md`'s "ACP dashboard / attention / parked permissions" row.
 extension ACPEventDecoder {
@@ -40,26 +40,20 @@ extension ACPEventDecoder {
     }
 
     func sessionInfoUpdate(params: JSONValue, update: JSONValue) async -> Batch {
-        guard let context = state.currentContext() else { return Batch() }
         let sessionID = params["sessionId"]?.stringValue ?? state.sessionID()
         guard let sessionID else { return Batch() }
         let title = update["title"]?.stringValue
-        await sessionIndex.recordSession(
-            id: sessionID,
-            customAgentID: context.customAgentID,
-            workspace: context.workspace,
-            title: title
-        )
+        await updateSessionMetadata(.registered(sessionID: sessionID,
+                                                title: title))
         var events: [AgentEvent] = []
         var replies: [Data] = []
         let meta = update["_meta"]?.objectValue ?? params["_meta"]?.objectValue
-        var didMutateIndex = false
         if let archived = meta?["archived"]?.boolValue {
-            await sessionIndex.setArchived(
-                sessionID: sessionID,
-                customAgentID: context.customAgentID,
-                archived: archived
-            )
+            if archived {
+                await updateSessionMetadata(.archived(sessionID: sessionID))
+            } else {
+                await updateSessionMetadata(.unarchived(sessionID: sessionID))
+            }
             if archived {
                 // Migration Restart archives file sessions — drop parked reviews
                 // and cancel any open permission RPCs so timeouts cannot auto-deny
@@ -90,45 +84,30 @@ extension ACPEventDecoder {
                     }
                 }
             }
-            didMutateIndex = true
         }
         if let needsAttention = meta?["needsAttention"]?.boolValue {
-            await sessionIndex.setNeedsAttention(
-                sessionID: sessionID,
-                customAgentID: context.customAgentID,
-                needsAttention: needsAttention
-            )
             let resolvedTitle: String
             if let title, !title.isEmpty {
                 resolvedTitle = title
             } else {
-                resolvedTitle = await sessionTitle(
-                    sessionID: sessionID,
-                    customAgentID: context.customAgentID,
-                    workspace: context.workspace
-                ) ?? sessionID
+                resolvedTitle = sessionID
             }
             events.append(.sessionAttentionChanged(
                 sessionID: sessionID,
                 title: resolvedTitle,
                 needsAttention: needsAttention
             ))
-            didMutateIndex = true
         }
         if let isOverview = meta?["codemixer.dev/overviewSession"]?.boolValue
             ?? meta?["overviewSession"]?.boolValue {
-            let overviewURL = meta?["codemixer.dev/dashboardUrl"]?.stringValue
-                .flatMap(URL.init(string:))
-            await sessionIndex.setIsOverview(
-                sessionID: sessionID,
-                customAgentID: context.customAgentID,
-                isOverview: isOverview,
-                overviewURL: overviewURL
-            )
-            didMutateIndex = true
-        }
-        if didMutateIndex || title != nil {
-            events.append(.sessionIndexChanged(projectPath: context.workspace))
+            if isOverview {
+                let overviewURL = meta?["codemixer.dev/dashboardUrl"]?.stringValue
+                    .flatMap(URL.init(string:))
+                await updateSessionMetadata(.markAsOverview(sessionID: sessionID,
+                                                            url: overviewURL))
+            } else {
+                await updateSessionMetadata(.unmarkAsOverview(sessionID: sessionID))
+            }
         }
         return Batch(events: events, replies: replies)
     }

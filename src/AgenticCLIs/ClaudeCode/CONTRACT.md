@@ -109,8 +109,7 @@ Status: `handled` = adapter + twin scenario + test; `ledger` = intentional defer
 | status phrases | handled | handled | TUIFallbackTests |
 | file edit hints | handled | handled | TUIFallbackTests |
 | workspace trust screen | handled | handled | TUIFallbackTests |
-| resume prompt readiness | engine | handled | FakeClaudeIntegrationTests |
-| startup submit recovery | engine | handled | FakeClaudeIntegrationTests |
+| session readiness | `SessionStart` event | handled | FakeClaudeIntegrationTests |
 
 ### Permission modes (`L0`)
 

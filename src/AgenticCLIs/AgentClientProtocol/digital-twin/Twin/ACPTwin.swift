@@ -25,7 +25,6 @@ public final class ACPTwin: AgentAdapter {
     public let capabilities: AgentCapabilities = [
         .permissionPrompts,
         .resumableSessions,
-        .sessionHandshakeGate,
     ]
     public var transportDescriptor: AgentTransportDescriptor { .agentClientProtocol }
 
@@ -122,19 +121,6 @@ public final class ACPTwin: AgentAdapter {
     public var slashCommandCatalog: [SlashCommand] { [] }
 
     public func enumerateProjectCommands(workspace: URL) async -> [SlashCommand] { [] }
-
-    public func listResumableSessions(workspace: URL) async -> [SessionSummary] {
-        [
-            SessionSummary(
-                id: configuration.sessionID,
-                agentID: .other,
-                workspace: workspace,
-                title: "ACP Twin Session",
-                lastActivity: clock.now(),
-                messageCount: 1
-            ),
-        ]
-    }
 
     public func resumeArgvAddition(sessionID: String) -> [String] { [] }
 }

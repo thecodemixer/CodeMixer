@@ -12,6 +12,8 @@ public struct AgentInputs: Sendable {
     public let workspace: URL
     public let resumeSessionID: String?
     public let sessionID: AsyncStream<String>
+    public let recordBackgroundSessionEvents: @Sendable (BackgroundSessionEventBatch) async -> Void
+    public let updateSessionMetadata: @Sendable (SessionMetadataUpdate) async -> Void
 
     public init(outputBytes: AsyncStream<Data>,
                 writeBytes: @escaping @Sendable (Data) async throws -> Void = { _ in },
@@ -19,7 +21,9 @@ public struct AgentInputs: Sendable {
                 hookSocket: HookSocketHandle?,
                 workspace: URL,
                 resumeSessionID: String? = nil,
-                sessionID: AsyncStream<String>) {
+                sessionID: AsyncStream<String>,
+                recordBackgroundSessionEvents: @escaping @Sendable (BackgroundSessionEventBatch) async -> Void = { _ in },
+                updateSessionMetadata: @escaping @Sendable (SessionMetadataUpdate) async -> Void = { _ in }) {
         self.outputBytes = outputBytes
         self.writeBytes = writeBytes
         self.terminal = terminal
@@ -27,6 +31,8 @@ public struct AgentInputs: Sendable {
         self.workspace = workspace
         self.resumeSessionID = resumeSessionID
         self.sessionID = sessionID
+        self.recordBackgroundSessionEvents = recordBackgroundSessionEvents
+        self.updateSessionMetadata = updateSessionMetadata
     }
 }
 
@@ -81,20 +87,6 @@ public protocol TerminalSnapshotting: Sendable {
     func snapshotText() async -> String
 }
 
-/// Live input-row state scraped from a headless VT snapshot.
-///
-/// `.ptyTUIFallback` adapters classify their own prompt chrome so the engine
-/// can gate resume writes and recover swallowed first prompts without knowing
-/// vendor glyphs (`❯`, Ink footers, …).
-public enum TerminalInputState: Sendable, Hashable {
-    /// No heuristic, or the snapshot is ambiguous (painting / unknown chrome).
-    case unknown
-    /// Empty ready prompt — safe to write the next prompt.
-    case ready
-    /// Input row still holds unsubmitted text — recovery should send Enter.
-    case unsubmitted
-}
-
 /// The single protocol every CLI agent implements.
 public protocol AgentAdapter: Sendable {
 
@@ -127,13 +119,6 @@ public protocol AgentAdapter: Sendable {
 
     func makeEventStream(inputs: AgentInputs) -> AsyncStream<AgentEvent>
 
-    // MARK: Terminal input classification (optional TUI)
-
-    /// Classify the live input row from a headless VT snapshot. Used by the
-    /// engine's resume-startup gate and first-prompt submit recovery for
-    /// `.ptyTUIFallback` adapters. Default `.unknown` (no scrape).
-    func classifyTerminalInput(rows: [String]) -> TerminalInputState
-
     // MARK: Input encoding
 
     func encodeUserPrompt(_ text: String) -> Data
@@ -160,6 +145,12 @@ public protocol AgentAdapter: Sendable {
     func encodePermissionResponse(_ decision: PermissionDecision,
                                   for prompt: PermissionPrompt) -> PermissionResponseDelivery
 
+    /// When non-nil, the engine applies this decision silently without
+    /// surfacing the prompt to the UI. Adapters use this for gates that are
+    /// already decided by opening the project in Codemixer (e.g. Claude Code
+    /// folder trust). Default `nil` — prefs auto-approval still applies.
+    func autoAllowDecision(for prompt: PermissionPrompt) -> PermissionDecision?
+
     // MARK: Slash commands
 
     var slashCommandCatalog: [SlashCommand] { get }
@@ -167,7 +158,15 @@ public protocol AgentAdapter: Sendable {
 
     // MARK: Sessions
 
-    func listResumableSessions(workspace: URL) async -> [SessionSummary]
+    /// Stable directory namespace for Codemixer-owned history.
+    var historyNamespace: String { get }
+    /// One-shot vendor catalog import used only when an existing project is
+    /// added to a workspace.
+    func importSessionCatalog(
+        workspace: URL,
+        env: ResolvedEnvironment,
+        progress: @escaping @Sendable (Int, Int) async -> Void
+    ) async throws -> [ImportedSession]
     func resumeArgvAddition(sessionID: String) -> [String]
 
     // MARK: Model catalog
@@ -219,6 +218,16 @@ public protocol AgentAdapter: Sendable {
 }
 
 public extension AgentAdapter {
+    var historyNamespace: String { id.rawValue }
+
+    func importSessionCatalog(
+        workspace: URL,
+        env: ResolvedEnvironment,
+        progress: @escaping @Sendable (Int, Int) async -> Void
+    ) async throws -> [ImportedSession] {
+        []
+    }
+
     func installHookConfiguration(socketPath: String,
                                   workspace: URL,
                                   fileSystem: any FileSystem) async throws {}
@@ -226,8 +235,6 @@ public extension AgentAdapter {
     func truncateTranscript(afterUserTurnID turnID: String,
                             sessionID: String,
                             workspace: URL) async -> Bool { false }
-
-    func classifyTerminalInput(rows: [String]) -> TerminalInputState { .unknown }
 
     func availableModels() -> [AgentModelOption] { [] }
 
@@ -244,6 +251,8 @@ public extension AgentAdapter {
     func sessionBootstrapBytes(context: LaunchContext) -> Data { Data() }
 
     func encodeResumeSession(sessionID: String) -> Data? { nil }
+
+    func autoAllowDecision(for prompt: PermissionPrompt) -> PermissionDecision? { nil }
 
     /// Default encodes Claude-compatible slash text for the common command
     /// set. Non-terminal adapters override with protocol frames.

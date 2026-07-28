@@ -9,6 +9,7 @@ import Foundation
 public enum WireVersion: Int, Sendable, Codable {
     case v1 = 1
     case v2 = 2
+    case v3 = 3
 
-    public static let current: WireVersion = .v2
+    public static let current: WireVersion = .v3
 }

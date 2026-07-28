@@ -10,7 +10,7 @@ import AgentCore
 /// during a session, `ClaudeAdapter` stops feeding us snapshots.
 public actor ClaudeTUIFallback {
 
-    static let workspaceTrustToolName = "WorkspaceTrust"
+    static let workspaceTrustToolName = ClaudeInputEncoding.workspaceTrustToolName
 
     private let clock: any AgentClock
     private let random: any RandomSource
@@ -98,14 +98,27 @@ public actor ClaudeTUIFallback {
     private func parseWorkspaceTrustScreen(_ snapshot: TerminalSnapshot) -> AgentEvent? {
         let rows = snapshot.lines.map { normalized($0.text) }
         let compactRows = rows.map(compacted(_:))
-        guard compactRows.contains(where: { $0.contains("quicksafetycheck:isthisaproject") }),
-              compactRows.contains(where: { $0.contains("claudecode'llbeabletoread,edit,andexecutefileshere.") }),
-              compactRows.contains(where: { $0.contains("1.yes,itrustthisfolder") }),
-              compactRows.contains(where: { $0.contains("2.no,exit") }) else {
+        // Claude's copy drifts slightly across releases; keep the gate loose
+        // enough to catch the folder-trust chooser without matching unrelated
+        // permission menus.
+        let looksLikeTrustPrompt = compactRows.contains {
+            $0.contains("quicksafetycheck")
+                || $0.contains("isthisaprojectyou")
+                || ($0.contains("trust") && $0.contains("folder") && $0.contains("safety"))
+        }
+        let hasTrustChoice = compactRows.contains {
+            $0.contains("1.yes") && $0.contains("trust") && $0.contains("folder")
+        }
+        let hasExitChoice = compactRows.contains {
+            $0.contains("2.no") || $0.contains("2.no,exit")
+        }
+        guard looksLikeTrustPrompt, hasTrustChoice, hasExitChoice else {
             return nil
         }
 
-        let workspace = rows.drop(while: { !$0.contains("Accessing workspace:") })
+        let workspace = rows.drop(while: {
+            !$0.localizedCaseInsensitiveContains("Accessing workspace")
+        })
             .dropFirst()
             .first(where: { !$0.isEmpty })
 
@@ -119,7 +132,10 @@ public actor ClaudeTUIFallback {
     }
 
     private func normalized(_ line: String) -> String {
+        // SwiftTerm sometimes inserts NUL between cells when reading the
+        // framebuffer; strip them so matchers see real copy.
         line
+            .replacingOccurrences(of: "\u{0000}", with: "")
             .replacingOccurrences(of: "\u{00A0}", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }

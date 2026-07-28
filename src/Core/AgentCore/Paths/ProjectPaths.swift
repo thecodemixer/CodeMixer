@@ -6,9 +6,8 @@ import Foundation
 /// is typically `<workspace>/<projectName>/`; it is the workspace folder
 /// itself only when that folder was opened as the seeded root project:
 /// - `<project>/.codemixer/project.json` — type + display name
-/// - `<project>/.codemixer/acp/<customAgentID>/` — Custom ACP session index +
-///   JSONL transcripts (`ACPProjectPaths`; never the workspace shell unless
-///   that shell *is* the active project)
+/// - `<project>/.codemixer/history/` — adapter-namespaced transcript journals,
+///   the derived session index, and a local `.gitignore`
 ///
 /// Per **workspace** (window shell / `workspaceRoot`):
 /// - `<workspace>/.codemixer/workspace.json` — catalog of member projects
@@ -21,6 +20,8 @@ public enum ProjectPaths {
     public static let directoryName = ".codemixer"
     public static let projectFileName = "project.json"
     public static let workspaceFileName = "workspace.json"
+    public static let historyDirectoryName = "history"
+    public static let historyIndexFileName = "index.json"
 
     public static func directoryURL(in root: URL) -> URL {
         root.appendingPathComponent(directoryName, isDirectory: true)
@@ -32,6 +33,35 @@ public enum ProjectPaths {
 
     public static func workspaceStateURL(in workspaceRoot: URL) -> URL {
         directoryURL(in: workspaceRoot).appendingPathComponent(workspaceFileName)
+    }
+
+    public static func historyDirectoryURL(in projectRoot: URL) -> URL {
+        directoryURL(in: projectRoot)
+            .appendingPathComponent(historyDirectoryName, isDirectory: true)
+    }
+
+    public static func historyIndexURL(in projectRoot: URL) -> URL {
+        historyDirectoryURL(in: projectRoot)
+            .appendingPathComponent(historyIndexFileName)
+    }
+
+    public static func historyIgnoreURL(in projectRoot: URL) -> URL {
+        historyDirectoryURL(in: projectRoot)
+            .appendingPathComponent(".gitignore")
+    }
+
+    static func transcriptDirectoryURL(for key: SessionTranscriptKey) -> URL {
+        historyDirectoryURL(in: key.projectRoot)
+            .appendingPathComponent(key.namespaceDirectoryName, isDirectory: true)
+    }
+
+    static func transcriptURL(for key: SessionTranscriptKey) -> URL {
+        transcriptDirectoryURL(for: key)
+            .appendingPathComponent(key.journalFileName)
+    }
+
+    static func transcriptLockURL(for key: SessionTranscriptKey) -> URL {
+        transcriptURL(for: key).appendingPathExtension("lock")
     }
 
     public static func workspaceAdapterStateFileName(for agentID: AgentID) -> String {

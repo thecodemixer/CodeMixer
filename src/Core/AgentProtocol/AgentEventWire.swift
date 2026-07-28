@@ -50,10 +50,58 @@ public enum AgentEventWire: Sendable, Codable, Hashable {
     case clientAction(ClientAction)
 
     case agentDashboard(url: String, title: String?)
-    case sessionIndexChanged(projectPath: String)
     case sessionAttentionChanged(sessionID: String, title: String, needsAttention: Bool)
-    case cachedTranscriptLoaded(sessionID: String)
+    case sessionHistoryRestored(sessionID: String)
+    case sessionPromptReady(sessionID: String)
+    case sessionsListed(projectPath: String, sessions: [WireSessionSummary])
+    case historyImportProgress(projectPath: String, completed: Int, total: Int)
+    case historyImportFinished(projectPath: String, imported: Int, failed: Int)
     case sessionPhaseChanged(sessionID: String, phase: WireSessionPhase)
+}
+
+/// Portable mirror of the store-owned session-list projection.
+public struct WireSessionSummary: Sendable, Codable, Hashable {
+    public let id: String
+    public let agentID: String
+    public let workspace: String
+    public let title: String
+    public let lastActivity: Date
+    public let messageCount: Int
+    public let gitBranch: String?
+    public let needsAttention: Bool
+    public let isOverview: Bool
+    public let overviewURL: String?
+    public let archived: Bool
+    public let supersededAt: Date?
+    public let historyImportState: String
+
+    public init(id: String,
+                agentID: String,
+                workspace: String,
+                title: String,
+                lastActivity: Date,
+                messageCount: Int,
+                gitBranch: String?,
+                needsAttention: Bool,
+                isOverview: Bool,
+                overviewURL: String?,
+                archived: Bool,
+                supersededAt: Date?,
+                historyImportState: String) {
+        self.id = id
+        self.agentID = agentID
+        self.workspace = workspace
+        self.title = title
+        self.lastActivity = lastActivity
+        self.messageCount = messageCount
+        self.gitBranch = gitBranch
+        self.needsAttention = needsAttention
+        self.isOverview = isOverview
+        self.overviewURL = overviewURL
+        self.archived = archived
+        self.supersededAt = supersededAt
+        self.historyImportState = historyImportState
+    }
 }
 
 /// `SessionPhase` flattened to primitives; `group` is `SessionPhase.Group.rawValue`.

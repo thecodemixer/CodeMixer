@@ -30,6 +30,8 @@ public enum AgentCommand: Sendable, Codable, Hashable {
     // MARK: Session lifecycle
 
     case openProject(path: String, resumeSessionID: String?)
+    case listSessions(path: String)
+    case importProjectHistory(path: String)
     case closeSession
 
     // MARK: Voice & TTS (local-only intent)

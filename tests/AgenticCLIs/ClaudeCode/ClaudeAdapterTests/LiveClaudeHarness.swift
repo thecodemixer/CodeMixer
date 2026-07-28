@@ -1,5 +1,5 @@
 import Foundation
-import AgentCore
+@testable import AgentCore
 import AgentProtocol
 import ClaudeCode
 import AgentTestSupport
@@ -165,6 +165,19 @@ struct LiveClaudeHarness {
             await sink.hasHookSessionStarted()
         }
         guard sawHookSession else {
+            let snap = await engine.terminalSnapshotText()
+            let events = await sink.snapshot()
+            let trustish = snap.split(separator: "\n").map(String.init).filter {
+                $0.localizedCaseInsensitiveContains("trust")
+                    || $0.localizedCaseInsensitiveContains("safety")
+                    || $0.localizedCaseInsensitiveContains("folder")
+                    || $0.contains("1.")
+                    || $0.contains("2.")
+            }
+            print("DIAG SessionStart timeout workspace=\(configuration.workspace.path)")
+            print("DIAG trustishRows=\(trustish.suffix(20))")
+            print("DIAG eventKinds=\(events.suffix(30).map { String(describing: $0).prefix(100) })")
+            print("DIAG fullSnap=\n\(snap.suffix(2500))")
             await engine.shutdown(reason: .naturalExit)
             throw LiveClaudeHarnessError.hookSessionTimedOut
         }
@@ -232,8 +245,7 @@ struct LiveClaudeHarness {
                           })
     }
 
-    /// Seed → shutdown → `--resume` — asserts transcript history replay, then
-    /// a follow-up prompt (same shape as Cursor/Codex live resume loads).
+    /// Seed → shutdown → local history restore + `--resume`, then a follow-up.
     func runFreshProcessResume(_ configuration: Configuration) async throws -> ResumeLoadResult {
         let first = try await runTurn(configuration)
         guard let sessionID = first.sessionID, !sessionID.isEmpty else {
@@ -262,14 +274,37 @@ struct LiveClaudeHarness {
             Task { await engine.bus.unsubscribe(sub.id) }
         }
 
+        await engine.restoreHistory(for: SessionTranscriptKey(
+            projectRoot: configuration.workspace,
+            namespace: adapter.historyNamespace,
+            sessionID: sessionID
+        ))
+        let historyReady = await livePollUntil(timeout: .seconds(5)) {
+            let user = await sink.containsUserTurn(matching: configuration.prompt)
+            let assistant = await sink.containsFinalAssistantText(
+                matching: configuration.expectedFinalSubstring
+            )
+            return user && assistant
+        }
+        let sawUser = await sink.containsUserTurn(matching: configuration.prompt)
+        let sawAssistant = await sink.containsFinalAssistantText(
+            matching: configuration.expectedFinalSubstring
+        )
+        guard historyReady else {
+            let events = await sink.snapshot()
+            await engine.shutdown(reason: .naturalExit)
+            throw LiveClaudeHarnessError.historyLoadTimedOut(
+                events: events,
+                sessionID: sessionID,
+                detail: "missing local user/assistant (user=\(sawUser), assistant=\(sawAssistant))"
+            )
+        }
+
         try await engine.start(adapter: adapter,
                                workspace: configuration.workspace,
                                resumeSessionID: sessionID)
 
-        // Prefer a real hook SessionStart (model set). Bootstrap also publishes
-        // `sessionStarted(resumeID)` with `model: nil` the instant the engine
-        // starts — matching that alone races the first prompt ahead of the
-        // ready gate's useful work.
+        // A real SessionStart confirms the resumed TUI can accept new work.
         let sawHookSession = await livePollUntil(timeout: configuration.hookSessionTimeout) {
             if await sink.hasHookSessionStarted() { return true }
             return await sink.hasSessionStarted(sessionID: sessionID)
@@ -279,27 +314,7 @@ struct LiveClaudeHarness {
             throw LiveClaudeHarnessError.hookSessionTimedOut
         }
 
-        // Transcript tailer replays prior turns after bind; wait before follow-up.
-        let historyReady = await livePollUntil(timeout: configuration.assistantTextTimeout) {
-            let user = await sink.containsUserTurn(matching: configuration.prompt)
-            let assistant = await sink.containsFinalAssistantText(matching: configuration.expectedFinalSubstring)
-            return user && assistant
-        }
-        let sawUser = await sink.containsUserTurn(matching: configuration.prompt)
-        let sawAssistant = await sink.containsFinalAssistantText(matching: configuration.expectedFinalSubstring)
-        guard historyReady else {
-            let events = await sink.snapshot()
-            await engine.shutdown(reason: .naturalExit)
-            throw LiveClaudeHarnessError.historyLoadTimedOut(
-                events: events,
-                sessionID: sessionID,
-                detail: "missing replayed user/assistant (user=\(sawUser), assistant=\(sawAssistant))"
-            )
-        }
-
-        // Give Claude time to paint resumed history before the follow-up write.
-        // The engine also gates on ready-prompt scrape / post-SessionStart
-        // fallback; this mirrors the fresh-turn settle delay.
+        // Give Claude's resumed TUI time to settle before the follow-up write.
         try await Task.sleep(for: configuration.sessionReadyDelay)
 
         let resumePrompt = "Reply with exactly: resume-pong"
@@ -419,8 +434,7 @@ struct LiveClaudeHarness {
         await engine.shutdown(reason: .naturalExit)
     }
 
-    /// Classifies live input via `ClaudeTerminalInputClassification` so DIAG
-    /// dumps stay aligned with `ClaudeAdapter.classifyTerminalInput`.
+    /// Classifies live input via the diagnostic-only Claude prompt heuristic.
     private static func diagnoseClaudePromptRows(_ rows: [String]) -> (
         ready: Bool,
         unsubmitted: Bool,

@@ -31,7 +31,7 @@ struct ACPEventDecoderTests {
         #expect(joined.contains("session/new"))
     }
 
-    @Test("session new response emits sessionStarted and records session index")
+    @Test("session new response emits sessionStarted and registers metadata")
     func sessionNew() async {
         let fixture = ACPDecoderFixture(customAgentID: "cursor")
         let batch = await fixture.openSession(id: "abc-123")
@@ -41,11 +41,11 @@ struct ACPEventDecoderTests {
             }
             return false
         })
-        let summaries = await fixture.sessionIndex.summaries(
-            workspace: fixture.workspace,
-            customAgentID: "cursor"
-        )
-        #expect(summaries.contains { $0.id == "abc-123" })
+        let updates = await fixture.metadata.snapshot()
+        #expect(updates.contains {
+            if case .registered(let sessionID, _) = $0 { return sessionID == "abc-123" }
+            return false
+        })
     }
 
     @Test("session new response records advertised modes with name and description")
@@ -223,8 +223,8 @@ struct ACPEventDecoderTests {
         })
     }
 
-    @Test("session list merge records remote sessions")
-    func sessionListMerge() async {
+    @Test("session list merge never registers vendor-only sessions")
+    func sessionListMergeDoesNotRegisterVendorSessions() async {
         let fixture = ACPDecoderFixture(customAgentID: "cursor")
         _ = await fixture.openSession(
             capabilities: .object([
@@ -239,16 +239,35 @@ struct ACPEventDecoderTests {
                     .object([
                         "sessionId": .string("remote-1"),
                         "title": .string("Earlier chat"),
+                        "_meta": .object([
+                            "codemixer.dev/overviewSession": .bool(true),
+                            "codemixer.dev/dashboardUrl": .string("http://127.0.0.1:9/"),
+                            "archived": .bool(true),
+                        ]),
                     ]),
                 ]),
             ]),
             error: nil
         ))
-        let summaries = await fixture.sessionIndex.summaries(
-            workspace: fixture.workspace,
-            customAgentID: "cursor"
-        )
-        #expect(summaries.contains { $0.id == "remote-1" && $0.title == "Earlier chat" })
+        let updates = await fixture.metadata.snapshot()
+        #expect(!updates.contains {
+            if case .registered(let sessionID, _) = $0 {
+                return sessionID == "remote-1"
+            }
+            return false
+        })
+        // Metadata refresh still runs for overview/archived markers on known ids;
+        // markOverview is a no-op when the local index has no matching row.
+        #expect(updates.contains {
+            if case .markAsOverview(let sessionID, let url) = $0 {
+                return sessionID == "remote-1" && url?.absoluteString == "http://127.0.0.1:9/"
+            }
+            return false
+        })
+        #expect(updates.contains {
+            if case .archived(let sessionID) = $0 { return sessionID == "remote-1" }
+            return false
+        })
     }
 
     @Test("agent message chunks accumulate before prompt completion")
@@ -303,8 +322,8 @@ struct ACPEventDecoderTests {
         })
     }
 
-    @Test("first assistant chunk completes open thinking; finalize persists thought for replay")
-    func thinkingPersistedForLocalReplay() async {
+    @Test("first assistant chunk completes open thinking before final reply")
+    func thinkingCompletesBeforeFinalReply() async {
         let fixture = ACPDecoderFixture(customAgentID: "cursor")
         _ = await fixture.openSession(id: "s-think")
         _ = await fixture.decode(.notification(
@@ -330,26 +349,12 @@ struct ACPEventDecoderTests {
             return false
         })
         let promptID = fixture.state.nextRequestID(for: .sessionPrompt)
-        _ = await fixture.decode(.response(
+        let final = await fixture.decode(.response(
             id: promptID,
             result: .object(["stopReason": .string("end_turn")]),
             error: nil
         ))
-        try? await Task.sleep(for: .milliseconds(50))
-        let replay = await fixture.sessionIndex.localHistoryEvents(
-            sessionID: "s-think",
-            customAgentID: "cursor",
-            random: FakeRandomSource()
-        )
-        #expect(replay.contains {
-            if case .thinkingChunk(_, let delta) = $0 { return delta == "reason" }
-            return false
-        })
-        #expect(replay.contains {
-            if case .thinkingComplete = $0 { return true }
-            return false
-        })
-        #expect(replay.contains {
+        #expect(final.events.contains {
             if case .assistantText(_, _, let text, true) = $0 { return text == "answer" }
             return false
         })
@@ -395,52 +400,6 @@ struct ACPEventDecoderTests {
         })
     }
 
-    @Test("completed tool calls persist into local history replay")
-    func toolPersistedForLocalReplay() async {
-        let fixture = ACPDecoderFixture(customAgentID: "cursor")
-        _ = await fixture.openSession(id: "s-tool")
-        _ = await fixture.decode(.notification(
-            method: "session/update",
-            params: .object([
-                "update": .object([
-                    "sessionUpdate": .string("tool_call"),
-                    "toolCallId": .string("read-1"),
-                    "title": .string("Read"),
-                    "status": .string("running"),
-                ]),
-            ])
-        ))
-        _ = await fixture.decode(.notification(
-            method: "session/update",
-            params: .object([
-                "update": .object([
-                    "sessionUpdate": .string("tool_call_update"),
-                    "toolCallId": .string("read-1"),
-                    "status": .string("completed"),
-                    "content": .string("file contents"),
-                ]),
-            ])
-        ))
-        try? await Task.sleep(for: .milliseconds(50))
-        let replay = await fixture.sessionIndex.localHistoryEvents(
-            sessionID: "s-tool",
-            customAgentID: "cursor",
-            random: FakeRandomSource()
-        )
-        #expect(replay.contains {
-            if case .toolStart(let id, let name, _, _) = $0 {
-                return id == "read-1" && name == "Read"
-            }
-            return false
-        })
-        #expect(replay.contains {
-            if case .toolEnd(let id, let success, let output, _) = $0 {
-                return id == "read-1" && success && output.summary == "file contents"
-            }
-            return false
-        })
-    }
-
     @Test("tool call update with progress content maps to toolProgress")
     func toolProgress() async {
         let fixture = ACPDecoderFixture()
@@ -460,7 +419,7 @@ struct ACPEventDecoderTests {
         })
     }
 
-    @Test("session info update records title in session index")
+    @Test("session info update registers the new title")
     func sessionInfoUpdate() async {
         let fixture = ACPDecoderFixture(customAgentID: "cursor")
         _ = await fixture.openSession(id: "sess-title")
@@ -474,11 +433,13 @@ struct ACPEventDecoderTests {
                 ]),
             ])
         ))
-        let summaries = await fixture.sessionIndex.summaries(
-            workspace: fixture.workspace,
-            customAgentID: "cursor"
-        )
-        #expect(summaries.contains { $0.id == "sess-title" && $0.title == "Renamed chat" })
+        let updates = await fixture.metadata.snapshot()
+        #expect(updates.contains {
+            if case .registered(let sessionID, let title) = $0 {
+                return sessionID == "sess-title" && title == "Renamed chat"
+            }
+            return false
+        })
     }
 
     @Test("permission request emits permissionRequest event")
@@ -619,7 +580,7 @@ struct ACPEventDecoderTests {
         })
     }
 
-    @Test("session/load binds SessionStart before replaying user and assistant turns")
+    @Test("session/load suppresses vendor history and emits only readiness")
     func sessionLoadHistoryReplay() async {
         let fixture = ACPDecoderFixture(resumeSessionID: "resume-hist")
         _ = await fixture.decode(.response(
@@ -657,10 +618,7 @@ struct ACPEventDecoderTests {
                 ]),
             ])
         ))
-        #expect(agentBatch.events.contains {
-            if case .userTurn(_, let text) = $0 { return text == "hello" }
-            return false
-        })
+        #expect(agentBatch.events.isEmpty)
 
         let loadID = fixture.state.nextRequestID(for: .sessionLoad)
         let openBatch = await fixture.decode(.response(
@@ -669,27 +627,16 @@ struct ACPEventDecoderTests {
             error: nil
         ))
         #expect(openBatch.events.contains {
-            if case .assistantText(_, _, let text, true) = $0 { return text == "hi there" }
-            return false
-        })
-        #expect(openBatch.events.contains {
             if case .sessionStarted(let id, _, _) = $0 { return id == "resume-hist" }
             return false
         })
-        let sessionIdx = openBatch.events.firstIndex {
-            if case .sessionStarted = $0 { return true }
+        #expect(!openBatch.events.contains {
+            if case .assistantText = $0 { return true }
             return false
-        }
-        let assistantIdx = openBatch.events.firstIndex {
-            if case .assistantText(_, _, _, true) = $0 { return true }
-            return false
-        }
-        if let sessionIdx, let assistantIdx {
-            #expect(sessionIdx < assistantIdx)
-        }
+        })
     }
 
-    @Test("session/load binds SessionStart before replaying thought chunks")
+    @Test("session/load suppresses vendor thought replay")
     func sessionLoadThoughtReplay() async {
         let fixture = ACPDecoderFixture(resumeSessionID: "resume-think")
         _ = await fixture.decode(.response(
@@ -703,51 +650,23 @@ struct ACPEventDecoderTests {
         ))
         fixture.state.setPhase(.awaitingSession)
 
-        _ = await fixture.decode(.notification(
-            method: "session/update",
-            params: .object([
-                "sessionId": .string("resume-think"),
-                "update": .object([
-                    "sessionUpdate": .string("user_message_chunk"),
-                    "messageId": .string("u1"),
-                    "content": .object(["type": .string("text"), "text": .string("why?")]),
-                ]),
-            ])
-        ))
-        let thoughtBatch = await fixture.decode(.notification(
-            method: "session/update",
-            params: .object([
-                "sessionId": .string("resume-think"),
-                "update": .object([
-                    "sessionUpdate": .string("agent_thought_chunk"),
-                    "messageId": .string("t1"),
-                    "content": .object(["type": .string("text"), "text": .string("pondering")]),
-                ]),
-            ])
-        ))
-        #expect(thoughtBatch.events.contains {
-            if case .userTurn(_, let text) = $0 { return text == "why?" }
-            return false
-        })
-        let agentBatch = await fixture.decode(.notification(
-            method: "session/update",
-            params: .object([
-                "sessionId": .string("resume-think"),
-                "update": .object([
-                    "sessionUpdate": .string("agent_message_chunk"),
-                    "messageId": .string("a1"),
-                    "content": .object(["type": .string("text"), "text": .string("because")]),
-                ]),
-            ])
-        ))
-        #expect(agentBatch.events.contains {
-            if case .thinkingChunk(_, let delta) = $0 { return delta == "pondering" }
-            return false
-        })
-        #expect(agentBatch.events.contains {
-            if case .thinkingComplete = $0 { return true }
-            return false
-        })
+        for (kind, text) in [
+            ("user_message_chunk", "why?"),
+            ("agent_thought_chunk", "pondering"),
+            ("agent_message_chunk", "because"),
+        ] {
+            let batch = await fixture.decode(.notification(
+                method: "session/update",
+                params: .object([
+                    "sessionId": .string("resume-think"),
+                    "update": .object([
+                        "sessionUpdate": .string(kind),
+                        "content": .object(["type": .string("text"), "text": .string(text)]),
+                    ]),
+                ])
+            ))
+            #expect(batch.events.isEmpty)
+        }
 
         let loadID = fixture.state.nextRequestID(for: .sessionLoad)
         let openBatch = await fixture.decode(.response(
@@ -756,19 +675,9 @@ struct ACPEventDecoderTests {
             error: nil
         ))
         #expect(openBatch.events.contains {
-            if case .assistantText(_, _, let text, true) = $0 { return text == "because" }
+            if case .sessionStarted(let id, _, _) = $0 { return id == "resume-think" }
             return false
         })
-        let thinkIdx = agentBatch.events.firstIndex {
-            if case .thinkingComplete = $0 { return true }
-            return false
-        }
-        let assistantIdx = openBatch.events.firstIndex {
-            if case .assistantText(_, _, _, true) = $0 { return true }
-            return false
-        }
-        #expect(thinkIdx != nil)
-        #expect(assistantIdx != nil)
     }
 
     @Test("session/load RPC error surfaces session-load-failed")
@@ -781,29 +690,16 @@ struct ACPEventDecoderTests {
             error: .init(code: -32_000, message: "not found", data: nil)
         ))
         #expect(batch.events.contains {
-            if case .error(.unsupportedOperation(let detail)) = $0 {
-                return detail.contains("session-load-failed:resume-fail:not found")
+            if case .error(.sessionReadinessFailed(let sessionID, let detail)) = $0 {
+                return sessionID == "resume-fail" && detail == "not found"
             }
             return false
         })
     }
 
-    @Test("session/load not-found restores local history from Codemixer cache")
-    func sessionLoadNotFoundRestoresLocalHistory() async {
+    @Test("session/load not-found reports typed readiness failure")
+    func sessionLoadNotFoundReportsReadinessFailure() async {
         let fixture = ACPDecoderFixture(customAgentID: "migrate", resumeSessionID: "file:Orders.cs")
-        await fixture.sessionIndex.recordSession(
-            id: "file:Orders.cs",
-            customAgentID: "migrate",
-            workspace: fixture.workspace,
-            title: "Orders.cs"
-        )
-        await fixture.sessionIndex.appendConversationTurn(
-            sessionID: "file:Orders.cs",
-            customAgentID: "migrate",
-            role: .assistant,
-            text: "cached migration transcript"
-        )
-
         let id = fixture.state.nextRequestID(for: .sessionLoad)
         let batch = await fixture.decode(.response(
             id: id,
@@ -812,42 +708,16 @@ struct ACPEventDecoderTests {
         ))
 
         #expect(batch.events.contains {
-            if case .assistantText(_, _, let text, true) = $0 {
-                return text == "cached migration transcript"
+            if case .error(.sessionReadinessFailed(let sessionID, let detail)) = $0 {
+                return sessionID == "file:Orders.cs"
+                    && detail == "Unknown session file:Orders.cs"
             }
-            return false
-        })
-        #expect(batch.events.contains {
-            if case .sessionStarted(let id, _, _) = $0 {
-                return id == "file:Orders.cs"
-            }
-            return false
-        })
-        #expect(batch.events.contains {
-            if case .cachedTranscriptLoaded(let id) = $0 {
-                return id == "file:Orders.cs"
-            }
-            return false
-        })
-        let sessionIdx = batch.events.firstIndex {
-            if case .sessionStarted = $0 { return true }
-            return false
-        }
-        let assistantIdx = batch.events.firstIndex {
-            if case .assistantText = $0 { return true }
-            return false
-        }
-        if let sessionIdx, let assistantIdx {
-            #expect(sessionIdx < assistantIdx)
-        }
-        #expect(!batch.events.contains {
-            if case .error = $0 { return true }
             return false
         })
     }
 
-    @Test("background phase_update emits sessionPhaseChanged and persists for later load")
-    func backgroundPhaseUpdatePersistsForLaterLoad() async {
+    @Test("background phase_update emits sessionPhaseChanged for repository persistence")
+    func backgroundPhaseUpdateEmitsDurableEvent() async {
         let fixture = ACPDecoderFixture(customAgentID: "migrate")
         _ = await fixture.openSession(id: "overview")
 
@@ -863,19 +733,6 @@ struct ACPEventDecoderTests {
         ))
 
         #expect(batch.events.contains {
-            if case .sessionPhaseChanged(let sessionID, let phase) = $0 {
-                return sessionID == "file:Orders.cs" && phase.id == "migrating"
-            }
-            return false
-        })
-
-        try? await Task.sleep(for: .milliseconds(50))
-        let replay = await fixture.sessionIndex.localHistoryEvents(
-            sessionID: "file:Orders.cs",
-            customAgentID: "migrate",
-            random: fixture.random
-        )
-        #expect(replay.contains {
             if case .sessionPhaseChanged(let sessionID, let phase) = $0 {
                 return sessionID == "file:Orders.cs" && phase.id == "migrating"
             }
@@ -983,7 +840,7 @@ struct ACPEventDecoderTests {
         })
     }
 
-    @Test("reverse session/new records session and emits sessionIndexChanged")
+    @Test("reverse session/new records session metadata")
     func reverseSessionNew() async {
         let fixture = ACPDecoderFixture(customAgentID: "migrate")
         let batch = await fixture.decode(.serverRequest(
@@ -996,35 +853,20 @@ struct ACPEventDecoderTests {
             ])
         ))
         #expect(batch.replies.count == 1)
-        #expect(batch.events.contains {
-            if case .sessionIndexChanged(let path) = $0 {
-                return path.path == fixture.workspace.path
+        let updates = await fixture.metadata.snapshot()
+        #expect(updates.contains {
+            if case .registered(let sessionID, let title) = $0 {
+                return sessionID == "agent-sess-1" && title == "Agent created"
             }
             return false
         })
-        let summaries = await fixture.sessionIndex.summaries(
-            workspace: fixture.workspace,
-            customAgentID: "migrate"
-        )
-        #expect(summaries.contains { $0.id == "agent-sess-1" })
     }
 
     @Test("reverse session/new can unarchive a recreated file session")
     func reverseSessionNewUnarchivesRecreatedSession() async {
         let fixture = ACPDecoderFixture(customAgentID: "migrate")
-        await fixture.sessionIndex.recordSession(
-            id: "file:A.cs",
-            customAgentID: "migrate",
-            workspace: fixture.workspace,
-            title: "A.cs"
-        )
-        await fixture.sessionIndex.setArchived(
-            sessionID: "file:A.cs",
-            customAgentID: "migrate",
-            archived: true
-        )
 
-        let batch = await fixture.decode(.serverRequest(
+        _ = await fixture.decode(.serverRequest(
             id: .number(43),
             method: "session/new",
             params: .object([
@@ -1039,19 +881,19 @@ struct ACPEventDecoderTests {
             ])
         ))
 
-        #expect(batch.events.contains {
-            if case .sessionIndexChanged(let path) = $0 {
-                return path.path == fixture.workspace.path
+        let updates = await fixture.metadata.snapshot()
+        #expect(updates.contains {
+            if case .unarchived(let sessionID) = $0 {
+                return sessionID == "file:A.cs"
             }
             return false
         })
-        let summaries = await fixture.sessionIndex.summaries(
-            workspace: fixture.workspace,
-            customAgentID: "migrate"
-        )
-        let recreated = summaries.first { $0.id == "file:A.cs" }
-        #expect(recreated?.isOverview == false)
-        #expect(recreated?.needsAttention == false)
+        #expect(updates.contains {
+            if case .unmarkAsOverview(let sessionID) = $0 {
+                return sessionID == "file:A.cs"
+            }
+            return false
+        })
     }
 
     @Test("background permission parks and emits attention without permissionRequest")
@@ -1079,8 +921,8 @@ struct ACPEventDecoderTests {
         })
     }
 
-    @Test("session/load restores foreign-buffered turns into the chat pane")
-    func sessionLoadSurfacesForeignBuffer() async {
+    @Test("foreign-buffered turns are forwarded for repository persistence")
+    func foreignBufferForwardsBackgroundEvents() async {
         let fixture = ACPDecoderFixture(customAgentID: "migrate", resumeSessionID: "file:Orders.cs")
         _ = await fixture.decode(.response(
             id: .number(1),
@@ -1092,14 +934,7 @@ struct ACPEventDecoderTests {
             error: nil
         ))
         _ = await fixture.openSession(id: "overview")
-        await fixture.sessionIndex.recordSession(
-            id: "file:Orders.cs",
-            customAgentID: "migrate",
-            workspace: fixture.workspace,
-            title: "Orders.cs"
-        )
 
-        // File session streams while overview is foreground — UI drops, cache keeps.
         _ = await fixture.decode(.notification(
             method: "session/update",
             params: .object([
@@ -1110,7 +945,6 @@ struct ACPEventDecoderTests {
                 ]),
             ])
         ))
-        // Role boundary persists the agent turn into the local cache.
         _ = await fixture.decode(.notification(
             method: "session/update",
             params: .object([
@@ -1121,6 +955,7 @@ struct ACPEventDecoderTests {
                 ]),
             ])
         ))
+        let background = await fixture.backgroundEvents.snapshot()
 
         fixture.state.prepareLoadSession(sessionID: "file:Orders.cs")
         let loadID = fixture.state.nextRequestID(for: .sessionLoad)
@@ -1135,38 +970,29 @@ struct ACPEventDecoderTests {
             error: nil
         ))
         #expect(openBatch.events.contains {
-            if case .assistantText(_, _, let text, true) = $0 {
-                return text.contains("migrating Orders")
+            if case .sessionStarted(let sessionID, _, _) = $0 {
+                return sessionID == "file:Orders.cs"
             }
             return false
         })
-        #expect(openBatch.events.contains {
-            if case .userTurn(_, let text) = $0 { return text.contains("follow up") }
-            return false
+        #expect(background.contains {
+            $0.sessionID == "file:Orders.cs" && $0.events.contains {
+                if case .assistantText(_, _, let text, true) = $0 {
+                    return text == "migrating Orders"
+                }
+                return false
+            }
         })
-        let sessionIdx = openBatch.events.firstIndex {
-            if case .sessionStarted = $0 { return true }
-            return false
-        }
-        let historyIdx = openBatch.events.firstIndex {
+        #expect(!openBatch.events.contains {
             if case .assistantText = $0 { return true }
             return false
-        }
-        if let sessionIdx, let historyIdx {
-            #expect(sessionIdx < historyIdx)
-        }
+        })
     }
 
     @Test("foreign streaming sessionId chunks are dropped while another session is foreground")
     func foreignStreamingSessionIdGuard() async {
         let fixture = ACPDecoderFixture()
         _ = await fixture.openSession(id: "A")
-        await fixture.sessionIndex.recordSession(
-            id: "B",
-            customAgentID: fixture.customAgentID,
-            workspace: fixture.workspace,
-            title: "B"
-        )
         let foreign = await fixture.decode(.notification(
             method: "session/update",
             params: .object([
@@ -1191,14 +1017,12 @@ struct ACPEventDecoderTests {
             ])
         ))
         #expect(boundary.events.isEmpty)
-        let afterBoundary = await fixture.sessionIndex.localHistoryEvents(
-            sessionID: "B",
-            customAgentID: fixture.customAgentID,
-            random: SystemRandomSource()
-        )
-        #expect(afterBoundary.contains {
-            if case .assistantText(_, _, let text, true) = $0 { return text.contains("from-B") }
-            return false
+        let background = await fixture.backgroundEvents.snapshot()
+        #expect(background.contains {
+            $0.sessionID == "B" && $0.events.contains {
+                if case .assistantText(_, _, let text, true) = $0 { return text == "from-B" }
+                return false
+            }
         })
 
         let promptID = fixture.state.nextRequestID(for: .sessionPrompt)
@@ -1278,15 +1102,10 @@ struct ACPEventDecoderTests {
         })
     }
 
-    @Test("session_info_update archived hides session from summaries")
+    @Test("session_info_update forwards archived metadata")
     func archivedSessionInfoUpdate() async {
         let fixture = ACPDecoderFixture(customAgentID: "migrate")
         _ = await fixture.openSession(id: "to-archive")
-        let before = await fixture.sessionIndex.summaries(
-            workspace: fixture.workspace,
-            customAgentID: "migrate"
-        )
-        #expect(before.contains { $0.id == "to-archive" })
 
         _ = await fixture.decode(.notification(
             method: "session/update",
@@ -1299,11 +1118,13 @@ struct ACPEventDecoderTests {
                 ]),
             ])
         ))
-        let after = await fixture.sessionIndex.summaries(
-            workspace: fixture.workspace,
-            customAgentID: "migrate"
-        )
-        #expect(!after.contains { $0.id == "to-archive" })
+        let updates = await fixture.metadata.snapshot()
+        #expect(updates.contains {
+            if case .archived(let sessionID) = $0 {
+                return sessionID == "to-archive"
+            }
+            return false
+        })
     }
 
     @Test("archiving a session drops parked permissions so restart cannot re-fire them")

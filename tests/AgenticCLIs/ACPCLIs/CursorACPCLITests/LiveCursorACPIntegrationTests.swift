@@ -115,7 +115,7 @@ struct LiveCursorACPIntegrationTests {
         )
     }
 
-    @Test("live Cursor ACP fresh-process session/load replays history")
+    @Test("local history restores before fresh-process session/load follow-up")
     func liveFreshProcessHistoryLoad() async throws {
         guard LiveCursorACPHarness.isEnabled() else { return }
         if let reason = LiveCursorACPHarness.prerequisiteFailure() {

@@ -18,6 +18,10 @@ public enum WireAgentErrorCode: String, Sendable, CaseIterable {
     case attachmentNotFound = "attachment_not_found"
     case engineRestartLimitReached = "engine_restart_limit"
     case permissionTimeout = "permission_timeout"
+    case historyWriteFailed = "history_write_failed"
+    case historyLoadFailed = "history_load_failed"
+    case historyJournalLocked = "history_journal_locked"
+    case sessionReadinessFailed = "session_readiness_failed"
     case internalInvariant = "internal_invariant"
     case unsupportedOperation = "unsupported_operation"
 }
@@ -35,6 +39,8 @@ public enum WireAgentErrorContextKey: String, Sendable {
     case id
     case promptID
     case action
+    case sessionID
+    case ownerPID
 }
 
 /// Typed builder and view over `WireAgentError.context`.

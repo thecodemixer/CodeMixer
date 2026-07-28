@@ -58,16 +58,16 @@ struct TwinDecoderParityTests {
     @Test("Twin project slug matches Claude's case-preserving leading-dash convention")
     func projectSlugConvention() {
         let slug = ClaudeCodeTwinTranscript.projectSlug(
-            for: URL(fileURLWithPath: "/Users/Alice/Code/My.Proj")
+            for: URL(fileURLWithPath: "/home/Alice/Code/My.Proj")
         )
-        #expect(slug == "-Users-Alice-Code-My-Proj")
+        #expect(slug == "-home-Alice-Code-My-Proj")
     }
 
     @Test("Project slug preserves spaces from a typical checkout path")
     func projectSlugPreservesSpacesFromCheckoutPath() {
         let slug = ClaudeCodeTwinTranscript.projectSlug(
-            for: URL(fileURLWithPath: "/Users/alice/Code/Codemixer/Sample Workspace")
+            for: URL(fileURLWithPath: "/home/alice/Code/Codemixer/Sample Workspace")
         )
-        #expect(slug == "-Users-alice-Code-Codemixer-Sample-Workspace")
+        #expect(slug == "-home-alice-Code-Codemixer-Sample-Workspace")
     }
 }
