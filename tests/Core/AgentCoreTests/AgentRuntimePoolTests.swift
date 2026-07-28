@@ -47,6 +47,175 @@ struct AgentRuntimePoolTests {
         await engine.shutdown(reason: .naturalExit)
     }
 
+    @Test("reactivating an already-bound pooled session replays visible history")
+    func reactivatingSameSessionReplaysVisibleHistory() async throws {
+        let clock = FakeClock()
+        let a = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("pool-replay-a-\(UUID().uuidString)", isDirectory: true)
+        let b = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("pool-replay-b-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: a, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: b, withIntermediateDirectories: true)
+
+        let t1 = ScriptedTransport()
+        let t2 = ScriptedTransport()
+        let factory = ScriptedTransportFactory([t1, t2])
+        let fs = InMemoryFileSystem()
+        let env = FakeEnvironment(home: a)
+        let seams = Seams.fake(environment: env, fileSystem: fs).with(clock: clock)
+        let engine = AgentEngine(seams: seams, transportFactory: factory.makeTransport)
+        await engine.bootstrap()
+
+        let adapterA = RecordingMockAdapter()
+        try await engine.start(adapter: adapterA, workspace: a, resumeSessionID: "s-a")
+        let keyA = AgentRuntimeKey(projectPath: a.path, agentID: adapterA.id)
+        let phase = SessionPhase(id: "review",
+                                 label: "Review",
+                                 ordinal: 2,
+                                 group: .review)
+        await engine.ingest(.sessionPhaseChanged(sessionID: "s-a", phase: phase),
+                            from: keyA)
+        await engine.ingest(.userTurn(id: "u-a", text: "restore me"), from: keyA)
+        let thinkingID = UUID()
+        await engine.ingest(.thinkingChunk(blockID: thinkingID, delta: "I need to inspect files."),
+                            from: keyA)
+        await engine.ingest(.thinkingComplete(blockID: thinkingID,
+                                              duration: .seconds(1)),
+                            from: keyA)
+        let streamingID = UUID()
+        await engine.ingest(.textDelta(messageID: streamingID, delta: "Streaming reply"),
+                            from: keyA)
+        await engine.ingest(.toolStart(id: "tool-a",
+                                       name: "Bash",
+                                       input: ToolInput(summary: "Run: pwd"),
+                                       startedAt: clock.now()),
+                            from: keyA)
+        await engine.ingest(.toolProgress(callID: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
+                                          progress: .generic(message: "checking files")),
+                            from: keyA)
+        await engine.ingest(.toolEnd(id: "tool-a",
+                                     success: true,
+                                     output: ToolOutput(summary: "/tmp/ws"),
+                                     durationMS: 12),
+                            from: keyA)
+        await engine.ingest(.assistantText(id: "m-a",
+                                           blockID: "b-a",
+                                           text: "history reply",
+                                           isFinal: true),
+                            from: keyA)
+
+        try await engine.start(adapter: RecordingMockAdapter(), workspace: b, resumeSessionID: "s-b")
+        let beforeReactivate = await engine.bus.historySnapshot.count
+
+        let activated = await engine.activate(key: keyA, resumeSessionID: "s-a")
+        #expect(activated)
+        #expect(factory.spawnCount == 2)
+        #expect(await t1.isClosed() == false)
+
+        let replayed = await engine.bus.historySnapshot.dropFirst(beforeReactivate).map(\.event)
+        #expect(replayed.contains {
+            if case .sessionStarted(let id, _, _) = $0 { return id == "s-a" }
+            return false
+        })
+        #expect(replayed.contains {
+            if case .userTurn(_, let text) = $0 { return text == "restore me" }
+            return false
+        })
+        #expect(replayed.contains {
+            if case .sessionPhaseChanged(let id, let replayedPhase) = $0 {
+                return id == "s-a" && replayedPhase == phase
+            }
+            return false
+        })
+        #expect(replayed.contains {
+            if case .thinkingChunk(let id, let text) = $0 {
+                return id == thinkingID && text == "I need to inspect files."
+            }
+            return false
+        })
+        #expect(replayed.contains {
+            if case .thinkingComplete(let id, let duration) = $0 {
+                return id == thinkingID && duration == .seconds(1)
+            }
+            return false
+        })
+        #expect(replayed.contains {
+            if case .textDelta(let id, let delta) = $0 {
+                return id == streamingID && delta == "Streaming reply"
+            }
+            return false
+        })
+        #expect(replayed.contains {
+            if case .toolStart("tool-a", "Bash", let input, _) = $0 {
+                return input.summary == "Run: pwd"
+            }
+            return false
+        })
+        #expect(replayed.contains {
+            if case .toolProgress(_, let progress) = $0,
+               case .generic(let message) = progress {
+                return message == "checking files"
+            }
+            return false
+        })
+        #expect(replayed.contains {
+            if case .toolEnd("tool-a", true, let output, 12) = $0 {
+                return output.summary == "/tmp/ws"
+            }
+            return false
+        })
+        #expect(replayed.contains {
+            if case .assistantText(_, _, let text, let isFinal) = $0 {
+                return text == "history reply" && isFinal
+            }
+            return false
+        })
+
+        await engine.shutdown(reason: .naturalExit)
+    }
+
+    @Test("engine-sent prompts are cached for pooled session replay")
+    func optimisticPromptEchoIsCachedForReplay() async throws {
+        let a = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("pool-prompt-a-\(UUID().uuidString)", isDirectory: true)
+        let b = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("pool-prompt-b-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: a, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: b, withIntermediateDirectories: true)
+
+        let t1 = ScriptedTransport()
+        let t2 = ScriptedTransport()
+        let factory = ScriptedTransportFactory([t1, t2])
+        let fs = InMemoryFileSystem()
+        let env = FakeEnvironment(home: a)
+        let seams = Seams.fake(environment: env, fileSystem: fs)
+        let engine = AgentEngine(seams: seams, transportFactory: factory.makeTransport)
+        await engine.bootstrap()
+
+        let adapterA = RecordingMockAdapter()
+        try await engine.start(adapter: adapterA, workspace: a, resumeSessionID: "s-a")
+        try await engine.send(.sendPrompt(text: "show current files", attachments: []))
+
+        let adapterB = RecordingMockAdapter()
+        try await engine.start(adapter: adapterB, workspace: b, resumeSessionID: "s-b")
+        let beforeReactivate = await engine.bus.historySnapshot.count
+
+        let keyA = AgentRuntimeKey(projectPath: a.path, agentID: adapterA.id)
+        let activated = await engine.activate(key: keyA, resumeSessionID: "s-a")
+        #expect(activated)
+        #expect(await t1.writtenTexts().contains { $0.contains("show current files") })
+
+        let replayed = await engine.bus.historySnapshot.dropFirst(beforeReactivate).map(\.event)
+        #expect(replayed.contains {
+            if case .userTurn(_, let text) = $0 {
+                return text == "show current files"
+            }
+            return false
+        })
+
+        await engine.shutdown(reason: .naturalExit)
+    }
+
     @Test("closeSession kills only the active slot")
     func closeSessionKeepsSibling() async throws {
         let a = URL(fileURLWithPath: NSTemporaryDirectory())
@@ -235,6 +404,32 @@ struct AgentRuntimePoolTests {
         let ok = await engine.activate(key: key, resumeSessionID: "thread-2")
         #expect(ok)
         #expect(adapter.resumeCalls.contains("thread-2"))
+        #expect(factory.spawnCount == 1)
+
+        await engine.shutdown(reason: .naturalExit)
+    }
+
+    @Test("same-session activate with no cached history asks the adapter to reload")
+    func sameSessionWithoutCachedHistoryReloadsAdapter() async throws {
+        let project = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("pool-same-empty-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        let transport = ScriptedTransport()
+        let factory = ScriptedTransportFactory([transport])
+        let fs = InMemoryFileSystem()
+        let env = FakeEnvironment(home: project)
+        let seams = Seams.fake(environment: env, fileSystem: fs)
+        let engine = AgentEngine(seams: seams, transportFactory: factory.makeTransport)
+        await engine.bootstrap()
+
+        let adapter = WarmHandshakeAdapter()
+        try await engine.start(adapter: adapter, workspace: project, resumeSessionID: "thread-1")
+        let key = AgentRuntimeKey(projectPath: project.path, agentID: adapter.id)
+
+        let ok = await engine.activate(key: key, resumeSessionID: "thread-1")
+        #expect(ok)
+        #expect(adapter.resumeCalls == ["thread-1"])
+        #expect(await transport.writtenTexts().contains("session/load:thread-1"))
         #expect(factory.spawnCount == 1)
 
         await engine.shutdown(reason: .naturalExit)

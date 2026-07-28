@@ -35,12 +35,12 @@ extension ACPEventDecoder {
         switch kind {
         case "agent_message_chunk":
             if state.phase() == .awaitingSession {
-                return historyChunk(role: "agent", update: update)
+                return historyChunk(role: .agent, update: update)
             }
             return agentMessageChunk(update)
         case "agent_thought_chunk":
             if state.phase() == .awaitingSession {
-                return historyChunk(role: "thinking", update: update)
+                return historyChunk(role: .thinking, update: update)
             }
             return agentThoughtChunk(update)
         case "tool_call":
@@ -60,7 +60,7 @@ extension ACPEventDecoder {
             return toolCallUpdate(update)
         case "user_message_chunk":
             if state.phase() == .awaitingSession {
-                return historyChunk(role: "user", update: update)
+                return historyChunk(role: .user, update: update)
             }
             // Live user chunks for the foreground session are unusual; ignore.
             // Foreign user chunks are handled above via cacheForeignStreaming.
@@ -84,6 +84,15 @@ extension ACPEventDecoder {
             return Batch()
         case "available_commands_update":
             return Batch()
+        case "codemixer.dev/phase_update":
+            // During session/load, flush coalesced history text first so the
+            // phase marker anchors after prior turns instead of before them.
+            if state.phase() == .awaitingSession {
+                let flushed = state.flushHistoryReplay()
+                let phase = phaseUpdate(params: params, update: update)
+                return Batch(events: flushed + phase.events, replies: phase.replies)
+            }
+            return phaseUpdate(params: params, update: update)
         default:
             await SilentDiagnostics.shared.record(
                 kind: .other,
@@ -92,6 +101,56 @@ extension ACPEventDecoder {
                 details: kind ?? "nil"
             )
             return Batch()
+        }
+    }
+
+    /// A file-level pipeline phase advanced (Custom ACP only). Bridged
+    /// agent-agnostically to `AgentEvent.sessionPhaseChanged` regardless of
+    /// whether `sessionID` is the foreground session — the reduction step
+    /// decides what to do with a background file's marker; dropping it here
+    /// would leave that session with no phase history once selected.
+    ///
+    /// When the phase advances on the *foreground* session, finalize any open
+    /// assistant / thinking stream first so planner → implementer → reviewer
+    /// text becomes separate transcript bubbles instead of one concatenated wall.
+    func phaseUpdate(params: JSONValue, update: JSONValue) -> Batch {
+        guard let status = update["status"]?.stringValue else { return Batch() }
+        let sessionID = params["sessionId"]?.stringValue ?? state.sessionID() ?? ""
+        guard !sessionID.isEmpty else { return Batch() }
+        let phase = ACPPipelinePhaseMapping.phase(forStatus: status)
+        var events: [AgentEvent] = []
+
+        let isForeground = sessionID == state.sessionID()
+        if isForeground, state.phase() == .ready, state.foregroundPhaseID() != phase.id {
+            if let thoughtID = state.takeOpenThinkingBlockID() {
+                events.append(.thinkingComplete(blockID: thoughtID, duration: .zero))
+            }
+            if let finalized = state.finalizedAssistantMessage() {
+                events.append(.assistantText(
+                    id: finalized.id.uuidString,
+                    blockID: "agent-message",
+                    text: finalized.text,
+                    isFinal: true
+                ))
+            }
+            state.setForegroundPhaseID(phase.id)
+        } else if isForeground {
+            state.setForegroundPhaseID(phase.id)
+        }
+
+        persistPhaseTurn(sessionID: sessionID, phase: phase)
+        events.append(.sessionPhaseChanged(sessionID: sessionID, phase: phase))
+        return Batch(events: events)
+    }
+
+    /// Only cache live phase markers — load-time wire replay must not
+    /// rewrite the index (mirrors `persistToolTurn`'s `.ready`-only gate).
+    func persistPhaseTurn(sessionID: String, phase: SessionPhase) {
+        guard state.phase() == .ready, let context = state.currentContext() else { return }
+        let customAgentID = context.customAgentID
+        let index = sessionIndex
+        Task {
+            await index.appendPhaseTurn(sessionID: sessionID, customAgentID: customAgentID, phase: phase)
         }
     }
 
@@ -120,13 +179,12 @@ extension ACPEventDecoder {
         let customAgentID = context.customAgentID
         let index = sessionIndex
 
-        func persist(_ role: String, _ text: String) async {
+        func persist(_ role: ACPTurnRole, _ text: String) async {
             guard !text.isEmpty else { return }
-            let storedRole = role == "agent" ? "assistant" : role
             await index.appendConversationTurn(
                 sessionID: sessionID,
                 customAgentID: customAgentID,
-                role: storedRole,
+                role: role,
                 text: text
             )
         }
@@ -135,7 +193,7 @@ extension ACPEventDecoder {
         case "user_message_chunk":
             if let flushed = state.appendForeignChunk(
                 sessionID: sessionID,
-                role: "user",
+                role: .user,
                 delta: streamingText(from: update)
             ) {
                 await persist(flushed.role, flushed.text)
@@ -143,7 +201,7 @@ extension ACPEventDecoder {
         case "agent_message_chunk":
             if let flushed = state.appendForeignChunk(
                 sessionID: sessionID,
-                role: "agent",
+                role: .agent,
                 delta: streamingText(from: update)
             ) {
                 await persist(flushed.role, flushed.text)
@@ -151,7 +209,7 @@ extension ACPEventDecoder {
         case "agent_thought_chunk":
             if let flushed = state.appendForeignChunk(
                 sessionID: sessionID,
-                role: "thinking",
+                role: .thinking,
                 delta: streamingText(from: update)
             ) {
                 await persist(flushed.role, flushed.text)
@@ -207,7 +265,7 @@ extension ACPEventDecoder {
             ?? ""
     }
 
-    func historyChunk(role: String, update: JSONValue) -> Batch {
+    func historyChunk(role: ACPTurnRole, update: JSONValue) -> Batch {
         let content = update["content"]
         let text = content?["text"]?.stringValue
             ?? content?["content"]?.stringValue

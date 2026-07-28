@@ -60,7 +60,7 @@ struct CustomACPSessionListingTests {
         await store.appendConversationTurn(
             sessionID: "listed-1",
             customAgentID: ref.id,
-            role: "user",
+            role: .user,
             text: "listed chat"
         )
 

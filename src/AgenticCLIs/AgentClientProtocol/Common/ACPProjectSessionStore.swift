@@ -5,15 +5,30 @@ import AgentCore
 /// Project-local ACP session index + dual-write JSONL transcripts under
 /// `<project>/.codemixer/acp/<customAgentID>/`.
 public actor ACPProjectSessionStore: ACPSessionIndexing {
-    private struct JSONLLine: Encodable {
+    private struct JSONLLine: Codable {
         let v: Int
         let ts: Date
-        let role: String
+        let role: ACPTurnRole
         let text: String
         let toolCallID: String?
         let toolSuccess: Bool?
         let toolOutputSummary: String?
         let toolInputJSON: String?
+        let phase: SessionPhase?
+
+        init(v: Int,
+             ts: Date,
+             turn: ACPConversationTurn) {
+            self.v = v
+            self.ts = ts
+            self.role = turn.role
+            self.text = turn.text
+            self.toolCallID = turn.toolCallID
+            self.toolSuccess = turn.toolSuccess
+            self.toolOutputSummary = turn.toolOutputSummary
+            self.toolInputJSON = turn.toolInputJSON
+            self.phase = turn.phase
+        }
     }
 
     private let customAgentID: String
@@ -72,15 +87,16 @@ public actor ACPProjectSessionStore: ACPSessionIndexing {
 
     public func appendConversationTurn(sessionID: String,
                                        customAgentID: String,
-                                       role: String,
+                                       role: ACPTurnRole,
                                        text: String) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        let stored = role.stored
         await appendTurn(
             sessionID: sessionID,
             customAgentID: customAgentID,
-            turn: ACPConversationTurn(role: role, text: trimmed),
-            titleFromUserText: role == "user" ? trimmed : nil
+            turn: ACPConversationTurn(role: stored, text: trimmed),
+            titleFromUserText: stored == .user ? trimmed : nil
         )
     }
 
@@ -97,13 +113,22 @@ public actor ACPProjectSessionStore: ACPSessionIndexing {
             sessionID: sessionID,
             customAgentID: customAgentID,
             turn: ACPConversationTurn(
-                role: "tool",
+                role: .tool,
                 text: trimmedName,
                 toolCallID: toolCallID,
                 toolSuccess: success,
                 toolOutputSummary: outputSummary,
                 toolInputJSON: inputJSON
             ),
+            titleFromUserText: nil
+        )
+    }
+
+    public func appendPhaseTurn(sessionID: String, customAgentID: String, phase: SessionPhase) async {
+        await appendTurn(
+            sessionID: sessionID,
+            customAgentID: customAgentID,
+            turn: ACPConversationTurn(role: .phase, text: phase.label, phase: phase),
             titleFromUserText: nil
         )
     }
@@ -118,7 +143,7 @@ public actor ACPProjectSessionStore: ACPSessionIndexing {
         }
         let key = ACPSessionStoreCodec.key(customAgentID: customAgentID, sessionID: sessionID)
         guard let entry = entries[key] else { return [] }
-        return ACPSessionStoreCodec.events(from: entry.turns, clock: clock, random: random)
+        return ACPSessionStoreCodec.events(from: entry.turns, sessionID: sessionID, clock: clock, random: random)
     }
 
     public func summaries(workspace: URL, customAgentID: String) async -> [SessionSummary] {
@@ -331,16 +356,7 @@ public actor ACPProjectSessionStore: ACPSessionIndexing {
             let encoder = JSONEncoder()
             encoder.outputFormatting = .sortedKeys
             encoder.dateEncodingStrategy = .iso8601
-            let line = JSONLLine(
-                v: 1,
-                ts: clock.now(),
-                role: turn.role,
-                text: turn.text,
-                toolCallID: turn.toolCallID,
-                toolSuccess: turn.toolSuccess,
-                toolOutputSummary: turn.toolOutputSummary,
-                toolInputJSON: turn.toolInputJSON
-            )
+            let line = JSONLLine(v: 1, ts: clock.now(), turn: turn)
             var data = try encoder.encode(line)
             data.append(contentsOf: "\n".utf8)
             if fileSystem.fileExists(at: url) {
@@ -379,16 +395,7 @@ public actor ACPProjectSessionStore: ACPSessionIndexing {
             var data = Data()
             let now = clock.now()
             for turn in turns {
-                let line = JSONLLine(
-                    v: 1,
-                    ts: now,
-                    role: turn.role,
-                    text: turn.text,
-                    toolCallID: turn.toolCallID,
-                    toolSuccess: turn.toolSuccess,
-                    toolOutputSummary: turn.toolOutputSummary,
-                    toolInputJSON: turn.toolInputJSON
-                )
+                let line = JSONLLine(v: 1, ts: now, turn: turn)
                 data.append(try encoder.encode(line))
                 data.append(contentsOf: "\n".utf8)
             }

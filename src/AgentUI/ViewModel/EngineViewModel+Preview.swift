@@ -61,5 +61,13 @@ public extension EngineViewModel {
         model.applyPreviewConversationState()
         return model
     }
+
+    /// Multi-turn, multi-phase Custom ACP file session for the chat
+    /// workbench's lane views and `SessionScrubber` previews.
+    static var previewCustomACPPhases: EngineViewModel {
+        let model = preview
+        model.applyPreviewCustomACPPhasesState()
+        return model
+    }
 }
 #endif

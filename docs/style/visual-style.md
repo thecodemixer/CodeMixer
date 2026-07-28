@@ -147,7 +147,7 @@ When Claude asks to run a command, Codemixer's UI is built as *the user's delibe
 
 ### 1.15 Density adapts
 
-Codemixer runs comfortably on a 27" display and credibly on a 13" laptop. When (in future) a phone or pad client mirrors the same agent, the chrome compresses but the conversation does not. We support three density classes: `comfortable` (default macOS), `compact` (small windows or iPad), and `tactile` (touch surfaces). All three are driven by a single `Theme.density` setting plus environment-derived layout — never by `if isPhone { ... }`.
+Codemixer runs comfortably on a 27" display and credibly on a 13" laptop. When (in future) a phone or pad client mirrors the same agent, the chrome compresses but the conversation does not. `Theme.DensityMode` has three cases today: `comfortable` (default), `compact` (small windows), and `focus` — the chat workbench's zen reading mode, which shares `compact`'s spacing scale but additionally collapses the index rail and work lane to a single centered transcript (see §12 "Chat workbench"). All three are driven by the one `densityMode` setting plus environment-derived layout (`codemixerSpacingScale`) — never by `if isPhone { ... }`. A touch-oriented fourth class remains a future addition, not a shipped one.
 
 ---
 
@@ -677,21 +677,26 @@ A drag is a four-state interaction: handle (at rest), drag preview (in flight), 
 
 ### The window
 
-[macOS] Codemixer's main window is a `NavigationSplitView`: a collapsible session navigator, then the conversation + diff detail:
+[macOS] Codemixer's main window is a `NavigationSplitView`: a collapsible session navigator, then the **chat workbench** — a calm, content-driven 3-lane detail region (superseding the earlier single centered conversation column + optional diff panel):
 
 ```
-┌───────────────┬────────────────────┬──────────────────────┐
-│               │                    │                      │
-│  Session      │  Conversation      │   Diff (optional,    │
-│  Navigator    │  (always shown)    │   can be collapsed)  │
-│  (collapsible)│                    │                      │
-│               │                    │                      │
-│               ├────────────────────┴──────────────────────┤
-│               │  Composer (always at the bottom)          │
-└───────────────┴───────────────────────────────────────────┘
+┌───────────────┬────────────┬───────────────────┬──────────────────┐
+│               │            │                    │                  │
+│  Session      │ Index Rail │  Transcript Lane   │  Work Lane       │
+│  Navigator    │ (turns, or │  (prose + prominent│  (tool cards for │
+│  (collapsible;│  phases    │  live thinking;     │  the selected    │
+│  cmd+\ ; icon-│  for       │  StatusPill pinned  │  turn, then      │
+│  rail focus)  │  Custom ACP│  top-trailing)      │  Changes/diffs)  │
+│               │  files)    │                     │  on-demand       │
+│               │  fixed,    │                     │                  │
+│               │  non-drag  ├─────────────────────┴──────────────────┤
+│               │            │  Composer (always at the bottom)       │
+└───────────────┴────────────┴─────────────────────────────────────────┘
 ```
 
-[iOS / iPadOS / visionOS] The same regions exist but reflow into a single column: the navigator becomes a slide-over / first column, the diff is accessible via a tab or sheet.
+The index rail and work lane are **content-driven** (§1.1/§1.4): the work lane claims a slot only when it has tools or changed files, and `.focus` density (`Theme.DensityMode.focus`, §1.15) collapses both rail and work lane to a single centered transcript — the workbench's zen reading mode. Keep one transcript instance alive per render; avoid multi-candidate layout shells that duplicate markdown/code parsing during streaming.
+
+[iOS / iPadOS / visionOS] The same regions exist but reflow into a single column: the navigator becomes a slide-over / first column, the index rail and work lane are accessible via a tab or sheet.
 
 ### Session Navigator
 
@@ -708,10 +713,10 @@ The leftmost column lists the **currently-loaded workspace's projects** and, und
 
 ### Resizable splits
 
-- The diff panel toggles open/closed via a window-toolbar button or `cmd+D`.
-- Open default width: 40% of the window.
-- Min conversation width: 480pt. Below that, the diff auto-collapses.
-- Composer height grows with input up to 6 lines, then scrolls internally.
+- The index rail is fixed-width (`indexRailWidth`, 248pt) and non-draggable — it does not compete for space, mirroring the navigator's own fixed-width behavior. It is also layout-priority-protected so opening the work lane cannot clip it under the session sidebar.
+- Only the transcript/work-lane boundary is user-draggable (custom `HStack` divider — **not** nested `HSplitView`, which AppKit expands under the session sidebar and hides the Turns rail). The work lane toggles open/closed via a window-toolbar button or `cmd+D` (repurposed from the old diff-panel binding); open default/ideal width is `workLaneIdealWidth` (420pt).
+- Min transcript / work widths: `transcriptMinWidth` (320pt) and `workLaneMinWidth` (280pt). Together with the rail they must fit a typical detail column (~840pt after a ~260pt sidebar); do not re-alias transcript min to the old single-column `workspaceSidebarMinWidth` (480pt) — that overflows and hides the Turns rail.
+- Composer height grows with input up to 6 lines, then scrolls internally; it spans the transcript + work-lane width, not the rail.
 
 ### Empty conversation
 
@@ -722,18 +727,21 @@ The hero state — no messages yet — has two faces, driven only by view-model 
 
 Both use `heroIcon` type, a centered column clamped to the reading width, generous `s32` padding, and exactly one idea each. No tutorial overlays, no helper text walls. The hero cross-fades to the conversation with the `changing` token (reduced-motion safe).
 
-### Conversation list
+### Conversation list (the transcript lane)
 
-- Single column, max width clamped at 720pt for legibility.
-- Centered horizontally when the conversation area is wider.
+- Single column within the transcript lane, inner max width still clamped at 720pt (`messageMaxWidth`) for legibility, centered when the lane is wider. Only the outer full-pane centering (the old dead side margins) is gone — the lane itself spans its `HSplitView` share.
 - Turns are separated by `s24`; bubbles within a turn by `s8`.
 - Timestamps appear only on hover (IntentReveal) and on the first/last bubble of every minute.
+- Tool calls do **not** render inline here — they render as cards in the work lane instead. This is the workbench's primary fix for "too much scrolling": the transcript is prose + thinking only.
+- **Scoped deviation (§13.3/§14):** the live/selected turn's thinking is *not* collapsed-by-default here — `ThinkingFocusView` keeps it expanded and prominent above assistant prose, overriding §13.3's "never competes" rule for that one turn. Every other turn keeps the unchanged §13.3 `ThinkingBlockView` treatment (collapsed, caption-weight, opt-in expand). See §13.3 below.
 
 ### Sticky elements
 
-- **StatusPill** stays pinned at the top of the conversation, just below the window toolbar.
-- **Composer** stays pinned at the bottom, always visible.
-- **Search overlay** floats over the conversation but doesn't displace it.
+- **StatusPill** stays pinned at the top-trailing corner of the transcript lane (not the full window) — it remains the single "now" signal (§14), just scoped to the reading column.
+- **Composer** stays pinned at the bottom of the transcript + work-lane region, always visible.
+- **Search overlay** floats over the transcript lane but doesn't displace it.
+- **Peripheral progress** (Custom ACP file sessions only, content-driven): a thin top-edge hairline in the transcript lane fills by the active file session's phase ordinal; a matching `Review 2/3`-style phase readout appears in the window's `.navigationSubtitle`. Both are absent when there is no phase data.
+  - **§3 `GeometryReader` note:** the hairline's fill bar is the one narrow, justified use of `GeometryReader` in the workbench — it measures its own row's width to size a proportional fill, the same "absolutely-positioned overlay" spirit §3 already carves out for progress/indicator chrome. It never drives a layout/breakpoint decision.
 
 ---
 
@@ -867,6 +875,8 @@ When the agent emits structured thinking content (e.g., from `/think`), it surfa
 - **Header is `caption` weight** — never competes with the assistant's response.
 - **Body is `bodyMono` if the agent emitted code-like content, else `body`.**
 - **Opening uses `.changing` (220ms)**, height-based.
+
+**Scoped deviation — `ThinkingFocusView` (chat workbench):** for the live or rail-selected turn only, the transcript lane renders `ThinkingFocusView` instead of the collapsed treatment above — body expanded and pinned above assistant prose, header at `label` weight (not `caption`), no `DisclosureGroup`. This is a deliberate override of "collapsed by default" and "never competes," because the workbench's whole premise is that live thinking *is* the primary signal users watch to know what the agent is doing. Every turn other than the live/selected one keeps the exact treatment above unchanged. `ThinkingFocusView` still shares this section's token vocabulary (`surface.bubble`, `corner.medium`, `ShimmerDots` while active, `considered` transition) so it reads as a family member, not a foreign surface.
 
 ### 13.4 Tickers
 

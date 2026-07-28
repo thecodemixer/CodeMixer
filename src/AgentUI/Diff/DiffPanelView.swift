@@ -14,7 +14,7 @@ public struct DiffPanelView: View {
     @Bindable public var model: EngineViewModel
     public let workspace: URL?
 
-    @State private var selected: String?
+    @State private var selected: ChangedFile?
     @State private var hunks: [DiffHunk] = []
     @State private var loadingPath: String?
     @State private var hoveredFullPath: String?
@@ -77,46 +77,46 @@ public struct DiffPanelView: View {
 
     private var fileList: some View {
         List(selection: $selected) {
-            ForEach(model.changedFiles, id: \.self) { path in
-                let filename = displayName(for: path)
-                let absolutePath = absolutePath(for: path)
+            ForEach(model.changedFiles) { file in
+                let filename = displayName(for: file)
+                let absolutePath = absolutePath(for: file)
                 HStack {
                     Text(filename)
                         .font(Theme.typography.monoSmall)
                         .fontDesign(.monospaced)
                         .lineLimit(1)
-                        .accessibilityLabel("Changed file \(path)")
+                        .accessibilityLabel("Changed file \(file.relativePath)")
                     Spacer()
                 }
                 .help(absolutePath)
                 .onHover { hovering in
                     hoveredFullPath = hovering ? absolutePath : nil
                 }
-                .tag(path)
+                .tag(file)
                 .revealOnIntent {
                     Button {
-                        model.revertFile(path: path)
+                        model.revertFile(file: file)
                     } label: {
                         Image(systemName: "arrow.uturn.backward")
                             .foregroundStyle(Theme.signal.danger)
                             .imageScale(.small)
                     }
                     .buttonStyle(.plain)
-                    .help("Revert \(path) to HEAD")
-                    .accessibilityLabel("Revert \(path) to HEAD")
+                    .help("Revert \(file.relativePath) to HEAD")
+                    .accessibilityLabel("Revert \(file.relativePath) to HEAD")
                 }
                 .contextMenu {
-                    Button("Open in Default App") { openInDefaultApp(path) }
-                        .accessibilityLabel("Open \(path) in default app")
-                    Button("Reveal in Finder") { revealInFinder(path) }
-                        .accessibilityLabel("Reveal \(path) in Finder")
-                    Button("Quick Look") { quickLook(path) }
-                        .accessibilityLabel("Quick Look \(path)")
+                    Button("Open in Default App") { openInDefaultApp(file) }
+                        .accessibilityLabel("Open \(file.relativePath) in default app")
+                    Button("Reveal in Finder") { revealInFinder(file) }
+                        .accessibilityLabel("Reveal \(file.relativePath) in Finder")
+                    Button("Quick Look") { quickLook(file) }
+                        .accessibilityLabel("Quick Look \(file.relativePath)")
                     Divider()
                     Button("Revert to HEAD", role: .destructive) {
-                        model.revertFile(path: path)
+                        model.revertFile(file: file)
                     }
-                    .accessibilityLabel("Revert \(path) to HEAD")
+                    .accessibilityLabel("Revert \(file.relativePath) to HEAD")
                 }
             }
         }
@@ -130,7 +130,7 @@ public struct DiffPanelView: View {
                 ContentUnavailableView("Select a file",
                                        systemImage: "rectangle.split.2x1",
                                        description: Text("Pick a changed file to see its diff."))
-            } else if loadingPath == selected {
+            } else if loadingPath == selected?.relativePath {
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if hunks.isEmpty {
@@ -143,7 +143,7 @@ public struct DiffPanelView: View {
                         ForEach(hunks) { hunk in
                             HunkView(hunk: hunk) {
                                 guard let selected else { return }
-                                model.revertHunk(path: selected, hunkID: hunk.id)
+                                model.revertHunk(file: selected, hunkID: hunk.id)
                             }
                         }
                     }
@@ -157,12 +157,13 @@ public struct DiffPanelView: View {
 
     // MARK: - Actions
 
-    private func load(path: String?) {
+    private func load(path: ChangedFile?) {
         guard let path, let workspace else { return }
-        loadingPath = path
+        loadingPath = path.relativePath
         Task {
             let engine = GitDiffEngine(workspace: workspace)
-            let diff = (try? await engine.diff(for: path)) ?? FileDiff(relativePath: path, hunks: [])
+            let diff = (try? await engine.diff(for: path))
+                ?? FileDiff(file: path, hunks: [])
             await MainActor.run {
                 self.hunks = diff.hunks
                 self.loadingPath = nil
@@ -170,16 +171,20 @@ public struct DiffPanelView: View {
         }
     }
 
-    private func openInDefaultApp(_ path: String) {
-        DesktopActions.openURL(fileURL(for: path))
+    private func openInDefaultApp(_ file: ChangedFile) {
+        DesktopActions.openURL(fileURL(for: file))
     }
 
-    private func revealInFinder(_ path: String) {
-        DesktopActions.revealInFinder(fileURL(for: path))
+    private func revealInFinder(_ file: ChangedFile) {
+        DesktopActions.revealInFinder(fileURL(for: file))
     }
 
-    private func quickLook(_ path: String) {
-        qlBridge = presentQuickLook(url: fileURL(for: path)) // retain until the panel is dismissed
+    private func quickLook(_ file: ChangedFile) {
+        qlBridge = presentQuickLook(url: fileURL(for: file)) // retain until the panel is dismissed
+    }
+
+    private func fileURL(for file: ChangedFile) -> URL {
+        fileURL(for: file.relativePath)
     }
 
     private func fileURL(for path: String) -> URL {
@@ -187,8 +192,16 @@ public struct DiffPanelView: View {
         return workspace?.appendingPathComponent(path) ?? URL(fileURLWithPath: path)
     }
 
+    private func absolutePath(for file: ChangedFile) -> String {
+        absolutePath(for: file.relativePath)
+    }
+
     private func absolutePath(for path: String) -> String {
         fileURL(for: path).path
+    }
+
+    private func displayName(for file: ChangedFile) -> String {
+        displayName(for: file.relativePath)
     }
 
     private func displayName(for path: String) -> String {

@@ -213,7 +213,7 @@ struct WireCodecParityTests {
                 eventID: UUID(uuidString: "00000000-0000-0000-0000-000000000005")!,
                 action: .play
             ),
-            .fileReverted(path: "/tmp/a.txt"),
+            .fileReverted(file: ChangedFile(relativePath: "/tmp/a.txt")),
             .prefsChanged(rulesCount: 2),
             .appearancePrefChanged(key: .theme, value: .string("dark")),
             .snapshotReady(kind: .prefs, payload: Data("{}".utf8)),
@@ -230,6 +230,10 @@ struct WireCodecParityTests {
             .sessionIndexChanged(projectPath: cwd),
             .sessionAttentionChanged(sessionID: "bg-1", title: "Background", needsAttention: true),
             .cachedTranscriptLoaded(sessionID: "cached-1"),
+            .sessionPhaseChanged(
+                sessionID: "file-1",
+                phase: SessionPhase(id: "reviewing", label: "Review", ordinal: 2, group: .review)
+            ),
         ]
     }
 }
@@ -271,6 +275,7 @@ extension AgentEvent {
         case .sessionIndexChanged:      "sessionIndexChanged"
         case .sessionAttentionChanged:  "sessionAttentionChanged"
         case .cachedTranscriptLoaded:   "cachedTranscriptLoaded"
+        case .sessionPhaseChanged:      "sessionPhaseChanged"
         }
     }
 
@@ -353,6 +358,8 @@ extension AgentEvent {
             return s1 == s2 && t1 == t2 && n1 == n2
         case (.cachedTranscriptLoaded(let s1), .cachedTranscriptLoaded(let s2)):
             return s1 == s2
+        case (.sessionPhaseChanged(let s1, let p1), .sessionPhaseChanged(let s2, let p2)):
+            return s1 == s2 && p1 == p2
         default:
             return false
         }

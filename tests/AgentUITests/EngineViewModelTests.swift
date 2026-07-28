@@ -659,7 +659,7 @@ struct EngineViewModelTests {
                                        kind: .fsObserved))
         await drain()
 
-        #expect(vm.changedFiles == ["src/main.swift"])
+        #expect(vm.changedFiles == [ChangedFile(relativePath: "src/main.swift")])
 
         await bus.shutdown()
     }
@@ -675,9 +675,9 @@ struct EngineViewModelTests {
         await bus.publish(.fileTouched(cwd.appendingPathComponent("src/main.swift"),
                                        kind: .fsObserved))
         await drain()
-        #expect(vm.changedFiles == ["src/main.swift"])
+        #expect(vm.changedFiles == [ChangedFile(relativePath: "src/main.swift")])
 
-        await bus.publish(.fileReverted(path: "src/main.swift"))
+        await bus.publish(.fileReverted(file: ChangedFile(relativePath: "src/main.swift")))
         await drain()
         #expect(vm.changedFiles.isEmpty)
 

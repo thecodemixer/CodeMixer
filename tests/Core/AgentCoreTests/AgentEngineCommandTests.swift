@@ -598,12 +598,12 @@ struct AgentEngineCommandTests {
         try "changed\n".write(to: file, atomically: true, encoding: .utf8)
 
         let h = try await EngineHarness.make(workspace: workspace)
-        try await h.engine.send(.revertFile(path: "foo.txt"))
+        try await h.engine.send(.revertFile(file: ChangedFile(relativePath: "foo.txt")))
         try await Task.sleep(for: .milliseconds(20))
 
         let events = await h.collectedSoFar()
         #expect(events.contains {
-            if case .fileReverted(let p) = $0 { return p == "foo.txt" }; return false
+            if case .fileReverted(let f) = $0 { return f.relativePath == "foo.txt" }; return false
         })
         let restored = try String(contentsOf: file, encoding: .utf8)
         #expect(restored == "original\n")
@@ -628,12 +628,12 @@ struct AgentEngineCommandTests {
         let firstHunkID = try #require(diff.hunks.first?.id)
 
         let h = try await EngineHarness.make(workspace: workspace)
-        try await h.engine.send(.revertHunk(path: "foo.txt", hunkID: firstHunkID))
+        try await h.engine.send(.revertHunk(file: ChangedFile(relativePath: "foo.txt"), hunkID: firstHunkID))
         try await Task.sleep(for: .milliseconds(20))
 
         let events = await h.collectedSoFar()
         #expect(events.contains {
-            if case .fileReverted(let p) = $0 { return p == "foo.txt" }; return false
+            if case .fileReverted(let f) = $0 { return f.relativePath == "foo.txt" }; return false
         })
         let content = try String(contentsOf: file, encoding: .utf8)
         #expect(content.contains("line 2\n"))

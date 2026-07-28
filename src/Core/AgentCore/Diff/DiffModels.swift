@@ -89,14 +89,19 @@ public struct DiffHunk: Sendable, Hashable, Identifiable {
 
 /// All hunks for one file.
 public struct FileDiff: Sendable, Hashable, Identifiable {
-    public var id: String { relativePath }
-    public let relativePath: String
+    public var id: String { file.relativePath }
+    public let file: ChangedFile
     public let hunks: [DiffHunk]
     public var additions: Int { hunks.reduce(0) { $0 + $1.lines.filter { $0.kind == .addition }.count } }
     public var deletions: Int { hunks.reduce(0) { $0 + $1.lines.filter { $0.kind == .deletion }.count } }
 
+    public init(file: ChangedFile, hunks: [DiffHunk]) {
+        self.file = file
+        self.hunks = hunks
+    }
+
     public init(relativePath: String, hunks: [DiffHunk]) {
-        self.relativePath = relativePath
+        self.file = ChangedFile(relativePath: relativePath)
         self.hunks = hunks
     }
 }

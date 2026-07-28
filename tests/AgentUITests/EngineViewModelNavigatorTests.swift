@@ -509,6 +509,32 @@ struct EngineViewModelNavigatorTests {
         await bus.shutdown()
     }
 
+    @Test("openSession retries the current session when the pane is blank")
+    func openSessionRetriesCurrentBlankSession() async {
+        let port = RecordingPort()
+        let bus = MulticastEventBus()
+        let workspace = TestPaths.workspace("ws")
+        let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
+        vm.workspace = workspace
+        vm.sessionID = "sess-42"
+        vm.messages = []
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        vm.openSession(projectPath: workspace.path, id: "sess-42")
+        try? await Task.sleep(for: .milliseconds(60))
+
+        #expect(port.commands.contains {
+            if case .openProject(let path, let resume) = $0 {
+                return path == workspace.path && resume == "sess-42"
+            }
+            return false
+        })
+        #expect(vm.isSwitchingSession)
+
+        await bus.shutdown()
+    }
+
     @Test("openSession enters a switching state until replayed content arrives")
     func openSessionSwitchingState() async {
         let port = RecordingPort()

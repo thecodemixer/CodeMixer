@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 /// Block-level markdown renderer for assistant answers (visual-style §15).
@@ -10,7 +11,14 @@ import SwiftUI
 /// Prose blocks stay selectable and are exposed to TTS as one combined string
 /// (`plainText`) so Read-Aloud reads the words and skips code.
 struct MarkdownProseView: View {
+    enum CodePresentation: Equatable {
+        case expanded
+        case collapsed
+    }
+
     let text: String
+    var codePresentation: CodePresentation = .expanded
+    var onCollapsedCodeSelected: ((String, String?) -> Void)? = nil
 
     private var blocks: [MarkdownBlock] { MarkdownBlock.parse(text) }
 
@@ -37,6 +45,222 @@ struct MarkdownProseView: View {
         }.joined(separator: "\n")
     }
 
+    struct ReviewerComment: Sendable, Hashable, Identifiable {
+        struct Finding: Sendable, Hashable, Identifiable {
+            let id: String
+            let severity: String
+            let message: String
+        }
+
+        let id: String
+        let reviewer: String
+        let verdict: String
+        let findings: [Finding]
+
+        func isDuplicate(of other: ReviewerComment) -> Bool {
+            verdict == other.verdict
+                && findings.map(\.severity) == other.findings.map(\.severity)
+                && findings.map(\.message) == other.findings.map(\.message)
+        }
+    }
+
+    struct ReviewerContent: Sendable, Hashable {
+        let prose: String?
+        let comments: [ReviewerComment]
+    }
+
+    /// Pulls migration-tool reviewer verdicts out of assistant text even when
+    /// streamed JSON and the later `Reviewer A/B: {…}` summary are concatenated
+    /// into one paragraph (common with Custom ACP live streaming).
+    static func reviewerContent(from text: String) -> ReviewerContent? {
+        var comments: [ReviewerComment] = []
+        var consumed = Set<Range<String.Index>>()
+        var anonymousIndex = 0
+
+        // Prefer labeled `Reviewer A: {…}` / `Reviewer B: {…}` spans.
+        // Require the opening `{` on the same line so prose like
+        // "Reviewer verdicts:" or "Reviewer A: not-json" cannot steal a later object.
+        var search = text.startIndex
+        while search < text.endIndex {
+            guard let match = text.range(of: #"Reviewer [A-Za-z0-9_-]+:"#,
+                                         options: .regularExpression,
+                                         range: search..<text.endIndex) else { break }
+            let label = String(text[match])
+                .trimmingCharacters(in: CharacterSet(charactersIn: ":"))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let afterColon = match.upperBound
+            let lineEnd = text[afterColon...].firstIndex(of: "\n") ?? text.endIndex
+            let sameLine = text[afterColon..<lineEnd]
+            guard let relativeBrace = sameLine.firstIndex(of: "{") else {
+                search = afterColon
+                continue
+            }
+            // `relativeBrace` is already a String.Index into `text` (substring shares indices).
+            let brace = relativeBrace
+            guard sameLine[afterColon..<brace].allSatisfy({ $0.isWhitespace }),
+                  let jsonRange = balancedJSONObjectRange(in: text, from: brace),
+                  let comment = reviewerComment(label: label,
+                                                json: String(text[jsonRange]),
+                                                id: label) else {
+                search = afterColon
+                continue
+            }
+            comments.append(comment)
+            consumed.insert(match.lowerBound..<jsonRange.upperBound)
+            search = jsonRange.upperBound
+        }
+
+        // Bare streamed verdict objects (no "Reviewer X:" prefix) still map to cards.
+        search = text.startIndex
+        while search < text.endIndex {
+            guard let brace = text[search...].firstIndex(of: "{"),
+                  let jsonRange = balancedJSONObjectRange(in: text, from: brace) else { break }
+            if consumed.contains(where: { $0.overlaps(jsonRange) }) {
+                search = jsonRange.upperBound
+                continue
+            }
+            let json = String(text[jsonRange])
+            guard looksLikeReviewerVerdictJSON(json) else {
+                search = text.index(after: brace)
+                continue
+            }
+            anonymousIndex += 1
+            let label = "Reviewer"
+            if let comment = reviewerComment(label: label,
+                                             json: json,
+                                             id: "\(label)-\(anonymousIndex)"),
+               !comments.contains(where: { $0.isDuplicate(of: comment) }) {
+                comments.append(comment)
+                consumed.insert(jsonRange)
+            }
+            search = jsonRange.upperBound
+        }
+
+        guard !comments.isEmpty else { return nil }
+
+        // Drop extracted spans so streamed JSON does not remain as a raw wall.
+        let prose = removingRanges(consumed, from: text)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let visibleProse: String?
+        if prose.isEmpty || looksLikeJSON(prose) || looksLikeReviewerVerdictJSON(prose) {
+            visibleProse = nil
+        } else {
+            visibleProse = prose
+        }
+        return ReviewerContent(prose: visibleProse, comments: deduplicated(comments))
+    }
+
+    static func reviewerComments(from text: String) -> [ReviewerComment]? {
+        reviewerContent(from: text)?.comments
+    }
+
+    private static func reviewerComment(label: String,
+                                        json: String,
+                                        id: String) -> ReviewerComment? {
+        let trimmed = json.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let data = trimmed.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              object["verdict"] != nil else { return nil }
+        let verdict = object["verdict"] as? String ?? "unknown"
+        let findings = (object["findings"] as? [[String: Any]] ?? []).enumerated().map { offset, item in
+            ReviewerComment.Finding(
+                id: "\(id)-finding-\(offset)",
+                severity: item["severity"] as? String ?? "info",
+                message: item["message"] as? String ?? ""
+            )
+        }
+        return ReviewerComment(id: id, reviewer: label, verdict: verdict, findings: findings)
+    }
+
+    private static func looksLikeReviewerVerdictJSON(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("{"), trimmed.hasSuffix("}"),
+              let data = trimmed.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let verdict = object["verdict"] as? String else { return false }
+        return verdict == "approve" || verdict == "reject"
+    }
+
+    private static func balancedJSONObjectRange(in text: String,
+                                                from start: String.Index) -> Range<String.Index>? {
+        guard text[start] == "{" else { return nil }
+        var depth = 0
+        var inString = false
+        var escaped = false
+        var index = start
+        while index < text.endIndex {
+            let ch = text[index]
+            if inString {
+                if escaped {
+                    escaped = false
+                } else if ch == "\\" {
+                    escaped = true
+                } else if ch == "\"" {
+                    inString = false
+                }
+            } else {
+                switch ch {
+                case "\"": inString = true
+                case "{": depth += 1
+                case "}":
+                    depth -= 1
+                    if depth == 0 {
+                        return start..<text.index(after: index)
+                    }
+                default: break
+                }
+            }
+            index = text.index(after: index)
+        }
+        return nil
+    }
+
+    private static func removingRanges(_ ranges: Set<Range<String.Index>>,
+                                       from text: String) -> String {
+        let ordered = ranges.sorted { $0.lowerBound < $1.lowerBound }
+        var result = ""
+        var cursor = text.startIndex
+        for range in ordered {
+            if cursor < range.lowerBound {
+                result += text[cursor..<range.lowerBound]
+            }
+            cursor = range.upperBound
+        }
+        if cursor < text.endIndex {
+            result += text[cursor...]
+        }
+        return result
+            .replacingOccurrences(of: #"\n{3,}"#, with: "\n\n", options: .regularExpression)
+    }
+
+    private static func deduplicated(_ comments: [ReviewerComment]) -> [ReviewerComment] {
+        var unique: [ReviewerComment] = []
+        for comment in comments {
+            if let idx = unique.firstIndex(where: { $0.isDuplicate(of: comment) }) {
+                // Prefer labeled "Reviewer A/B" over a bare streamed verdict object.
+                if unique[idx].reviewer == "Reviewer",
+                   comment.reviewer.hasPrefix("Reviewer ") {
+                    unique[idx] = comment
+                }
+                continue
+            }
+            unique.append(comment)
+        }
+        return unique
+    }
+
+    static func codeLikeSnippet(from text: String) -> (code: String, language: String?)? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if looksLikeJSON(trimmed) {
+            return (trimmed, "json")
+        }
+        if looksLikeCode(trimmed) {
+            return (trimmed, nil)
+        }
+        return nil
+    }
+
     @ViewBuilder
     private func view(for block: MarkdownBlock) -> some View {
         switch block {
@@ -47,10 +271,29 @@ struct MarkdownProseView: View {
                 .textSelection(.enabled)
 
         case .paragraph(let text):
-            Text(inline(text))
-                .font(Theme.typography.prose)
-                .foregroundStyle(Theme.text.primary)
-                .textSelection(.enabled)
+            if let reviewer = Self.reviewerContent(from: text) {
+                VStack(alignment: .leading, spacing: Theme.spacing.s12) {
+                    if let prose = reviewer.prose {
+                        Text(inline(prose))
+                            .font(Theme.typography.body)
+                            .foregroundStyle(Theme.text.primary)
+                            .textSelection(.enabled)
+                    }
+                    ReviewerCommentGroupView(comments: reviewer.comments)
+                }
+            } else if codePresentation == .collapsed,
+                      let snippet = Self.codeLikeSnippet(from: text) {
+                CollapsedCodeBlockView(code: snippet.code,
+                                       language: snippet.language,
+                                       onOpen: {
+                                           onCollapsedCodeSelected?(snippet.code, snippet.language)
+                                       })
+            } else {
+                Text(inline(text))
+                    .font(Theme.typography.prose)
+                    .foregroundStyle(Theme.text.primary)
+                    .textSelection(.enabled)
+            }
 
         case .unorderedList(let items):
             VStack(alignment: .leading, spacing: Theme.spacing.s4) {
@@ -79,7 +322,16 @@ struct MarkdownProseView: View {
             .fixedSize(horizontal: false, vertical: true)
 
         case .code(let language, let code):
-            CodeBlockView(code: code, language: language)
+            switch codePresentation {
+            case .expanded:
+                CodeBlockView(code: code, language: language)
+            case .collapsed:
+                CollapsedCodeBlockView(code: code,
+                                       language: language,
+                                       onOpen: {
+                                           onCollapsedCodeSelected?(code, language)
+                                       })
+            }
         }
     }
 
@@ -111,6 +363,132 @@ struct MarkdownProseView: View {
             markdown: text,
             options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
             ?? AttributedString(text)
+    }
+
+    private static func looksLikeJSON(_ text: String) -> Bool {
+        guard (text.hasPrefix("{") && text.hasSuffix("}"))
+            || (text.hasPrefix("[") && text.hasSuffix("]")) else { return false }
+        guard let data = text.data(using: .utf8) else { return false }
+        return (try? JSONSerialization.jsonObject(with: data)) != nil
+    }
+
+    private static func looksLikeCode(_ text: String) -> Bool {
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        let codePrefixes = ["import ", "export ", "const ", "let ", "var ", "func ", "function ",
+                            "class ", "struct ", "enum ", "interface ", "type ", "return "]
+        if lines.contains(where: { line in codePrefixes.contains(where: line.hasPrefix) }) {
+            return true
+        }
+        let structuralLines = lines.filter { line in
+            line.hasSuffix("{") || line.hasSuffix("}") || line.hasSuffix(";") || line.contains("=>")
+        }
+        return lines.count >= 2 && structuralLines.count >= 2
+    }
+}
+
+private struct ReviewerCommentGroupView: View {
+    let comments: [MarkdownProseView.ReviewerComment]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.spacing.s8) {
+            ForEach(comments) { comment in
+                ReviewerCommentView(comment: comment)
+            }
+        }
+    }
+}
+
+private struct ReviewerCommentView: View {
+    let comment: MarkdownProseView.ReviewerComment
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.spacing.s8) {
+            HStack(spacing: Theme.spacing.s8) {
+                Image(systemName: comment.verdict == "approve" ? "checkmark.seal" : "exclamationmark.triangle")
+                    .foregroundStyle(comment.verdict == "approve" ? Theme.signal.success : Theme.signal.warning)
+                    .accessibilityHidden(true)
+                Text(comment.reviewer)
+                    .font(Theme.typography.label)
+                    .foregroundStyle(Theme.text.primary)
+                Text(comment.verdict)
+                    .font(Theme.typography.caption)
+                    .foregroundStyle(Theme.text.secondary)
+            }
+            if comment.findings.isEmpty {
+                Text("No findings")
+                    .font(Theme.typography.caption)
+                    .foregroundStyle(Theme.text.tertiary)
+            } else {
+                VStack(alignment: .leading, spacing: Theme.spacing.s4) {
+                    ForEach(comment.findings) { finding in
+                        Text("[\(finding.severity)] \(finding.message)")
+                            .font(Theme.typography.caption)
+                            .foregroundStyle(Theme.text.secondary)
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, Theme.spacing.s12)
+        .padding(.vertical, Theme.spacing.s8)
+        .background(Theme.surface.bubble,
+                    in: RoundedRectangle(cornerRadius: Theme.corner.medium, style: .continuous))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(comment.reviewer), \(comment.verdict)")
+    }
+}
+
+/// Lightweight transcript placeholder for fenced code. Full code still lives in
+/// diffs/tools; rendering syntax-highlighted blocks in the live transcript made
+/// Custom ACP updates slow and visually noisy.
+private struct CollapsedCodeBlockView: View {
+    let code: String
+    var language: String?
+    var onOpen: (() -> Void)? = nil
+
+    var body: some View {
+        HStack(spacing: Theme.spacing.s8) {
+            Button {
+                onOpen?()
+            } label: {
+                HStack(spacing: Theme.spacing.s8) {
+                    Image(systemName: "chevron.left.forwardslash.chevron.right")
+                        .foregroundStyle(Theme.text.tertiary)
+                        .accessibilityHidden(true)
+                    Text(summary)
+                        .font(Theme.typography.caption)
+                        .foregroundStyle(Theme.text.secondary)
+                    Spacer(minLength: 0)
+                    Text("Show in work lane")
+                        .font(Theme.typography.caption)
+                        .foregroundStyle(Theme.signal.info)
+                }
+            }
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityLabel("Show collapsed code block in work lane")
+
+            Spacer(minLength: 0)
+            Button("Copy") {
+                DesktopActions.copyToPasteboard(code)
+            }
+            .buttonStyle(.plain)
+            .font(Theme.typography.caption)
+            .foregroundStyle(Theme.signal.info)
+            .accessibilityLabel("Copy collapsed code block")
+        }
+        .padding(.horizontal, Theme.spacing.s12)
+        .padding(.vertical, Theme.spacing.s8)
+        .background(Theme.surface.sunken,
+                    in: RoundedRectangle(cornerRadius: Theme.corner.medium, style: .continuous))
+        .accessibilityElement(children: .contain)
+    }
+
+    private var summary: String {
+        let lineCount = max(1, code.split(separator: "\n", omittingEmptySubsequences: false).count)
+        let label = language.map { "\($0) " } ?? ""
+        return "\(label)code block collapsed · \(lineCount) line\(lineCount == 1 ? "" : "s")"
     }
 }
 

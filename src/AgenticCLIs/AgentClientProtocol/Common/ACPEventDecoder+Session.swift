@@ -33,12 +33,13 @@ extension ACPEventDecoder {
                         random: random
                     )
                     if !local.isEmpty {
-                        return Batch(events: local + [
+                        return Batch(events: [
                             .sessionStarted(
                                 sessionID: sessionID,
                                 model: state.currentModelID(),
                                 cwd: context.workspace
                             ),
+                        ] + local + [
                             .cachedTranscriptLoaded(sessionID: sessionID),
                         ])
                     }
@@ -116,20 +117,20 @@ extension ACPEventDecoder {
             workspace: context.workspace,
             title: nil
         )
-        // Wire replay first so the UI paints history while still gated, then
-        // SessionStart unlocks. When the agent streams nothing on load (Cursor),
-        // restore from the Codemixer turn cache before SessionStart as well.
+        // SessionStart must lead replay. The view model uses it to bind the
+        // selected session before reducing user/assistant/phase events; putting
+        // replay first made history depend on navigator preselection and could
+        // leave loaded chats empty after races.
         var events = state.flushHistoryReplay()
         // Background work while the user watched another session (overview) may
         // still sit in the foreign buffer — persist it so local history below
         // includes the latest coalesced turn.
         if let pending = state.flushForeignBuffer(sessionID: sessionID),
            !pending.text.isEmpty {
-            let role = pending.role == "agent" ? "assistant" : pending.role
             await sessionIndex.appendConversationTurn(
                 sessionID: sessionID,
                 customAgentID: context.customAgentID,
-                role: role,
+                role: pending.role,
                 text: pending.text
             )
         }
@@ -149,11 +150,11 @@ extension ACPEventDecoder {
             )
             events.append(contentsOf: local)
         }
-        events.append(.sessionStarted(
+        events.insert(.sessionStarted(
             sessionID: sessionID,
             model: modelCatalog.currentModelID,
             cwd: context.workspace
-        ))
+        ), at: 0)
         var replies = [ACPInputEncoding.queuedPrompts(state: state)]
         if let list = ACPInputEncoding.listSessions(state: state) {
             replies.append(list)
@@ -236,7 +237,7 @@ extension ACPEventDecoder {
             await sessionIndex.appendConversationTurn(
                 sessionID: sessionID,
                 customAgentID: context.customAgentID,
-                role: "thinking",
+                role: .thinking,
                 text: thoughtText
             )
         }
@@ -251,7 +252,7 @@ extension ACPEventDecoder {
                 await sessionIndex.appendConversationTurn(
                     sessionID: sessionID,
                     customAgentID: context.customAgentID,
-                    role: "assistant",
+                    role: .assistant,
                     text: finalized.text
                 )
             }

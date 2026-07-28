@@ -25,12 +25,12 @@ extension EngineViewModel {
         send(.requestSnapshot(kind))
     }
 
-    func revertFile(path: String) {
-        send(.revertFile(path: path))
+    func revertFile(file: ChangedFile) {
+        send(.revertFile(file: file))
     }
 
-    func revertHunk(path: String, hunkID: UUID) {
-        send(.revertHunk(path: path, hunkID: hunkID))
+    func revertHunk(file: ChangedFile, hunkID: UUID) {
+        send(.revertHunk(file: file, hunkID: hunkID))
     }
 
     func requestAssistantBubbleSpeech(eventID: UUID, action: TTSAction) {

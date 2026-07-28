@@ -16,6 +16,11 @@ public enum Theme {
     public enum DensityMode: String, CaseIterable, Sendable, Codable, Hashable {
         case comfortable
         case compact
+        /// Zen reading mode: the workbench collapses the index rail and work
+        /// lane to a single centered transcript. Global spacing scales like
+        /// `.compact`; the density-driven lane collapse is the distinguishing
+        /// behavior (see `docs/style/visual-style.md` §1.15).
+        case focus
     }
 
     /// User-selectable text personality. SwiftUI's `Font.Design` mapping lives
@@ -124,6 +129,21 @@ public enum Theme {
         public static let attachmentPaletteMinWidth: CGFloat = 320
         public static let attachmentPaletteMaxWidth: CGFloat = 420
         public static let messageMaxWidth: CGFloat = 720
+        /// Chat workbench (`ConversationWorkbenchView`) lane widths. The rail
+        /// is fixed and non-draggable; transcript/work share a draggable
+        /// `HSplitView` boundary. See `docs/architecture.md` "Chat workbench".
+        ///
+        /// `transcriptMinWidth` must stay well below the old single-column
+        /// `workspaceSidebarMinWidth` (480). With the rail (248) and work lane
+        /// (min 280) open, a 480 transcript floor overflows typical detail
+        /// widths and NavigationSplitView clips the rail under the sidebar.
+        public static let indexRailWidth: CGFloat = 248
+        public static let transcriptMinWidth: CGFloat = 320
+        public static let workLaneMinWidth: CGFloat = 280
+        public static let workLaneIdealWidth: CGFloat = 420
+        /// Caps the work lane's tools section when diffs are also present, so
+        /// the two content-driven sections both get room to breathe.
+        public static let workLaneToolsSectionMaxHeight: CGFloat = 320
         public static let diffPanelMinWidth: CGFloat = 360
         public static let diffSidebarMinWidth: CGFloat = 200
         public static let diffSidebarIdealWidth: CGFloat = 240

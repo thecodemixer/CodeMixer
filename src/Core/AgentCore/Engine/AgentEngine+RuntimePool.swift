@@ -27,6 +27,8 @@ extension AgentEngine {
         promptAcceptance = .idle
         currentTurnID = nil
         runtime.boundSessionID = currentSessionID
+        runtime.transcript = transcript
+        runtime.changedFiles = changedFiles
         runtime.lastActivatedAt = seams.clock.now()
         // Keep forwarding/bell tasks on the runtime; clear engine mirrors so
         // activate can rebind without closing the child.
@@ -72,8 +74,6 @@ extension AgentEngine {
         sessionIDContinuation = runtime.sessionIDContinuation
         eventForwardingTask = runtime.forwardingTask
         bellTask = runtime.bellTask
-        transcript = []
-        changedFiles = []
         currentTurnID = nil
         promptAcceptance = .idle
         cancelStartupSubmitRecovery()
@@ -86,6 +86,9 @@ extension AgentEngine {
         heartbeat = monitor
 
         let targetSession = resumeSessionID ?? runtime.boundSessionID
+        let reactivatingSameSession = targetSession == runtime.boundSessionID
+        transcript = reactivatingSameSession ? runtime.transcript : []
+        changedFiles = reactivatingSameSession ? runtime.changedFiles : []
         currentSessionID = targetSession
         state = .running(sessionID: targetSession)
         runtime.lastActivatedAt = seams.clock.now()
@@ -94,13 +97,19 @@ extension AgentEngine {
         await startFSWatcher(workspace: runtime.workspace)
 
         let handshakeGate = runtime.adapter.capabilities.contains(.sessionHandshakeGate)
+        let needsAdapterReload = reactivatingSameSession
+            && !hasCachedConversation(runtime)
+            && resumeSessionID != nil
         if let resumeSessionID,
-           resumeSessionID != runtime.boundSessionID,
+           (resumeSessionID != runtime.boundSessionID || needsAdapterReload),
            let bytes = runtime.adapter.encodeResumeSession(sessionID: resumeSessionID),
            !bytes.isEmpty {
             currentSessionID = resumeSessionID
             if var updated = runtimes[key] {
                 updated.boundSessionID = resumeSessionID
+                updated.transcript = []
+                updated.changedFiles = []
+                updated.replayEvents = []
                 runtimes[key] = updated
             }
             do {
@@ -117,6 +126,9 @@ extension AgentEngine {
             await bus.publish(.sessionStarted(sessionID: targetSession ?? "",
                                               model: nil,
                                               cwd: runtime.workspace))
+            if reactivatingSameSession {
+                await replayCachedConversation(runtime)
+            }
         }
         await publishRuntimePoolChanged()
         return true
@@ -125,7 +137,11 @@ extension AgentEngine {
     private func applyInProcessSessionSwitch(resumeSessionID: String?) async -> Bool {
         guard let key = activeKey, var runtime = runtimes[key] else { return false }
         guard let resumeSessionID else { return true }
-        if runtime.boundSessionID == resumeSessionID {
+        if runtime.boundSessionID == resumeSessionID, hasCachedConversation(runtime) {
+            await bus.publish(.sessionStarted(sessionID: resumeSessionID,
+                                              model: nil,
+                                              cwd: runtime.workspace))
+            await replayCachedConversation(runtime)
             return true
         }
         guard let bytes = runtime.adapter.encodeResumeSession(sessionID: resumeSessionID),
@@ -140,6 +156,9 @@ extension AgentEngine {
         await heartbeat?.endTurn()
         currentSessionID = resumeSessionID
         runtime.boundSessionID = resumeSessionID
+        runtime.transcript = []
+        runtime.changedFiles = []
+        runtime.replayEvents = []
         runtimes[key] = runtime
         state = .running(sessionID: resumeSessionID)
         do {
@@ -151,6 +170,33 @@ extension AgentEngine {
             return true
         } catch {
             return false
+        }
+    }
+
+    private func hasCachedConversation(_ runtime: AgentRuntime) -> Bool {
+        !runtime.replayEvents.isEmpty || !runtime.transcript.isEmpty
+    }
+
+    private func replayCachedConversation(_ runtime: AgentRuntime) async {
+        guard runtime.replayEvents.isEmpty else {
+            for event in runtime.replayEvents {
+                await bus.publish(event)
+            }
+            return
+        }
+        for message in runtime.transcript {
+            switch message.role {
+            case .user:
+                await bus.publish(.userTurn(id: seams.random.uuid().uuidString,
+                                            text: message.text))
+            case .assistant:
+                await bus.publish(.assistantText(id: seams.random.uuid().uuidString,
+                                                 blockID: seams.random.uuid().uuidString,
+                                                 text: message.text,
+                                                 isFinal: true))
+            case .action:
+                break
+            }
         }
     }
 

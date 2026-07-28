@@ -57,8 +57,8 @@ public enum WireCodec {
             return .error(WireAgentErrorCoding.encode(err))
         case .speakBubbleRequested(let eventID, let action):
             return .speakBubbleRequested(eventID: eventID, action: action)
-        case .fileReverted(let path):
-            return .fileReverted(path: path)
+        case .fileReverted(let file):
+            return .fileReverted(file: file)
         case .prefsChanged(let n):
             return .prefsChanged(rulesCount: n)
         case .appearancePrefChanged(let key, let value):
@@ -79,6 +79,11 @@ public enum WireCodec {
             )
         case .cachedTranscriptLoaded(let sessionID):
             return .cachedTranscriptLoaded(sessionID: sessionID)
+        case .sessionPhaseChanged(let sessionID, let phase):
+            return .sessionPhaseChanged(
+                sessionID: sessionID,
+                phase: WireSessionPhase(id: phase.id, label: phase.label, ordinal: phase.ordinal, group: phase.group.rawValue)
+            )
         }
     }
 
@@ -133,8 +138,8 @@ public enum WireCodec {
             return .error(WireAgentErrorCoding.decode(wireErr))
         case .speakBubbleRequested(let eventID, let action):
             return .speakBubbleRequested(eventID: eventID, action: action)
-        case .fileReverted(let path):
-            return .fileReverted(path: path)
+        case .fileReverted(let file):
+            return .fileReverted(file: file)
         case .prefsChanged(let n):
             return .prefsChanged(rulesCount: n)
         case .appearancePrefChanged(let key, let value):
@@ -158,6 +163,12 @@ public enum WireCodec {
             )
         case .cachedTranscriptLoaded(let sessionID):
             return .cachedTranscriptLoaded(sessionID: sessionID)
+        case .sessionPhaseChanged(let sessionID, let wirePhase):
+            let group = SessionPhase.Group(rawValue: wirePhase.group) ?? .plan
+            return .sessionPhaseChanged(
+                sessionID: sessionID,
+                phase: SessionPhase(id: wirePhase.id, label: wirePhase.label, ordinal: wirePhase.ordinal, group: group)
+            )
         }
     }
 

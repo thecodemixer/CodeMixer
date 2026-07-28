@@ -172,7 +172,7 @@ private struct FakeCustomACPServer: ACPTwinServer {
                     "description": .string("Generate and refresh project docs"),
                 ]),
                 .object([
-                    "id": .string("agent"),
+                    "id": .string(ACPStandardModeID.agent.rawValue),
                     "name": .string("Agent"),
                     "description": .string("General project assistant"),
                 ]),

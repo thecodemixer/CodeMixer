@@ -22,7 +22,7 @@ struct SnapshotServiceTests {
     func conversationSnapshot() async throws {
         let svc = makeService()
         let data = await svc.snapshot(.conversation,
-                                      conversation: [("user", "hi", Date())],
+                                      conversation: [(.user, "hi", Date())],
                                       sessionID: "s1")
         let obj = try topLevel(data)
         #expect(obj["messages"] != nil)
@@ -32,7 +32,7 @@ struct SnapshotServiceTests {
     @Test(".diff snapshot contains 'changedFiles' key")
     func diffSnapshot() async throws {
         let svc = makeService()
-        let data = await svc.snapshot(.diff, changedFiles: ["/foo.swift"])
+        let data = await svc.snapshot(.diff, changedFiles: [ChangedFile(relativePath: "/foo.swift")])
         let obj = try topLevel(data)
         #expect(obj["changedFiles"] != nil)
     }

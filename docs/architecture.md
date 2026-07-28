@@ -407,6 +407,7 @@ public enum AgentEvent: Sendable {
     case agentDashboard(url: URL, title: String?)
     case sessionIndexChanged(projectPath: URL)
     case sessionAttentionChanged(sessionID: String, title: String, needsAttention: Bool)
+    case sessionPhaseChanged(sessionID: String, phase: SessionPhase)
     // Out-of-band (also on the bus): speakBubbleRequested, fileReverted,
     // prefsChanged, appearancePrefChanged, snapshotReady, clientAction
 }
@@ -423,7 +424,7 @@ Streaming `session/update` chunks that carry a foreign `sessionId` (not the fore
 | **Tool execution** | `toolStart`, `toolProgress`, `toolEnd` |
 | **Permissions** | `permissionRequest`, `permissionAlreadyResolved` (optional `PermissionPrompt.options` for custom ACP buttons); parked until load when for a background session |
 | **Activity & ambient** | `statusPhraseChanged`, `activityStateChanged`, `noEventGap`, `authURL` (legacy wire; adapters use `authenticationRequired` errors for setup), `bell`, `fileTouched`, `usage` |
-| **Custom ACP surfaces** | `agentDashboard(url:title:)` (WebView URL + optional title from `_meta`), `sessionIndexChanged`, `sessionAttentionChanged` |
+| **Custom ACP surfaces** | `agentDashboard(url:title:)` (WebView URL + optional title from `_meta`), `sessionIndexChanged`, `sessionAttentionChanged`, `sessionPhaseChanged` (file-level pipeline phase — see §35) |
 | **Out-of-band** | `speakBubbleRequested`, `fileReverted`, `prefsChanged`, `appearancePrefChanged`, `snapshotReady` |
 
 A consumer that knows nothing else can render a complete conversation by folding these events. New event cases require: (a) wire DTO in `AgentEventWire`, (b) `WireCodec` round-trip, (c) `RemoteParityTests` coverage, (d) a UI consumer or an explicit decision that none is wanted.
@@ -1870,6 +1871,43 @@ Rare. Bumps the wire version unless purely additive. Requires a checklist sign-o
 - **When in doubt about novelty**, prefer the boring shape. Codemixer's complexity is in its constraints, not its cleverness.
 
 If after all this you still cannot decide, propose the decision in the PR description with the trade-offs made explicit; the reviewer's job is to lock the direction for future readers.
+
+---
+
+## 35. Chat workbench
+
+The chat surface (`AgentUI/Workbench/ConversationWorkbenchView.swift`) is a 3-lane layout, not the old single centered column. It replaces `conversationColumn`'s body in `WorkspaceScene.swift` for chat sessions only — `showsOverviewDashboard` sessions keep the WebView path untouched.
+
+```
+IndexRailView | TranscriptLaneView | WorkLaneView
+ (turns, or    (user + assistant     (tool cards for
+  phase groups  prose + live          the selected turn,
+  for Custom    ThinkingFocusView;    then DiffPanelView
+  ACP files)    StatusPill overlay)   for changed files)
+```
+
+- **`IndexRailView`** — fixed-width (`Theme.layout.indexRailWidth`), non-draggable. Rows are `EngineViewModel.ConversationTurn` (§ below); for a session that has received at least one `sessionPhaseChanged`, rows nest under phase-group headers with round/ETA/attention badges instead. Hosts the collapsed `SessionScrubber` mini-map.
+- **`TranscriptLaneView`** — lifts `ConversationView`'s scroll machinery (`ScrollViewReader`/`LazyVStack`, `ConversationAutoScrollController`, Cmd+F search, banners, empty-state hero) unchanged, minus `.toolCall` rows (the primary fix for excessive scrolling — tool cards moved to the work lane). Floats the existing `StatusPill` top-trailing (still the one "now" signal) and a peripheral-progress hairline keyed to the active file session's phase.
+- **`WorkLaneView`** — two content-driven, stacked sections: `ToolCallCardView`s for the effective selected turn's tool-call IDs, then the existing `DiffPanelView` (workspace-wide changed files, not per-turn). Present only when it has something to show.
+- **`ConversationWorkbenchView`** composes the rail, one transcript instance, and an optional work lane. The transcript is intentionally not duplicated across layout candidates — long Custom ACP sessions stream large markdown payloads, so one render tree prevents repeated markdown/code parsing. A `.focus` `Theme.DensityMode` case (Cmd+Shift+J) is the zen extreme: rail and work lane both collapse to a single centered transcript.
+
+### `ConversationTurn` — the turn/phase projection
+
+`EngineViewModel+Turns.swift` adds a *computed*, never-stored `conversationTurns: [ConversationTurn]` that splits `messages` on `.user` boundaries (turn `id` == the user bubble's `UUID` == the engine's live-turn id). Each turn carries prompt text, a live thinking preview, its tool-call ids, a running/done/failed status, and — for Custom ACP file sessions — the `SessionPhase` in effect when it started. `selectedTurnID`/`selectedPhaseID` on `EngineViewModel` hold the rail's pin state (`nil` means "follow the live turn").
+
+### File-level phase as a durable transcript event
+
+Custom ACP's per-file pipeline status (`PipelineStatus` in the migration tool) is bridged into `AgentEvent.sessionPhaseChanged(sessionID:phase:)`, a small `Codable` `SessionPhase { id, label, ordinal, group }` — deliberately file-scoped only; the migration tool's run/overall status (assessment → characterization → wave N → cutover) stays exclusively in the Custom ACP overview dashboard WebView and is not duplicated here.
+
+The key design constraint: phase is an **ordered transcript entry**, not session-level `_meta`. The migration tool appends a `{ kind: "phase", status, wave? }` `TranscriptChunk` from the same `commitStatus(...)` seam that mutates file state, so it persists to `TranscriptStore` (JSONL) and replays in order on `session/load` for free — no special re-emit hack. `ACPEventDecoder+Streaming` decodes the resulting `codemixer.dev/phase_update` session-update into `sessionPhaseChanged` on the live path; `ACPConversationTurn` carries a `phase` field and `ACPSessionStoreCodec.events(from:)` re-derives `sessionPhaseChanged` from it on the **cached**-transcript path too, so phase grouping survives both live and reopened sessions.
+
+### Deviations from `docs/style/visual-style.md`
+
+Recorded here per the guide's own "update the doc in the same PR" rule; full detail lives in visual-style.md itself:
+
+- **§12 (layout):** the centered 720pt column is superseded by the 3-lane workbench; `messageMaxWidth` remains only as the transcript's inner readable cap.
+- **§13.3/§14 (thinking):** `ThinkingFocusView` keeps the live/selected turn's thinking expanded and prominent above assistant prose — the opposite of §13.3's "collapsed by default" rule. History (every other turn) keeps the unchanged §13.3 treatment via `ThinkingBlockView`.
+- **§1.15 (density):** `Theme.DensityMode` gained a third case, `.focus`, the workbench's zen reading mode.
 
 ---
 

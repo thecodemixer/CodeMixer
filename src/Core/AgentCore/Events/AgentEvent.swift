@@ -43,7 +43,7 @@ public enum AgentEvent: Sendable {
     // MARK: - Out-of-band (snapshots, prefs, TTS, revert)
 
     case speakBubbleRequested(eventID: UUID, action: TTSAction)
-    case fileReverted(path: String)
+    case fileReverted(file: ChangedFile)
     case prefsChanged(rulesCount: Int)
     case appearancePrefChanged(key: AppearancePrefKey, value: AppearancePrefValue)
     case snapshotReady(kind: SnapshotKind, payload: Data)
@@ -65,4 +65,12 @@ public enum AgentEvent: Sendable {
     /// The agent no longer owns this session, so Codemixer restored cached
     /// project transcript history instead of live ACP state.
     case cachedTranscriptLoaded(sessionID: String)
+
+    /// A file-level pipeline phase advanced for this session. Agent-agnostic:
+    /// a Custom ACP adapter maps its vendor status onto `SessionPhase`. Always
+    /// file-scoped — there is no run/overall variant (see `AGENTS.md` phase
+    /// bridge notes). Ordered and durable: emitted live and re-emitted, in
+    /// order, on both `session/load` replay and cached-transcript replay, so
+    /// the rail can phase-group reopened history, not just the live tail.
+    case sessionPhaseChanged(sessionID: String, phase: SessionPhase)
 }

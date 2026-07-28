@@ -44,6 +44,14 @@ extension ACPClientState {
         withLock { thinkingBlockIDs.removeAll() }
     }
 
+    func foregroundPhaseID() -> String? {
+        withLock { lastForegroundPhaseID }
+    }
+
+    func setForegroundPhaseID(_ id: String?) {
+        withLock { lastForegroundPhaseID = id }
+    }
+
     func thinkingBlockID(for key: String, random: any RandomSource) -> UUID {
         withLock {
             if let existing = thinkingBlockIDs[key] { return existing }
@@ -82,8 +90,8 @@ extension ACPClientState {
     /// Accumulate a background-session text chunk. Returns a completed turn when
     /// the role changes for that session (or when `flushForeignBuffer` is used).
     func appendForeignChunk(sessionID: String,
-                            role: String,
-                            delta: String) -> (role: String, text: String)? {
+                            role: ACPTurnRole,
+                            delta: String) -> (role: ACPTurnRole, text: String)? {
         withLock {
             guard !delta.isEmpty else { return nil }
             if let existing = foreignBuffers[sessionID], existing.role != role {
@@ -99,7 +107,7 @@ extension ACPClientState {
         }
     }
 
-    func flushForeignBuffer(sessionID: String) -> (role: String, text: String)? {
+    func flushForeignBuffer(sessionID: String) -> (role: ACPTurnRole, text: String)? {
         withLock {
             guard let existing = foreignBuffers.removeValue(forKey: sessionID),
                   !existing.text.isEmpty else { return nil }

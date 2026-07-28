@@ -179,20 +179,21 @@ enum ACPSessionStoreCodec {
     }
 
     static func events(from turns: [ACPConversationTurn],
+                       sessionID: String,
                        clock: any AgentClock,
                        random: any RandomSource) -> [AgentEvent] {
         let now = clock.now()
         return turns.flatMap { turn -> [AgentEvent] in
             switch turn.role {
-            case "user":
+            case .user:
                 return [.userTurn(id: random.uuid().uuidString, text: turn.text)]
-            case "thinking":
+            case .thinking:
                 let blockID = random.uuid()
                 return [
                     .thinkingChunk(blockID: blockID, delta: turn.text),
                     .thinkingComplete(blockID: blockID, duration: .zero),
                 ]
-            case "tool":
+            case .tool:
                 let id = turn.toolCallID ?? random.uuid().uuidString
                 return [
                     .toolStart(
@@ -208,10 +209,13 @@ enum ACPSessionStoreCodec {
                         durationMS: 0
                     ),
                 ]
-            case "assistant":
+            case .assistant, .agent:
                 let id = random.uuid().uuidString
                 return [.assistantText(id: id, blockID: id, text: turn.text, isFinal: true)]
-            default:
+            case .phase:
+                guard let phase = turn.phase else { return [] }
+                return [.sessionPhaseChanged(sessionID: sessionID, phase: phase)]
+            case .unknown:
                 return []
             }
         }
@@ -223,6 +227,6 @@ enum ACPSessionStoreCodec {
     }
 
     static func chatMessageCount(in turns: [ACPConversationTurn]) -> Int {
-        turns.filter { $0.role == "user" || $0.role == "assistant" }.count
+        turns.filter(\.role.isChatMessage).count
     }
 }

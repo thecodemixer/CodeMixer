@@ -61,7 +61,9 @@ extension EngineViewModel {
         }
         if isCurrentSession(projectPath: projectPath, sessionID: id) {
             detailPane = .conversation
-            return
+            if !messages.isEmpty || !activeToolCalls.isEmpty {
+                return
+            }
         }
         // Capabilities must be known before arming the composer lock — Cursor /
         // ACP need the longer handshake gate, not the 3s resume unlock.

@@ -62,6 +62,29 @@ public struct SlashCommand: Sendable, Hashable, Identifiable {
     }
 }
 
+/// A file-level pipeline phase, bridged agent-agnostically from a Custom ACP
+/// migration tool. Always scoped to the file session that owns it — run/
+/// overall status is not modeled here; it stays in the ACP overview
+/// dashboard. `group` buckets the vendor's finer-grained status into the
+/// rail's ordered headers (Plan / Migrate / Review / Fix / Verify).
+public struct SessionPhase: Sendable, Codable, Hashable {
+    public enum Group: String, Sendable, Codable, Hashable, CaseIterable {
+        case plan, migrate, review, fix, verify
+    }
+
+    public let id: String
+    public let label: String
+    public let ordinal: Int
+    public let group: Group
+
+    public init(id: String, label: String, ordinal: Int, group: Group) {
+        self.id = id
+        self.label = label
+        self.ordinal = ordinal
+        self.group = group
+    }
+}
+
 /// Lightweight metadata for a previously-recorded session, suitable for the
 /// project picker's "Resume" list.
 public struct SessionSummary: Sendable, Hashable, Identifiable {

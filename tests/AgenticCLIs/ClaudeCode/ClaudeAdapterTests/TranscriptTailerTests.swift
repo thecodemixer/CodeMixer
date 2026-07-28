@@ -174,6 +174,37 @@ struct TranscriptTailerTests {
         await tailer.stop()
     }
 
+    @Test("Replay emits user records with top-level content")
+    func replayEmitsTopLevelUserRecords() async throws {
+        let (tmp, tailer, projects) = try makeTailer()
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let line = """
+        {"type":"user","uuid":"user-top-text","sessionId":"s","content":"top-level text"}
+        {"type":"user","uuid":"user-top-blocks","sessionId":"s","content":[{"type":"text","text":"top-level block"}]}
+        """
+        try line.write(to: projects.appendingPathComponent("s.jsonl"),
+                       atomically: true,
+                       encoding: .utf8)
+
+        await tailer.bind(sessionID: "s")
+        let stream = await tailer.start()
+        let collector = EventCollector()
+        let task = Task { await collector.collect(from: stream) }
+
+        await tailer.drain()
+        await tailer.stop()
+        task.cancel()
+
+        let collected = await collector.events
+        let userTexts = collected.compactMap { event -> String? in
+            if case .userTurn(_, let text) = event { return text }
+            return nil
+        }
+        #expect(userTexts.contains("top-level text"))
+        #expect(userTexts.contains("top-level block"))
+    }
+
     @Test("Live tailing suppresses user records")
     func liveTailingSuppressesUserRecords() async throws {
         let (tmp, tailer, projects) = try makeTailer(replayUserTurns: false)
@@ -295,6 +326,48 @@ struct TranscriptTailerTests {
         task.cancel()
 
         let collected = await collector.events
+        #expect(collected.contains {
+            if case .toolStart("tool-1", "Bash", let input, _) = $0 {
+                return input.summary == "Run: pwd"
+            }
+            return false
+        })
+        #expect(collected.contains {
+            if case .toolEnd("tool-1", true, let output, _) = $0 {
+                return output.summary == "/tmp/ws"
+            }
+            return false
+        })
+    }
+
+    @Test("Replay emits user prompt and tool call records from the same Claude session")
+    func replayEmitsUserPromptAndToolCallsTogether() async throws {
+        let (tmp, tailer, projects) = try makeTailer()
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let line = """
+        {"type":"user","uuid":"user-1","sessionId":"s","message":{"role":"user","content":[{"type":"text","text":"inspect the workspace"}]}}
+        {"type":"assistant","uuid":"tool-start","sessionId":"s","message":{"role":"assistant","content":[{"type":"tool_use","id":"tool-1","name":"Bash","input":{"command":"pwd"}}]}}
+        {"type":"tool_result","uuid":"tool-end","sessionId":"s","tool_use_id":"tool-1","content":[{"type":"text","text":"/tmp/ws"}],"is_error":false}
+        """
+        try line.write(to: projects.appendingPathComponent("s.jsonl"),
+                       atomically: true,
+                       encoding: .utf8)
+
+        await tailer.bind(sessionID: "s")
+        let stream = await tailer.start()
+        let collector = EventCollector()
+        let task = Task { await collector.collect(from: stream) }
+
+        await tailer.drain()
+        await tailer.stop()
+        task.cancel()
+
+        let collected = await collector.events
+        #expect(collected.contains {
+            if case .userTurn("user-1", "inspect the workspace") = $0 { return true }
+            return false
+        })
         #expect(collected.contains {
             if case .toolStart("tool-1", "Bash", let input, _) = $0 {
                 return input.summary == "Run: pwd"

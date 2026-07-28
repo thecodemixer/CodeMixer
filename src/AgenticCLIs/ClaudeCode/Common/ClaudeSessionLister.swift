@@ -79,9 +79,8 @@ public enum ClaudeSessionLister {
         let tail = data.suffix(tailByteBudget)
         guard let text = String(data: tail, encoding: .utf8) else { return fallback }
         for line in text.split(separator: "\n", omittingEmptySubsequences: true).reversed() {
-            guard let lineData = line.data(using: .utf8),
-                  let object = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
-                  let timestamp = object["timestamp"] as? String,
+            guard let record = decodeRecord(from: line),
+                  let timestamp = record.timestamp,
                   let date = parseTranscriptTimestamp(timestamp) else { continue }
             return date
         }
@@ -110,14 +109,12 @@ public enum ClaudeSessionLister {
         var title: String?
         var gitBranch: String?
         for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
-            guard let lineData = line.data(using: .utf8),
-                  let object = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any]
-            else { continue }
+            guard let record = decodeRecord(from: line) else { continue }
 
-            if gitBranch == nil, let branch = object["gitBranch"] as? String, !branch.isEmpty {
+            if gitBranch == nil, let branch = record.gitBranch, !branch.isEmpty {
                 gitBranch = branch
             }
-            if title == nil, let extracted = userText(from: object) {
+            if title == nil, let extracted = record.userPromptText {
                 title = sanitizeTitle(extracted)
             }
             if title != nil && gitBranch != nil { break }
@@ -125,22 +122,9 @@ public enum ClaudeSessionLister {
         return Metadata(title: title, messageCount: totalLines, gitBranch: gitBranch)
     }
 
-    /// Extract user-authored text from a transcript record, if this is a user turn.
-    private static func userText(from object: [String: Any]) -> String? {
-        guard (object["type"] as? String) == "user",
-              let message = object["message"] as? [String: Any] else { return nil }
-
-        // content is either a string or an array of typed blocks.
-        if let string = message["content"] as? String { return string }
-        if let blocks = message["content"] as? [[String: Any]] {
-            for block in blocks {
-                if (block["type"] as? String) == "text",
-                   let text = block["text"] as? String {
-                    return text
-                }
-            }
-        }
-        return nil
+    private static func decodeRecord(from line: some StringProtocol) -> ClaudeTranscriptTailer.Record? {
+        guard let data = line.data(using: .utf8) else { return nil }
+        return ClaudeTranscriptTailer.decodeRecord(from: data)
     }
 
     private static func sanitizeTitle(_ raw: String) -> String {

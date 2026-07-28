@@ -8,18 +8,13 @@ import AgentProtocol
 extension ACPClientState {
     /// Append a history chunk during `session/load`. Emits finalized turns when
     /// the role or `messageId` boundary changes.
-    func appendHistoryChunk(role: String,
+    func appendHistoryChunk(role: ACPTurnRole,
                             messageID: String?,
                             delta: String,
                             random: any RandomSource) -> [AgentEvent] {
         withLock {
             guard !delta.isEmpty else { return [] }
-            let nextRole: ReplayRole
-            switch role {
-            case "user": nextRole = .user
-            case "thinking": nextRole = .thinking
-            default: nextRole = .agent
-            }
+            let nextRole = role
             var events: [AgentEvent] = []
             let boundary = replayRole != nil && (
                 replayRole != nextRole
@@ -54,7 +49,7 @@ extension ACPClientState {
         switch role {
         case .user:
             return [.userTurn(id: id.uuidString, text: text)]
-        case .agent:
+        case .agent, .assistant:
             return [.assistantText(
                 id: id.uuidString,
                 blockID: replayMessageID ?? "history-agent",
@@ -67,6 +62,8 @@ extension ACPClientState {
                 .thinkingChunk(blockID: id, delta: text),
                 .thinkingComplete(blockID: id, duration: .zero),
             ]
+        case .tool, .phase, .unknown:
+            return []
         }
     }
 

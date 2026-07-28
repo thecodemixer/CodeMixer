@@ -7,20 +7,29 @@ struct ChangedFilesReconcilerTests {
 
     @Test("reconcile reports added and removed paths")
     func reconcileDelta() {
-        let current = ["a.swift", "b.swift"]
-        let git = ["b.swift", "c.swift"]
+        let current = [
+            ChangedFile(relativePath: "a.swift"),
+            ChangedFile(relativePath: "b.swift"),
+        ]
+        let git = [
+            ChangedFile(relativePath: "b.swift"),
+            ChangedFile(relativePath: "c.swift"),
+        ]
         let delta = ChangedFilesReconciler.reconcile(current: current, gitPaths: git)
-        #expect(delta.added == ["c.swift"])
-        #expect(delta.removed == ["a.swift"])
-        #expect(delta.next == ["b.swift", "c.swift"])
+        #expect(delta.added.map(\.relativePath) == ["c.swift"])
+        #expect(delta.removed.map(\.relativePath) == ["a.swift"])
+        #expect(delta.next.map(\.relativePath) == ["b.swift", "c.swift"])
     }
 
     @Test("reconcile with identical sets yields empty deltas")
     func reconcileNoOp() {
-        let paths = ["src/App.swift", "src/Util.swift"]
+        let paths = [
+            ChangedFile(relativePath: "src/App.swift"),
+            ChangedFile(relativePath: "src/Util.swift"),
+        ]
         let delta = ChangedFilesReconciler.reconcile(current: paths, gitPaths: paths)
         #expect(delta.added.isEmpty)
         #expect(delta.removed.isEmpty)
-        #expect(delta.next == paths.sorted())
+        #expect(delta.next.map(\.relativePath) == ["src/App.swift", "src/Util.swift"])
     }
 }

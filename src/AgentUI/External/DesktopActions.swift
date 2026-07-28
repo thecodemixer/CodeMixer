@@ -74,6 +74,16 @@ public enum DesktopActions {
         }
     }
 
+    /// Shows the column-resize cursor while dragging a workbench lane divider.
+    @MainActor
+    public static func setColumnResizeCursor(_ hovering: Bool) {
+        if hovering {
+            NSCursor.resizeLeftRight.push()
+        } else {
+            NSCursor.pop()
+        }
+    }
+
     /// Presents a save panel and returns the chosen URL, or nil if cancelled.
     @MainActor
     public static func savePanel(nameField: String,

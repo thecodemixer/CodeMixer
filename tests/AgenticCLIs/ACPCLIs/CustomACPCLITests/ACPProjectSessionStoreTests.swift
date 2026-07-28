@@ -46,13 +46,13 @@ struct ACPProjectSessionStoreTests {
         await store.appendConversationTurn(
             sessionID: "sess-1",
             customAgentID: "mig",
-            role: "user",
+            role: .user,
             text: "migrate users"
         )
         await store.appendConversationTurn(
             sessionID: "sess-1",
             customAgentID: "mig",
-            role: "assistant",
+            role: .assistant,
             text: "done"
         )
 
@@ -111,7 +111,7 @@ struct ACPProjectSessionStoreTests {
         await legacy.appendConversationTurn(
             sessionID: "old-1",
             customAgentID: "mig",
-            role: "user",
+            role: .user,
             text: "from app support"
         )
 
@@ -167,7 +167,7 @@ struct ACPProjectSessionStoreTests {
         await writer.appendConversationTurn(
             sessionID: "sess-reload",
             customAgentID: "reload",
-            role: "user",
+            role: .user,
             text: "hello disk"
         )
 
@@ -193,7 +193,7 @@ struct ACPProjectSessionStoreTests {
     @Test("trims index and JSONL to 200 turns")
     func trimsTurnsAndJSONL() async throws {
         #expect(ACPSessionStoreCodec.trimmedTurns(
-            (0..<205).map { ACPConversationTurn(role: "user", text: "t\($0)") }
+            (0..<205).map { ACPConversationTurn(role: .user, text: "t\($0)") }
         ).count == 200)
 
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
@@ -218,7 +218,7 @@ struct ACPProjectSessionStoreTests {
             await store.appendConversationTurn(
                 sessionID: "sess-trim",
                 customAgentID: "trim",
-                role: i.isMultiple(of: 2) ? "user" : "assistant",
+                role: i.isMultiple(of: 2) ? .user : .assistant,
                 text: "turn-\(i)"
             )
         }

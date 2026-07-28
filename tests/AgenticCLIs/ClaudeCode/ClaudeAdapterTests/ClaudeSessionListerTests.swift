@@ -7,6 +7,15 @@ import AgentTestSupport
 @Suite("ClaudeSessionLister")
 struct ClaudeSessionListerTests {
 
+    @Test("title extracts from user message with text blocks")
+    func titleFromTextBlocks() {
+        let data = Data(
+            #"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"block title"}]}}"#.utf8
+        )
+        let meta = ClaudeSessionLister.parse(headOf: data)
+        #expect(meta.title == "block title")
+    }
+
   @Test("lastActivity uses the newest transcript timestamp, not file mtime")
   func lastActivityUsesTranscriptTimestamp() {
     let old = Date(timeIntervalSince1970: 1_700_000_000)

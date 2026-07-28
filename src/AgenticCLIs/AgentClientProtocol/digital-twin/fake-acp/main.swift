@@ -20,7 +20,7 @@ private struct FakeACPServer: ACPTwinServer {
     var workspacePath: String?
     var pendingPromptID: JSONValue?
     var pendingReplyPrefix = ""
-    var currentModeID = "agent"
+    var currentModeID = ACPStandardModeID.agent.rawValue
 
     init(scenario: ACPTwinScenario) {
         self.scenario = scenario
@@ -60,7 +60,7 @@ private struct FakeACPServer: ACPTwinServer {
         case "session/new":
             workspacePath = params["cwd"]?.stringValue
             sessionID = UUID().uuidString
-            currentModeID = "agent"
+            currentModeID = ACPStandardModeID.agent.rawValue
             return [ACPRPCCodec.response(
                 id: id,
                 result: .object([
@@ -178,23 +178,13 @@ private struct FakeACPServer: ACPTwinServer {
     private func modesPayload() -> JSONValue {
         .object([
             "currentModeId": .string(currentModeID),
-            "availableModes": .array([
+            "availableModes": .array(ACPStandardModeID.allCases.map { mode in
                 .object([
-                    "id": .string("agent"),
-                    "name": .string("Agent"),
-                    "description": .string("Full agent capabilities with tool access"),
-                ]),
-                .object([
-                    "id": .string("plan"),
-                    "name": .string("Plan"),
-                    "description": .string("Read-only planning"),
-                ]),
-                .object([
-                    "id": .string("ask"),
-                    "name": .string("Ask"),
-                    "description": .string("Q&A mode"),
-                ]),
-            ]),
+                    "id": .string(mode.rawValue),
+                    "name": .string(mode.displayName),
+                    "description": .string(mode.catalogSummary),
+                ])
+            }),
         ])
     }
 

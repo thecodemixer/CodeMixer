@@ -1,5 +1,6 @@
 import Foundation
 
+import AgentClientProtocol
 import AgentCore
 import AgentProtocol
 
@@ -9,34 +10,35 @@ import AgentProtocol
 /// `session/set_mode`, not slash prompts. Slash `/agent`/`/plan`/`/ask` are
 /// ordinary prompts unless Codemixer remaps them to `session/set_mode`.
 /// `/debug` is diagnostic-only — not in `availableModes`.
-public enum CursorModeCommand: String, Sendable, CaseIterable {
+public enum CursorModeCommand: Sendable, CaseIterable {
     case agent
     case plan
     case ask
 
+    public init?(standardModeID: ACPStandardModeID) {
+        switch standardModeID {
+        case .agent: self = .agent
+        case .plan: self = .plan
+        case .ask: self = .ask
+        }
+    }
+
+    public var standardModeID: ACPStandardModeID {
+        switch self {
+        case .agent: return .agent
+        case .plan: return .plan
+        case .ask: return .ask
+        }
+    }
+
     /// ACP `modeId` value.
-    public var modeID: String { rawValue }
+    public var modeID: String { standardModeID.rawValue }
 
-    public var slashName: String { "/\(rawValue)" }
+    public var slashName: String { "/\(modeID)" }
 
-    public var displayLabel: String {
-        switch self {
-        case .agent: return "Agent"
-        case .plan: return "Plan"
-        case .ask: return "Ask"
-        }
-    }
+    public var displayLabel: String { standardModeID.displayName }
 
-    public var catalogSummary: String {
-        switch self {
-        case .agent:
-            return "Full agent capabilities with tool access"
-        case .plan:
-            return "Read-only planning before implementation"
-        case .ask:
-            return "Q&A mode — no edits or command execution"
-        }
-    }
+    public var catalogSummary: String { standardModeID.catalogSummary }
 
     /// Composer bottom-bar modes. Activation writes ACP `session/set_mode`
     /// through `CursorACPAdapter.encodeCommand`.
@@ -53,7 +55,7 @@ public enum CursorModeCommand: String, Sendable, CaseIterable {
     public static func chatMode(forSlash name: String) -> CursorModeCommand? {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let bare = trimmed.hasPrefix("/") ? String(trimmed.dropFirst()) : trimmed
-        return Self(rawValue: bare.lowercased())
+        return ACPStandardModeID(rawValue: bare.lowercased()).flatMap(CursorModeCommand.init(standardModeID:))
     }
 
     public static func modeID(forPermissionMode mode: PermissionMode) -> String? {

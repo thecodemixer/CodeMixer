@@ -71,6 +71,7 @@ extension EngineViewModel {
         workspace = URL(fileURLWithPath: projectPath).standardizedFileURL
         sessionID = id
         clearConversationState()
+        promotePendingPhases(for: id, projectPath: projectPath)
         // Activity follows the newly selected session — unrelated parked reviews
         // stay in `pendingPermissionsBySession` and only show their orange dots.
         refreshPermissionActivity()

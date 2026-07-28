@@ -158,7 +158,7 @@ public final class EngineViewModel {
     public internal(set) var diagnostics: [DiagnosticEntry] = []
     public internal(set) var status: StatusLine = .idle
     public internal(set) var activity: ActivitySubstate = .idle
-    public internal(set) var changedFiles: [String] = []
+    public internal(set) var changedFiles: [ChangedFile] = []
     /// WebSocket peers attached to `RemoteControlServer` (server-side count).
     /// In Mode B includes the loopback GUI; in Mode A counts external peers only.
     /// See `docs/architecture.md` §4.1 and `Remote/AgentRemoteControl/README.md`.
@@ -286,6 +286,31 @@ public final class EngineViewModel {
     /// Single-fire per turn; reset on session start and on stop.
     public internal(set) var stalledToastVisible: Bool = false
 
+    // MARK: - Chat workbench: turn / phase state (see EngineViewModel+Turns.swift)
+
+    /// Pinned turn in the index rail. `nil` means "follow the live turn" —
+    /// the transcript and work lane always track the newest turn.
+    public var selectedTurnID: UUID?
+    /// Pinned phase-group header in the index rail (Custom ACP sessions only).
+    public var selectedPhaseID: String?
+    /// Ordered, file-level phase markers for the current session, anchored to
+    /// a position in `messages` so turns can be phase-tagged retroactively —
+    /// including turns already replayed before the marker arrived (durable /
+    /// cached replay re-emits markers in original order). Reset on session switch.
+    var phaseMarkers: [PhaseMarker] = []
+    /// When cached background phases are promoted and `session/load` then
+    /// replays the same phase prefix, this cursor suppresses the duplicate
+    /// replay without hiding real later rounds.
+    var phaseReplayDedupCursor: Int?
+    /// Phase markers observed while another session (usually the Custom ACP
+    /// overview dashboard) is foregrounded. Promoted when the matching file
+    /// session is opened so background migration progress still appears in
+    /// the rail immediately.
+    var pendingPhaseMarkersBySession: [String: [PhaseMarker]] = [:]
+    /// Per-session `(messageCount, Date)` snapshot captured when a session
+    /// was last foregrounded, powering the while-you-were-away recap delta.
+    var lastSeenMarkerBySession: [String: (messageCount: Int, at: Date)] = [:]
+
     // MARK: - Cross-extension state (internal — split across +Conversation/+Navigator/+Send)
 
     var thinkingBlockTexts: [UUID: String] = [:]
@@ -377,11 +402,24 @@ public final class EngineViewModel {
     /// Seed conversation chrome for previews (DEBUG only).
     func applyPreviewConversationState() {
         messages = PreviewFixtures.conversationMessages()
-        changedFiles = ["src/AgentUI/Sidebar/SessionSidebarView.swift"]
+        changedFiles = [ChangedFile(relativePath: "src/AgentUI/Sidebar/SessionSidebarView.swift")]
         sessionTokens = 12_400
         sessionCostUSD = 0.42
         status = .working(phrase: "Thinking…")
         activity = .streamingText
+    }
+
+    /// Seed a multi-turn, multi-phase Custom ACP file session for the
+    /// workbench lane previews + `SessionScrubber` (DEBUG only).
+    func applyPreviewCustomACPPhasesState() {
+        let fixture = PreviewFixtures.customACPPhasesFixture()
+        messages = fixture.messages
+        activeToolCalls = fixture.toolCalls
+        phaseMarkers = fixture.phaseMarkers
+        changedFiles = [ChangedFile(relativePath: "migration-tool/src/orders.ts")]
+        sessionID = "file-orders-ts"
+        status = .idle
+        activity = .idle
     }
     #endif
 
@@ -503,6 +541,15 @@ public extension EngineViewModel {
         /// Accumulated subagent output lines (one per `.toolProgress(.generic)` event
         /// keyed to this call's ID). Rendered as a nested mini-conversation inside the card.
         public var subagentLines: [String] = []
+    }
+
+    /// One `sessionPhaseChanged` occurrence, anchored to its position in
+    /// `messages` so `conversationTurns` can tag every turn from that point
+    /// forward — including turns that replayed before the live marker arrived.
+    struct PhaseMarker: Sendable, Hashable {
+        let messageIndex: Int
+        let phase: SessionPhase
+        let at: Date
     }
 
     struct DiagnosticEntry: Sendable, Hashable, Identifiable {

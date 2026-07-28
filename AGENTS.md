@@ -127,15 +127,22 @@ Codemixer/
 | Theme tokens (color, type, spacing, motion) | `AgentUI/Theme/Theme.swift` |
 | Progressive disclosure modifier | `AgentUI/Theme/IntentReveal.swift` |
 | The observable view model | `AgentUI/ViewModel/EngineViewModel.swift` |
+| Chat workbench turn/phase projection (`ConversationTurn`, rail badges, recap, peripheral progress) | `AgentUI/ViewModel/EngineViewModel+Turns.swift` |
 | Activity primitives (`ShimmerDots`, `InlineStatusTicker`, `StatusPill`) | `AgentUI/Activity/ActivityViews.swift` |
 | Conversation views (bubbles, prose, thinking blocks) | `AgentUI/Conversation/MessageViews.swift` |
 | Markdown block parsing + prose/code rendering | `AgentUI/Conversation/{MarkdownBlock,MarkdownProseView,CodeBlockView,CodeSyntaxHighlighter}.swift` |
 | Conversation motion (arriving rows, turn spine, streaming caret, empty-state hero) | `AgentUI/Conversation/ConversationMotion.swift` |
 | Tool-call card (rendered inline in turn order) | `AgentUI/Conversation/ToolCallCardView.swift` |
+| Live/selected turn's prominent thinking card (deviates from collapsed-by-default; see `docs/style/visual-style.md` §13.3) | `AgentUI/Conversation/ThinkingFocusView.swift` |
 | Permission prompt | `AgentUI/Conversation/PermissionPromptView.swift` |
 | Agent dashboard WebView (Custom ACP overview) | `AgentUI/Dashboard/AgentDashboardView.swift` |
 | WKWebView wrapper | `AgentUI/External/WebViewRepresentable.swift` |
-| Conversation scroller | `AgentUI/Conversation/ConversationView.swift` |
+| Chat workbench root (3-lane layout, `ViewThatFits` breakpoints, Focus mode) | `AgentUI/Workbench/ConversationWorkbenchView.swift` |
+| Index rail (turn list, phase groups, round/ETA/attention badges, jump-to-live) | `AgentUI/Workbench/IndexRailView.swift` |
+| Transcript lane (prose/thinking only — tool calls excluded, see Work lane) | `AgentUI/Workbench/TranscriptLaneView.swift` |
+| Work lane (live tool calls, changed files, diff hunks) | `AgentUI/Workbench/WorkLaneView.swift` |
+| Per-session phase mini-map / scrubber (rendered by the rail when `hasPhaseData`) | `AgentUI/Workbench/SessionScrubber.swift` |
+| "While-you-were-away" recap banner | `AgentUI/Workbench/AwayRecapBanner.swift` |
 | Session navigator (projects → sessions, icon-rail focus mode; attention rollup badge) | `AgentUI/Sidebar/SessionSidebarView.swift` |
 | Cmd+K command palette | `AgentUI/Palette/CommandPaletteView.swift` |
 | Composer (prompt input, modes, mic, send/cancel) | `AgentUI/Composer/{PromptComposerView,PromptComposerSupportViews,PromptComposerDraftLogic,ComposerAttachmentHandling}.swift` |
@@ -254,6 +261,9 @@ tests/
 | Command dispatch parity | `Remote/RemoteParityTests/CommandDispatchParityTests.swift` |
 | View-model reduction | `AgentUITests/EngineViewModelTests.swift` |
 | Optimistic send + navigator actions | `AgentUITests/EngineViewModelNavigatorTests.swift` |
+| Chat workbench turns/phases (`conversationTurns`, `sessionPhaseChanged`, rail badges, recap, peripheral progress) | `AgentUITests/EngineViewModelTurnsTests.swift` |
+| Density-mode spacing scale (`.comfortable`/`.compact`/`.focus`) | `AgentUITests/AppearanceModifiersTests.swift` |
+| Chat workbench lane visibility (rail/work-lane per density, `WorkLaneView.hasContent`) | `AgentUITests/ConversationWorkbenchLaneVisibilityTests.swift` |
 | Workspace create/open model-catalog warm | `AgentUITests/WorkspaceLifecycleTests.swift` |
 | Interaction coverage (every command/event surfaced) | `AgentUITests/InteractionCoverageTests.swift` |
 | Session export | `AgentUITests/SessionExporterTests.swift` |

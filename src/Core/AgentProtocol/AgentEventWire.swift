@@ -43,7 +43,7 @@ public enum AgentEventWire: Sendable, Codable, Hashable {
     // MARK: - Out-of-band
 
     case speakBubbleRequested(eventID: UUID, action: TTSAction)
-    case fileReverted(path: String)
+    case fileReverted(file: ChangedFile)
     case prefsChanged(rulesCount: Int)
     case appearancePrefChanged(key: AppearancePrefKey, value: AppearancePrefValue)
     case snapshotReady(kind: SnapshotKind, payloadBase64: String)
@@ -53,6 +53,22 @@ public enum AgentEventWire: Sendable, Codable, Hashable {
     case sessionIndexChanged(projectPath: String)
     case sessionAttentionChanged(sessionID: String, title: String, needsAttention: Bool)
     case cachedTranscriptLoaded(sessionID: String)
+    case sessionPhaseChanged(sessionID: String, phase: WireSessionPhase)
+}
+
+/// `SessionPhase` flattened to primitives; `group` is `SessionPhase.Group.rawValue`.
+public struct WireSessionPhase: Sendable, Codable, Hashable {
+    public let id: String
+    public let label: String
+    public let ordinal: Int
+    public let group: String
+
+    public init(id: String, label: String, ordinal: Int, group: String) {
+        self.id = id
+        self.label = label
+        self.ordinal = ordinal
+        self.group = group
+    }
 }
 
 // MARK: - Wire payload types

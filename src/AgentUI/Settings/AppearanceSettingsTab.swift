@@ -30,6 +30,7 @@ struct AppearanceSettingsTab: View {
             Picker("Density", selection: $density) {
                 Text("Comfortable").tag(Theme.DensityMode.comfortable)
                 Text("Compact").tag(Theme.DensityMode.compact)
+                Text("Focus").tag(Theme.DensityMode.focus)
             }
             .onChange(of: density) { _, new in
                 model.updateAppearance(.densityMode(new.rawValue))

@@ -30,9 +30,9 @@ public actor GitDiffEngine {
     }
 
     /// Names of files that have any change vs `HEAD` (`git status --porcelain`).
-    public func changedFiles() async throws -> [String] {
+    public func changedFiles() async throws -> [ChangedFile] {
         let output = try await runGit(["status", "--porcelain"])
-        return parsePorcelain(output)
+        return parsePorcelain(output).map { ChangedFile(relativePath: $0) }
     }
 
     /// Unified diff for one file vs `HEAD`.
@@ -42,6 +42,10 @@ public actor GitDiffEngine {
     /// `git diff --no-index /dev/null <file>` which surfaces the full addition.
     /// git exits 1 when differences exist (the normal case); we treat 0 and 1
     /// as success via `allowedExitCodes`.
+    public func diff(for file: ChangedFile, context: Int = 3) async throws -> FileDiff {
+        try await diff(for: file.relativePath, context: context)
+    }
+
     public func diff(for relativePath: String, context: Int = 3) async throws -> FileDiff {
         let gitPath = pathRelativeToWorkspaceIfPossible(relativePath)
         let raw = relativePath.hasPrefix("/")
@@ -177,7 +181,7 @@ public actor GitDiffEngine {
             }
         }
         flushHunk()
-        return FileDiff(relativePath: relativePath, hunks: hunks)
+        return FileDiff(file: ChangedFile(relativePath: relativePath), hunks: hunks)
     }
 
     /// Parse `git status --porcelain` output into user-facing changed paths.

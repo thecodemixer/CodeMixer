@@ -50,9 +50,11 @@ public enum CustomACPModeMapping {
         let ids = Set(available.map(\.id))
         switch mode {
         case .plan:
-            return ids.contains("plan") ? "plan" : nil
+            let plan = ACPStandardModeID.plan.rawValue
+            return ids.contains(plan) ? plan : nil
         case .default:
-            if ids.contains("agent") { return "agent" }
+            let agent = ACPStandardModeID.agent.rawValue
+            if ids.contains(agent) { return agent }
             return available.first?.id
         case .acceptEdits, .bypassPermissions:
             return nil

@@ -58,13 +58,7 @@ public final class ACPClientState: @unchecked Sendable {
     }
 
     /// Role of the in-flight `session/load` history buffer (nil when idle).
-    enum ReplayRole: Sendable, Equatable {
-        case user
-        case agent
-        case thinking
-    }
-
-    /// Non-private: read/written by the concern extensions in this directory.
+    /// Uses ``ACPTurnRole/agent`` for assistant message chunks.
     let lock = NSLock()
     var nextID = 1
     var requests: [JSONValue: RequestPurpose] = [:]
@@ -87,7 +81,7 @@ public final class ACPClientState: @unchecked Sendable {
     var currentModeIDStorage: String?
     var availableModelOptions: [AgentModelOption] = []
     var currentModelIDStorage: String?
-    var replayRole: ReplayRole?
+    var replayRole: ACPTurnRole?
     var replayMessageID: String?
     var replayText = ""
     var replayEventID: UUID?
@@ -95,7 +89,11 @@ public final class ACPClientState: @unchecked Sendable {
     var thoughtText = ""
     var parkedPermissionsBySession: [String: [ParkedPermission]] = [:]
     /// Coalesced background-session stream text (sessionId → role + text).
-    var foreignBuffers: [String: (role: String, text: String)] = [:]
+    var foreignBuffers: [String: (role: ACPTurnRole, text: String)] = [:]
+    /// Last file-pipeline phase id emitted for the foreground session. Used to
+    /// finalize the open assistant bubble when the phase advances so planner /
+    /// implementer / reviewer text does not concatenate into one message.
+    var lastForegroundPhaseID: String?
 
     public init() {}
 

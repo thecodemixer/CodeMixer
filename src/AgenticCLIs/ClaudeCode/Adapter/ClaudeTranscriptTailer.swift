@@ -209,7 +209,7 @@ public actor ClaudeTranscriptTailer {
               let record = try? JSONDecoder().decode(Record.self, from: lineData) else {
             return (parsed: false, emitted: false)
         }
-        let id = record.uuid ?? "\(record.type)-\(record.toolUseID ?? "")-\(line.hashValue)"
+        let id = record.uuid ?? "\(record.type.rawValue)-\(record.toolUseID ?? "")-\(line.hashValue)"
         guard !seenRecordIDs.contains(id) else { return (parsed: true, emitted: false) }
         seenRecordIDs.insert(id)
         if sessionID == nil, let recordSessionID = record.sessionId {
@@ -230,26 +230,31 @@ public actor ClaudeTranscriptTailer {
     }
 
     private func events(from record: Record, recordID: String) -> [AgentEvent] {
-        if record.type == "tool_result" {
+        switch record.type {
+        case .toolResult:
             return toolResultEvents(id: record.toolUseID,
                                     content: resultText(text: record.text, blocks: record.content),
                                     isError: record.isError ?? false,
                                     durationMS: record.durationMS ?? 0)
+        case .user:
+            if let message = record.message,
+               let resultEvents = toolResultEvents(from: message),
+               !resultEvents.isEmpty {
+                return resultEvents
+            }
+            if userTurnReplayActive,
+               let text = userText(from: record),
+               !text.isEmpty {
+                return [.userTurn(id: recordID, text: text)]
+            }
+            return []
+        case .assistant:
+            break
+        case .unknown:
+            return []
         }
 
-        guard let message = record.message else { return [] }
-        if record.type == "user",
-           let resultEvents = toolResultEvents(from: message),
-           !resultEvents.isEmpty {
-            return resultEvents
-        }
-        if userTurnReplayActive,
-           record.type == "user",
-           let text = userText(from: message),
-           !text.isEmpty {
-            return [.userTurn(id: recordID, text: text)]
-        }
-        guard record.type == "assistant",
+        guard let message = record.message,
               let blocks = message.content else { return [] }
 
         var out: [AgentEvent] = []
@@ -333,12 +338,8 @@ public actor ClaudeTranscriptTailer {
         return events
     }
 
-    private func userText(from message: Message) -> String? {
-        if let text = message.text { return text }
-        return message.content?.compactMap { block in
-            if case .text(let text) = block { return text }
-            return nil
-        }.joined(separator: "\n")
+    private func userText(from record: Record) -> String? {
+        record.userPromptText
     }
 
     private func resultText(text: String?, blocks: [ContentBlock]?) -> String {

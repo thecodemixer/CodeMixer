@@ -63,6 +63,9 @@ extension EngineViewModel {
                !id.isEmpty || previousSessionID == nil {
                 clearConversationState()
             }
+            if bindChatSession, !id.isEmpty {
+                promotePendingPhases(for: id, projectPath: cwd.path)
+            }
             // SessionStart with a model is the first live signal from the
             // resumed agent process. For Claude Code, that matters because the
             // visible history may already be on screen from JSONL replay; wait
@@ -212,8 +215,8 @@ extension EngineViewModel {
                 }
             }
         case .fileTouched(let url, _):
-            let rel = displayPath(forTouchedFile: url)
-            if !changedFiles.contains(rel) { changedFiles.append(rel) }
+            let file = ChangedFile(url: url, workspace: workspace)
+            if !changedFiles.contains(file) { changedFiles.append(file) }
         case .stopped:
             if !isSwitchingSession {
                 endSessionSwitch()
@@ -244,8 +247,8 @@ extension EngineViewModel {
             }
         case .speakBubbleRequested:
             break
-        case .fileReverted(let path):
-            changedFiles.removeAll { $0 == path }
+        case .fileReverted(let file):
+            changedFiles.removeAll { $0 == file }
         case .prefsChanged(let count):
             diagnostics.append(diagnostic(level: .info, message: "Auto-approval rules updated (\(count))."))
         case .appearancePrefChanged(let key, let value):
@@ -280,7 +283,63 @@ extension EngineViewModel {
             updateSessionAttention(sessionID: sessionID, needsAttention: needsAttention)
         case .cachedTranscriptLoaded(let id):
             cachedTranscriptLoadedSessionID = id
+        case .sessionPhaseChanged(let phaseSessionID, let phase):
+            recordSessionPhase(sessionID: phaseSessionID, phase: phase)
         }
+    }
+
+    /// Anchors a file-level phase marker to the current tail of `messages` so
+    /// `conversationTurns` can tag every turn from this point forward. Only
+    /// tags the foreground session. Markers for background file sessions are
+    /// parked by session id and promoted when that file chat is selected.
+    func recordSessionPhase(sessionID phaseSessionID: String, phase: SessionPhase) {
+        let marker = PhaseMarker(messageIndex: messages.count, phase: phase, at: clock.now())
+        guard phaseSessionID == sessionID else {
+            let key = pendingPhaseKey(sessionID: phaseSessionID, projectPath: workspace?.path)
+            var pending = pendingPhaseMarkersBySession[key] ?? []
+            if pending.last?.phase.id != phase.id {
+                pending.append(marker)
+            }
+            pendingPhaseMarkersBySession[key] = pending
+            return
+        }
+        appendPhaseMarker(marker)
+    }
+
+    func promotePendingPhases(for sessionID: String, projectPath: String? = nil) {
+        let key = pendingPhaseKey(sessionID: sessionID, projectPath: projectPath ?? workspace?.path)
+        guard let pending = pendingPhaseMarkersBySession.removeValue(forKey: key),
+              !pending.isEmpty else { return }
+        for marker in pending {
+            appendPhaseMarker(PhaseMarker(messageIndex: messages.count,
+                                          phase: marker.phase,
+                                          at: marker.at))
+        }
+    }
+
+    func appendPhaseMarker(_ marker: PhaseMarker) {
+        if let cursor = phaseReplayDedupCursor {
+            if cursor < phaseMarkers.count,
+               phaseMarkers[cursor].phase.id == marker.phase.id {
+                phaseReplayDedupCursor = cursor + 1
+                return
+            }
+            phaseReplayDedupCursor = nil
+        }
+        guard phaseMarkers.last?.phase.id != marker.phase.id else { return }
+        if phaseMarkers.count > 1,
+           let first = phaseMarkers.first,
+           first.phase.id == marker.phase.id,
+           marker.messageIndex <= first.messageIndex {
+            phaseReplayDedupCursor = 1
+            return
+        }
+        phaseMarkers.append(marker)
+    }
+
+    func pendingPhaseKey(sessionID: String, projectPath: String?) -> String {
+        guard let projectPath, !projectPath.isEmpty else { return sessionID }
+        return "\(projectPath)::\(sessionID)"
     }
 
     /// Compute a rolling tok/s estimate from the last 5 delta timestamps.
@@ -326,6 +385,10 @@ extension EngineViewModel {
         messages = []
         activeToolCalls = []
         lastUserBubbleID = nil
+        selectedTurnID = nil
+        selectedPhaseID = nil
+        phaseMarkers = []
+        phaseReplayDedupCursor = nil
         thinkingBlockTexts.removeAll()
         deltaTimestamps.removeAll()
         streamingStartedAt = nil
@@ -342,20 +405,7 @@ extension EngineViewModel {
     }
 
     func displayPath(forTouchedFile url: URL) -> String {
-        guard let workspace else { return url.path }
-        let workspacePaths = [workspace, workspace.resolvingSymlinksInPath()]
-            .map { $0.path.hasSuffix("/") ? $0.path : $0.path + "/" }
-        let filePath = url.path
-        let resolvedFilePath = url.resolvingSymlinksInPath().path
-        for root in workspacePaths {
-            if filePath.hasPrefix(root) {
-                return String(filePath.dropFirst(root.count))
-            }
-            if resolvedFilePath.hasPrefix(root) {
-                return String(resolvedFilePath.dropFirst(root.count))
-            }
-        }
-        return filePath
+        ChangedFile.relativePath(for: url, workspace: workspace)
     }
 
     func noteAgentReplyObserved() {

@@ -113,7 +113,9 @@ public final class CursorACPAdapter: AgentAdapter, ACPBackedAdapter {
             }
             return inner.encodeCommand(command)
         case .setAgentMode(let id):
-            guard CursorModeCommand(rawValue: id) != nil else { return nil }
+            guard ACPStandardModeID(rawValue: id).flatMap(CursorModeCommand.init(standardModeID:)) != nil else {
+                return nil
+            }
             return inner.encodeSessionMode(id)
         case .selectModel(let id):
             return inner.encodeCommand(.selectModel(id: id))

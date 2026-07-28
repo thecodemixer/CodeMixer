@@ -162,7 +162,7 @@ public actor AgentEngine: AgentEngineCommandPort {
     var sessionTeardownState: SessionTeardownState = .idle
     var workspace: URL?
     var transcript: [SnapshotService.SnapshotMessage] = []
-    var changedFiles: [String] = []
+    var changedFiles: [ChangedFile] = []
     var permissionTimeouts: [UUID: Task<Void, Never>] = [:]
     private var resumeStartupWatchdogTask: Task<Void, Never>?
     private var resumeStartupWatchdogTurnID: UUID?
@@ -435,6 +435,9 @@ public actor AgentEngine: AgentEngineCommandPort {
             hookServer: hookServer,
             workspace: workspace,
             boundSessionID: resumeSessionID,
+            transcript: transcript,
+            changedFiles: changedFiles,
+            replayEvents: [],
             forwardingTask: forwarding,
             bellTask: bellsTask,
             sessionIDContinuation: sessionIDContinuation,
@@ -694,17 +697,63 @@ public actor AgentEngine: AgentEngineCommandPort {
         }
     }
 
-    private func record(_ event: AgentEvent) async {
+    func record(_ event: AgentEvent) async {
         switch event {
         case .userTurn(_, let text):
-            transcript.append(.init(role: "user", text: text, timestamp: seams.clock.now()))
+            if transcript.last?.role != .user || transcript.last?.text != text {
+                transcript.append(.init(role: .user, text: text, timestamp: seams.clock.now()))
+            }
         case .assistantText(_, _, let text, let isFinal) where isFinal:
-            transcript.append(.init(role: "assistant", text: text, timestamp: seams.clock.now()))
+            transcript.append(.init(role: .assistant, text: text, timestamp: seams.clock.now()))
         case .fileTouched(let url, _):
-            let path = relativePath(for: url)
-            if !changedFiles.contains(path) { changedFiles.append(path) }
+            let file = ChangedFile(url: url, workspace: workspace)
+            if !changedFiles.contains(file) { changedFiles.append(file) }
         default:
             break
+        }
+        if let key = activeKey, var runtime = runtimes[key] {
+            runtime.transcript = transcript
+            runtime.changedFiles = changedFiles
+            if let event = replayCacheEvent(from: event) {
+                appendReplayCacheEvent(event, to: &runtime)
+            }
+            runtimes[key] = runtime
+        }
+    }
+
+    private func appendReplayCacheEvent(_ event: AgentEvent, to runtime: inout AgentRuntime) {
+        if let last = runtime.replayEvents.last,
+           isDuplicateReplayEvent(event, after: last) {
+            return
+        }
+        runtime.replayEvents.append(event)
+    }
+
+    private func isDuplicateReplayEvent(_ event: AgentEvent, after previous: AgentEvent) -> Bool {
+        switch (previous, event) {
+        case (.userTurn(_, let oldText), .userTurn(_, let newText)):
+            return oldText == newText
+        default:
+            return false
+        }
+    }
+
+    private func replayCacheEvent(from event: AgentEvent) -> AgentEvent? {
+        switch event {
+        case .userTurn,
+             .assistantText,
+             .textDelta,
+             .thinkingChunk,
+             .thinkingComplete,
+             .toolStart,
+             .toolEnd,
+             .toolProgress,
+             .fileTouched,
+             .sessionPhaseChanged,
+             .clientAction:
+            return event
+        default:
+            return nil
         }
     }
 
@@ -1097,27 +1146,16 @@ public actor AgentEngine: AgentEngineCommandPort {
     private func refreshChangedFilesFromGit() async {
         guard let workspace else { return }
         let diffEngine = GitDiffEngine(workspace: workspace)
-        guard let gitPaths = try? await diffEngine.changedFiles() else { return }
-        let delta = ChangedFilesReconciler.reconcile(current: changedFiles, gitPaths: gitPaths)
+        guard let gitFiles = try? await diffEngine.changedFiles() else { return }
+        let delta = ChangedFilesReconciler.reconcile(current: changedFiles, gitPaths: gitFiles)
         changedFiles = delta.next
-        for path in delta.added {
-            let url = workspace.appendingPathComponent(path)
+        for file in delta.added {
+            let url = workspace.appendingPathComponent(file.relativePath)
             await bus.publish(.fileTouched(url, kind: .fsObserved))
         }
-        for path in delta.removed {
-            await bus.publish(.fileReverted(path: path))
+        for file in delta.removed {
+            await bus.publish(.fileReverted(file: file))
         }
-    }
-
-    private func relativePath(for url: URL) -> String {
-        guard let workspace else { return url.path }
-        let workspacePath = workspace.standardizedFileURL.path
-        let filePath = url.standardizedFileURL.path
-        if filePath.hasPrefix(workspacePath + "/") {
-            return String(filePath.dropFirst(workspacePath.count + 1))
-        }
-        if filePath == workspacePath { return url.lastPathComponent }
-        return url.path
     }
 
     private static func errno(from error: any Error) -> Int32 {

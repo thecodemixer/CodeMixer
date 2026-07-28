@@ -60,15 +60,16 @@ public actor ACPSessionIndex: ACPSessionIndexing {
 
     public func appendConversationTurn(sessionID: String,
                                        customAgentID: String,
-                                       role: String,
+                                       role: ACPTurnRole,
                                        text: String) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        let stored = role.stored
         await appendTurn(
             sessionID: sessionID,
             customAgentID: customAgentID,
-            turn: ACPConversationTurn(role: role, text: trimmed),
-            titleFromUserText: role == "user" ? trimmed : nil
+            turn: ACPConversationTurn(role: stored, text: trimmed),
+            titleFromUserText: stored == .user ? trimmed : nil
         )
     }
 
@@ -85,7 +86,7 @@ public actor ACPSessionIndex: ACPSessionIndexing {
             sessionID: sessionID,
             customAgentID: customAgentID,
             turn: ACPConversationTurn(
-                role: "tool",
+                role: .tool,
                 text: trimmedName,
                 toolCallID: toolCallID,
                 toolSuccess: success,
@@ -96,13 +97,22 @@ public actor ACPSessionIndex: ACPSessionIndexing {
         )
     }
 
+    public func appendPhaseTurn(sessionID: String, customAgentID: String, phase: SessionPhase) async {
+        await appendTurn(
+            sessionID: sessionID,
+            customAgentID: customAgentID,
+            turn: ACPConversationTurn(role: .phase, text: phase.label, phase: phase),
+            titleFromUserText: nil
+        )
+    }
+
     public func localHistoryEvents(sessionID: String,
                                    customAgentID: String,
                                    random: any RandomSource) async -> [AgentEvent] {
         await loadIfNeeded()
         let key = ACPSessionStoreCodec.key(customAgentID: customAgentID, sessionID: sessionID)
         guard let entry = entries[key] else { return [] }
-        return ACPSessionStoreCodec.events(from: entry.turns, clock: clock, random: random)
+        return ACPSessionStoreCodec.events(from: entry.turns, sessionID: sessionID, clock: clock, random: random)
     }
 
     public func summaries(workspace: URL, customAgentID: String) async -> [SessionSummary] {

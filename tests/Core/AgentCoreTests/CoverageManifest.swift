@@ -280,10 +280,12 @@ private func _classifyTerminalInput(adapter: any AgentAdapter) {
 // AgentEventWire
 // AgentID
 // AgentInputs
+// AgentInstanceIdentity
 // AgentModeCommandID
 // AgentModeOption
 // AgentModelCatalogCache
 // AgentModelOption
+// AgentRuntimeKey
 // AgentTransportDescriptor
 // AgentTransportError
 // AgentTransportKind
@@ -312,7 +314,6 @@ private func _classifyTerminalInput(adapter: any AgentAdapter) {
 // CertificateIdentityImporter
 // CertificateManager
 // ChildReaper
-// classifyTerminalInput
 // ClaudeAdapter
 // ClaudeBinaryLocator
 // ClaudeBuiltInSlashCommands
@@ -336,7 +337,6 @@ private func _classifyTerminalInput(adapter: any AgentAdapter) {
 // ClaudeSlashCommands
 // ClaudeTUIFallback
 // ClaudeTerminalInputClassification
-// classify
 // ClaudeTranscriptTailer
 // ClientAction
 // ClientError
@@ -369,7 +369,6 @@ private func _classifyTerminalInput(adapter: any AgentAdapter) {
 // Context
 // ConversationSearchBar
 // ConversationSnapshot
-// ConversationView
 // CostBadgeView
 // CursorACPAdapter
 // CursorBinaryLocator
@@ -406,6 +405,7 @@ private func _classifyTerminalInput(adapter: any AgentAdapter) {
 // FSEventsError
 // FSEventsStream
 // FSEventsWatcher
+// Factory
 // FileChangeKind
 // FileDiff
 // FileSystem
@@ -419,6 +419,7 @@ private func _classifyTerminalInput(adapter: any AgentAdapter) {
 // FolderViewState
 // FontFamily
 // GitDiffEngine
+// Group
 // HTTPSidecarServer
 // HeartbeatActivityMonitor
 // HistoryEntry
@@ -488,6 +489,7 @@ private func _classifyTerminalInput(adapter: any AgentAdapter) {
 // ProcessError
 // ProcessRunner
 // ProjectAgentRouter
+// ProjectDraft
 // ProjectLocalState
 // ProjectLocalStateStore
 // ProjectMemoryFile
@@ -520,6 +522,7 @@ private func _classifyTerminalInput(adapter: any AgentAdapter) {
 // ServerFrame
 // ServerInfo
 // SessionExporter
+// SessionPhase
 // SessionSidebarView
 // SessionStore
 // SessionSummary
@@ -541,6 +544,7 @@ private func _classifyTerminalInput(adapter: any AgentAdapter) {
 // SpeechSynthesis
 // StableID
 // State
+// Status
 // StatusPhraseResolver
 // StatusPhraseSource
 // StatusPill
@@ -563,10 +567,10 @@ private func _classifyTerminalInput(adapter: any AgentAdapter) {
 // TTSService
 // Tag
 // TerminalEngine
+// TerminalInputState
 // TerminalLine
 // TerminalSnapshot
 // TerminalSnapshotting
-// TerminalInputState
 // Theme
 // ThinkingEffort
 // Tick
@@ -589,6 +593,7 @@ private func _classifyTerminalInput(adapter: any AgentAdapter) {
 // WireAgentErrorContext
 // WireAgentErrorContextKey
 // WireCodec
+// WireSessionPhase
 // WireVersion
 // WorkspaceAdapterLocalState
 // WorkspaceAdapterLocalStateStore
@@ -628,17 +633,20 @@ private func _classifyTerminalInput(adapter: any AgentAdapter) {
 // agentDirectory
 // agentError
 // agentID
+// agentInstanceIdentity
 // agentModes
 // agentPickerMaxWidth
 // agentPickerMinWidth
 // all
 // allPaired
+// anchorMessageID
 // appSupportDirectory
 // appSupportRelativePath
 // appearance
 // append
 // appendConversationTurn
 // appendLines
+// appendPhaseTurn
 // appendToolTurn
 // apply
 // applyAdapterCapabilities
@@ -714,6 +722,8 @@ private func _classifyTerminalInput(adapter: any AgentAdapter) {
 // chatMode
 // chip
 // chooseDirectoryPanel
+// classify
+// classifyTerminalInput
 // claudeDirectory
 // clear
 // clearActiveWorkspace
@@ -752,6 +762,7 @@ private func _classifyTerminalInput(adapter: any AgentAdapter) {
 // count
 // create
 // createDirectory
+// createOrAddProject
 // createProject
 // current
 // currentIndex
@@ -839,6 +850,8 @@ private func _classifyTerminalInput(adapter: any AgentAdapter) {
 // executable
 // executablePath
 // execute
+// existingFolder
+// existingFolderURL
 // exists
 // exitCode
 // exitFolderPreviewOnly
@@ -853,6 +866,7 @@ private func _classifyTerminalInput(adapter: any AgentAdapter) {
 // fileSystem
 // fileSystemEvents
 // filename
+// filesChanged
 // finished
 // flags
 // floating
@@ -875,6 +889,7 @@ private func _classifyTerminalInput(adapter: any AgentAdapter) {
 // globalPaletteMaxHeight
 // globalPaletteWidth
 // glyph
+// group
 // hairline
 // hasEmittedAssistantText
 // hasResumableSessionProjects
@@ -908,6 +923,7 @@ private func _classifyTerminalInput(adapter: any AgentAdapter) {
 // importIdentity
 // incoming
 // index
+// indexRailWidth
 // info
 // ingest
 // initialDelay
@@ -918,6 +934,7 @@ private func _classifyTerminalInput(adapter: any AgentAdapter) {
 // installLaunchAgent
 // installMaxWidth
 // installMinWidth
+// instance
 // instant
 // interactiveTerminal
 // interrupt
@@ -935,6 +952,7 @@ private func _classifyTerminalInput(adapter: any AgentAdapter) {
 // isProjectDefined
 // isRestartingCustomACPCLI
 // isSpeaking
+// isThinking
 // janitorInterval
 // jsonPayload
 // jsonl
@@ -952,6 +970,7 @@ private func _classifyTerminalInput(adapter: any AgentAdapter) {
 // lastPublishedID
 // lastSeen
 // lastSessionID
+// latestPhase
 // launchAgentDetail
 // launchAgentInstalled
 // launchAgentLabel
@@ -960,6 +979,7 @@ private func _classifyTerminalInput(adapter: any AgentAdapter) {
 // launchAgentStdoutPath
 // launchAgentThrottleIntervalSeconds
 // layout
+// leadingTurnID
 // leaving
 // level
 // lines
@@ -967,6 +987,7 @@ private func _classifyTerminalInput(adapter: any AgentAdapter) {
 // listSessions
 // listen
 // live
+// liveProjectPaths
 // load
 // loadAll
 // loadHookCommands
@@ -1071,6 +1092,7 @@ private func _classifyTerminalInput(adapter: any AgentAdapter) {
 // optionID
 // optionId
 // options
+// ordinal
 // outboundBytes
 // outboundReplies
 // output
@@ -1097,6 +1119,7 @@ private func _classifyTerminalInput(adapter: any AgentAdapter) {
 // permissionMode
 // permissionPrompts
 // permissionResponse
+// phase
 // phrase
 // pin
 // pinFolderPath
@@ -1111,6 +1134,7 @@ private func _classifyTerminalInput(adapter: any AgentAdapter) {
 // postInitialize
 // postToolUse
 // preToolUse
+// preferFreshAgentProcess
 // prefs
 // prefsFileName
 // prefsURL
@@ -1131,6 +1155,7 @@ private func _classifyTerminalInput(adapter: any AgentAdapter) {
 // projectCommands
 // projectDirectory
 // projectFileName
+// projectPath
 // projectPickerMaxHeight
 // projectPickerWidth
 // projectSlug
@@ -1141,6 +1166,7 @@ private func _classifyTerminalInput(adapter: any AgentAdapter) {
 // prominentName
 // prompt
 // promptReady
+// promptText
 // promptWithShortcutFooter
 // prose
 // ptyChunks
@@ -1229,6 +1255,7 @@ private func _classifyTerminalInput(adapter: any AgentAdapter) {
 // resumePromptReadySettleDelay
 // resumeSessionID
 // resumeStartupStallTimeout
+// resumeThread
 // resumeUnsupportedAfterInitialize
 // resumedSessionPostSessionStartFallback
 // resumedSessionStartupStallTimeout
@@ -1272,6 +1299,8 @@ private func _classifyTerminalInput(adapter: any AgentAdapter) {
 // selectModel
 // selectProject
 // selectedAgentModeID
+// selectedPhaseID
+// selectedTurnID
 // send
 // sendPrompt
 // sendsAsPrompt
@@ -1297,6 +1326,7 @@ private func _classifyTerminalInput(adapter: any AgentAdapter) {
 // sessionsIndexURL
 // sessionsURL
 // setActiveFolderSelection
+// setAgentLaunchPreference
 // setArchived
 // setConnectedRemoteClients
 // setIsOverview
@@ -1421,6 +1451,7 @@ private func _classifyTerminalInput(adapter: any AgentAdapter) {
 // thinkOff
 // thinkingEffort
 // thinkingPhrase
+// thinkingPreview
 // threadID
 // timestamp
 // tint
@@ -1430,6 +1461,8 @@ private func _classifyTerminalInput(adapter: any AgentAdapter) {
 // token
 // tokens
 // toolCallID
+// toolCallIDs
+// toolCount
 // toolIndex
 // toolInputJSON
 // toolName
@@ -1439,6 +1472,7 @@ private func _classifyTerminalInput(adapter: any AgentAdapter) {
 // toolUseID
 // transcriptEvents
 // transcriptJSONL
+// transcriptMinWidth
 // transcriptPath
 // transcriptURL
 // transcriptsDirectory
@@ -1451,6 +1485,7 @@ private func _classifyTerminalInput(adapter: any AgentAdapter) {
 // tts
 // turnStart
 // turns
+// turnsCompleted
 // txt
 // type
 // typography
@@ -1498,6 +1533,10 @@ private func _classifyTerminalInput(adapter: any AgentAdapter) {
 // wireCode
 // wireValue
 // withOverrides
+// withProjectType
+// workLaneIdealWidth
+// workLaneMinWidth
+// workLaneToolsSectionMaxHeight
 // workingDirectory
 // workingPhrase
 // workspace
@@ -1516,5 +1555,7 @@ private func _classifyTerminalInput(adapter: any AgentAdapter) {
 // writeAtomically
 // writeBytes
 // zsh
-// MANIFEST_SYMBOLS_END  (1236 unique public symbols)
+// MANIFEST_SYMBOLS_END
+
+// Total: 1311 unique public symbols
 

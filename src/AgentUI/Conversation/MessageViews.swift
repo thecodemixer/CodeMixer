@@ -6,15 +6,13 @@ import AgentProtocol
 
 /// Right-aligned bubble for the user's own prompt.
 ///
-/// When `isLast` is true a pencil affordance appears on hover and a context
-/// menu offers Edit + Copy. The pencil calls `onEdit(text)` which pre-fills
-/// the composer; the engine's stale-edit guard validates the UUID.
+/// When `isLast` is true a pencil affordance and context menu offer Edit +
+/// Copy. The pencil calls `onEdit(text)` which pre-fills the composer; the
+/// engine's stale-edit guard validates the UUID.
 struct UserBubbleView: View {
     let text: String
     var isLast: Bool = false
     var onEdit: ((String) -> Void)? = nil
-
-    @State private var hovered = false
 
     var body: some View {
         HStack(alignment: .top, spacing: Theme.spacing.s8) {
@@ -25,14 +23,12 @@ struct UserBubbleView: View {
                     onEdit(text)
                 } label: {
                     Image(systemName: "pencil.circle")
-                        .foregroundStyle(hovered ? Theme.signal.info : Theme.text.tertiary)
+                        .foregroundStyle(Theme.text.tertiary)
                         .imageScale(.medium)
                 }
                 .buttonStyle(.plain)
                 .help("Edit and resubmit")
                 .accessibilityLabel("Edit this message")
-                .opacity(hovered ? 1 : 0)
-                .animation(Theme.motion.quick, value: hovered)
             }
 
             Text(text)
@@ -52,7 +48,6 @@ struct UserBubbleView: View {
                     }
                 }
         }
-        .onHover { hovered = $0 }
     }
 }
 
@@ -66,16 +61,18 @@ struct AssistantTextView: View {
     var tts: TTSService? = nil
     var onTTSAction: ((UUID, TTSAction) -> Void)? = nil
     /// Rolling tok/s estimate forwarded from `EngineViewModel.tokenRatePerSecond`.
-    /// Displayed in the streaming footer when non-nil.
+    /// Kept on the API for callers, but intentionally not rendered in the live
+    /// transcript because it churns during token streaming.
     var tokenRate: Double? = nil
+    var codePresentation: MarkdownProseView.CodePresentation = .expanded
+    var onCollapsedCodeSelected: ((String, String?) -> Void)? = nil
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.spacing.s8) {
             HStack(alignment: .top) {
-                MarkdownProseView(text: text)
-                    .accessibilityLabel("Assistant: \(MarkdownProseView.plainText(text))")
+                assistantContent
                     .contextMenu {
                         Button("Copy") { copyToClipboard(text) }
                         if let tts {
@@ -98,30 +95,34 @@ struct AssistantTextView: View {
             if isStreaming {
                 HStack(spacing: Theme.spacing.s8) {
                     // Streaming presence: while no tokens have arrived we show the
-                    // waiting dots; once prose is streaming we cross-fade to a thin
-                    // caret so the turn reads as "actively writing". One motion token,
-                    // reduced-motion safe (caret holds steady).
+                    // waiting dots; once prose is streaming we hold a thin caret
+                    // so the turn reads as "actively writing" without extra row
+                    // transitions during scroll.
                     if text.isEmpty {
                         ShimmerDots()
-                            .transition(.opacity)
                     } else {
                         StreamingCaret(reduceMotion: reduceMotion)
-                            .transition(.opacity)
-                    }
-                    if let rate = tokenRate {
-                        Text(String(format: "%.0f tok/s", rate))
-                            .font(Theme.typography.caption)
-                            .foregroundStyle(Theme.text.tertiary)
-                            .monospacedDigit()
-                            .transition(.opacity)
                     }
                 }
                 .padding(.top, Theme.spacing.s4)
-                .animation(Theme.motion.resolve(Theme.motion.changing, reduceMotion: reduceMotion),
-                           value: text.isEmpty)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var assistantContent: some View {
+        if isStreaming {
+            StreamingAssistantContentView(text: text,
+                                          codePresentation: codePresentation,
+                                          onCollapsedCodeSelected: onCollapsedCodeSelected)
+                .accessibilityLabel("Assistant is responding")
+        } else {
+            MarkdownProseView(text: text,
+                              codePresentation: codePresentation,
+                              onCollapsedCodeSelected: onCollapsedCodeSelected)
+                .accessibilityLabel("Assistant: \(MarkdownProseView.plainText(text))")
+        }
     }
 
     @ViewBuilder
@@ -154,6 +155,84 @@ struct AssistantTextView: View {
     }
 }
 
+private struct StreamingAssistantContentView: View {
+    let text: String
+    var codePresentation: MarkdownProseView.CodePresentation
+    var onCollapsedCodeSelected: ((String, String?) -> Void)?
+
+    var body: some View {
+        if codePresentation == .collapsed, let summary = structuredSummary {
+            Button {
+                onCollapsedCodeSelected?(text, summary.language)
+            } label: {
+                HStack(spacing: Theme.spacing.s8) {
+                    Image(systemName: "text.append")
+                        .foregroundStyle(Theme.text.tertiary)
+                        .accessibilityHidden(true)
+                    Text(summary.label)
+                        .font(Theme.typography.caption)
+                        .foregroundStyle(Theme.text.secondary)
+                    Spacer(minLength: 0)
+                    Text("Show in work lane")
+                        .font(Theme.typography.caption)
+                        .foregroundStyle(Theme.signal.info)
+                }
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, Theme.spacing.s12)
+            .padding(.vertical, Theme.spacing.s8)
+            .background(Theme.surface.sunken,
+                        in: RoundedRectangle(cornerRadius: Theme.corner.medium, style: .continuous))
+            .accessibilityLabel(summary.label)
+        } else {
+            Text(text)
+                .font(Theme.typography.prose)
+                .foregroundStyle(Theme.text.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private struct Summary {
+        let label: String
+        let language: String?
+    }
+
+    private var structuredSummary: Summary? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if trimmed.contains("```") {
+            return Summary(label: "Code block streaming", language: nil)
+        }
+        if isReviewerOutput(trimmed) {
+            return Summary(label: "Reviewer comment streaming", language: "json")
+        }
+        if isStructuredOutput(trimmed) {
+            return Summary(label: "Structured output streaming", language: nil)
+        }
+        return nil
+    }
+
+    private func isReviewerOutput(_ text: String) -> Bool {
+        (text.hasPrefix("Reviewer ") && text.contains("{"))
+            || ((text.hasPrefix("{") || text.hasPrefix("["))
+                && (text.contains(#""verdict""#) || text.contains(#""findings""#)))
+    }
+
+    private func isStructuredOutput(_ text: String) -> Bool {
+        if text.hasPrefix("{") || text.hasPrefix("[") { return true }
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        guard lines.count >= 12 else { return false }
+        let markers = ["import ", "export ", "const ", "let ", "var ", "func ",
+                       "function ", "class ", "struct ", "enum ", "return "]
+        return lines.contains { line in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            return markers.contains(where: trimmed.hasPrefix)
+                || trimmed.hasSuffix("{")
+                || trimmed.hasSuffix(";")
+        }
+    }
+}
+
 // MARK: - Thinking block
 
 /// Collapsible inline card for a chain-of-thought block.
@@ -171,16 +250,9 @@ struct ThinkingBlockView: View {
     private var isThinking: Bool { duration == nil }
 
     var body: some View {
-        DisclosureGroup(isExpanded: $expanded) {
-            if !text.isEmpty {
-                Text(text)
-                    .font(Theme.typography.monoSmall)
-                    .fontDesign(.monospaced)
-                    .foregroundStyle(Theme.text.secondary)
-                    .padding(.top, Theme.spacing.s8)
-                    .textSelection(.enabled)
-            }
-        } label: {
+        VStack(alignment: .leading, spacing: Theme.spacing.s8) {
+            // Match ToolCallCardView: header HStack + contentShape + onTapGesture.
+            // Plain Button hit-testing on macOS ignores Spacer/empty regions.
             HStack(spacing: Theme.spacing.s8) {
                 if isThinking {
                     // Still accumulating — show shimmer alongside label.
@@ -193,6 +265,35 @@ struct ThinkingBlockView: View {
                 Text(durationLabel)
                     .font(Theme.typography.caption)
                     .foregroundStyle(Theme.text.tertiary)
+                Spacer(minLength: 0)
+                Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                    .font(Theme.typography.iconSmall)
+                    .foregroundStyle(Theme.text.tertiary)
+                    .accessibilityHidden(true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                withAnimation(Theme.motion.resolve(Theme.motion.quick, reduceMotion: reduceMotion)) {
+                    expanded.toggle()
+                }
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityLabel("\(expanded ? "Collapse" : "Expand") thinking trace, \(durationLabel)")
+            .accessibilityAction {
+                withAnimation(Theme.motion.resolve(Theme.motion.quick, reduceMotion: reduceMotion)) {
+                    expanded.toggle()
+                }
+            }
+
+            if expanded, !text.isEmpty {
+                Text(text)
+                    .font(Theme.typography.monoSmall)
+                    .fontDesign(.monospaced)
+                    .foregroundStyle(Theme.text.secondary)
+                    .padding(.top, Theme.spacing.s8)
+                    .textSelection(.enabled)
             }
         }
         .padding(.horizontal, Theme.spacing.s12)
@@ -201,6 +302,8 @@ struct ThinkingBlockView: View {
                     in: RoundedRectangle(cornerRadius: Theme.corner.medium))
         .animation(Theme.motion.resolve(Theme.motion.considered, reduceMotion: reduceMotion),
                    value: isThinking)
+        .animation(Theme.motion.resolve(Theme.motion.quick, reduceMotion: reduceMotion),
+                   value: expanded)
         .accessibilityLabel("Thinking trace: \(durationLabel)")
         // Keep the latest thought open so the current reasoning remains visible;
         // older completed thoughts collapse into compact "Thought for Xs" rows.

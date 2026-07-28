@@ -25,9 +25,14 @@ public extension EnvironmentValues {
         codemixerAppearance.reduceMotion || accessibilityReduceMotion
     }
 
-    /// Spacing multiplier derived from density mode (`compact` → 0.85).
+    /// Spacing multiplier derived from density mode (`compact`/`focus` → 0.85).
+    /// `.focus` shares `.compact`'s scale — its distinguishing behavior is
+    /// lane collapse, handled separately by the workbench.
     var codemixerSpacingScale: CGFloat {
-        codemixerAppearance.densityMode == .compact ? 0.85 : 1.0
+        switch codemixerAppearance.densityMode {
+        case .compact, .focus: return 0.85
+        case .comfortable: return 1.0
+        }
     }
 
     /// Resolved corner radius for popovers, palettes, and dropdown panels.

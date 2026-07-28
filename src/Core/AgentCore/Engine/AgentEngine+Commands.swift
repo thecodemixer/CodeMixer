@@ -31,6 +31,7 @@ extension AgentEngine {
             // the prompt is queued in adapter state and flushed on SessionStart.
             // Do not start the heartbeat or leave the turn "awaiting acceptance"
             // forever in that case.
+            await record(.userTurn(id: bubbleID.uuidString, text: prompt))
             await bus.publish(.userTurn(id: bubbleID.uuidString, text: prompt))
             if bytes.isEmpty {
                 currentTurnID = bubbleID
@@ -159,15 +160,15 @@ extension AgentEngine {
         case .speakAssistantBubble(let eventID, let action):
             await bus.publish(.speakBubbleRequested(eventID: eventID, action: action))
             return ()
-        case .revertFile(let path):
-            try await gitReverter.checkout(path: path, workspace: workspace)
-            await bus.publish(.fileReverted(path: path))
+        case .revertFile(let file):
+            try await gitReverter.checkout(file: file, workspace: workspace)
+            await bus.publish(.fileReverted(file: file))
             return ()
-        case .revertHunk(let path, let hunkID):
-            try await gitReverter.revertHunk(path: path,
+        case .revertHunk(let file, let hunkID):
+            try await gitReverter.revertHunk(file: file,
                                              hunkID: hunkID,
                                              workspace: workspace)
-            await bus.publish(.fileReverted(path: path))
+            await bus.publish(.fileReverted(file: file))
             return ()
         case .updateAutoApprovalRules(let rules):
             try await prefs.updateRules(rules)
@@ -190,7 +191,7 @@ extension AgentEngine {
             return ()
         case .recordClientAction(let action):
             let text = action.detail.map { "\(action.title): \($0)" } ?? action.title
-            transcript.append(.init(role: "action", text: text, timestamp: seams.clock.now()))
+            transcript.append(.init(role: .action, text: text, timestamp: seams.clock.now()))
             await bus.publish(.clientAction(action))
             return ()
         default:
@@ -291,6 +292,9 @@ extension AgentEngine {
                     currentSessionID = nil
                     if var updated = runtimes[existingKey] {
                         updated.boundSessionID = nil
+                        updated.transcript = []
+                        updated.changedFiles = []
+                        updated.replayEvents = []
                         runtimes[existingKey] = updated
                     }
                     state = .running(sessionID: nil)
@@ -361,6 +365,9 @@ extension AgentEngine {
         currentSessionID = resumeSessionID
         if let key = activeKey, var runtime = runtimes[key] {
             runtime.boundSessionID = resumeSessionID
+            runtime.transcript = []
+            runtime.changedFiles = []
+            runtime.replayEvents = []
             runtimes[key] = runtime
         }
         state = .running(sessionID: resumeSessionID)

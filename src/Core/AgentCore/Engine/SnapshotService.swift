@@ -7,19 +7,44 @@ import AgentProtocol
 /// (UI + remote server) receive raw `Data` ready to send over the wire.
 public actor SnapshotService {
 
+    public enum TranscriptRole: String, Sendable, Codable, Hashable {
+        case user
+        case assistant
+        case action
+    }
+
     public struct ConversationSnapshot: Sendable, Codable {
         public let sessionID: String?
         public let messages: [SnapshotMessage]
     }
 
     public struct SnapshotMessage: Sendable, Codable {
-        public let role: String
+        public let role: TranscriptRole
         public let text: String
         public let timestamp: Date
     }
 
     public struct DiffSnapshot: Sendable, Codable {
-        public let changedFiles: [String]
+        public let changedFiles: [ChangedFile]
+
+        public init(changedFiles: [ChangedFile]) {
+            self.changedFiles = changedFiles
+        }
+
+        public init(from decoder: any Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            let paths = try container.decode([String].self, forKey: .changedFiles)
+            changedFiles = paths.map { ChangedFile(relativePath: $0) }
+        }
+
+        public func encode(to encoder: any Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(changedFiles.map(\.relativePath), forKey: .changedFiles)
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case changedFiles
+        }
     }
 
     public struct SessionsSnapshot: Sendable, Codable {
@@ -46,9 +71,9 @@ public actor SnapshotService {
     }
 
     public func snapshot(_ kind: SnapshotKind,
-                         conversation: [(role: String, text: String, timestamp: Date)] = [],
+                         conversation: [(role: TranscriptRole, text: String, timestamp: Date)] = [],
                          sessionID: String? = nil,
-                         changedFiles: [String] = [],
+                         changedFiles: [ChangedFile] = [],
                          workspace: URL? = nil) async -> Data {
         switch kind {
         case .conversation:

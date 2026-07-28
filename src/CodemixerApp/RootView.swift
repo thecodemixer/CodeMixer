@@ -28,6 +28,7 @@ struct RootView: View {
                                    diffPanelVisible: $diffPanelVisible)
                         .codemixerAppearance(model.appearancePrefs)
                         .navigationTitle(model.currentProjectDisplayName)
+                        .navigationSubtitle(model.currentPhaseNavigationSubtitle ?? "")
                         .toolbar {
                             ToolbarItemGroup(placement: .primaryAction) {
                                 if model.showUsageChip {

@@ -619,7 +619,7 @@ struct ACPEventDecoderTests {
         })
     }
 
-    @Test("session/load history chunks become user and assistant turns before SessionStart")
+    @Test("session/load binds SessionStart before replaying user and assistant turns")
     func sessionLoadHistoryReplay() async {
         let fixture = ACPDecoderFixture(resumeSessionID: "resume-hist")
         _ = await fixture.decode(.response(
@@ -685,11 +685,11 @@ struct ACPEventDecoderTests {
             return false
         }
         if let sessionIdx, let assistantIdx {
-            #expect(assistantIdx < sessionIdx)
+            #expect(sessionIdx < assistantIdx)
         }
     }
 
-    @Test("session/load thought chunks become thinkingComplete before SessionStart")
+    @Test("session/load binds SessionStart before replaying thought chunks")
     func sessionLoadThoughtReplay() async {
         let fixture = ACPDecoderFixture(resumeSessionID: "resume-think")
         _ = await fixture.decode(.response(
@@ -800,7 +800,7 @@ struct ACPEventDecoderTests {
         await fixture.sessionIndex.appendConversationTurn(
             sessionID: "file:Orders.cs",
             customAgentID: "migrate",
-            role: "assistant",
+            role: .assistant,
             text: "cached migration transcript"
         )
 
@@ -829,8 +829,131 @@ struct ACPEventDecoderTests {
             }
             return false
         })
+        let sessionIdx = batch.events.firstIndex {
+            if case .sessionStarted = $0 { return true }
+            return false
+        }
+        let assistantIdx = batch.events.firstIndex {
+            if case .assistantText = $0 { return true }
+            return false
+        }
+        if let sessionIdx, let assistantIdx {
+            #expect(sessionIdx < assistantIdx)
+        }
         #expect(!batch.events.contains {
             if case .error = $0 { return true }
+            return false
+        })
+    }
+
+    @Test("background phase_update emits sessionPhaseChanged and persists for later load")
+    func backgroundPhaseUpdatePersistsForLaterLoad() async {
+        let fixture = ACPDecoderFixture(customAgentID: "migrate")
+        _ = await fixture.openSession(id: "overview")
+
+        let batch = await fixture.decode(.notification(
+            method: "session/update",
+            params: .object([
+                "sessionId": .string("file:Orders.cs"),
+                "update": .object([
+                    "sessionUpdate": .string("codemixer.dev/phase_update"),
+                    "status": .string("migrating"),
+                ]),
+            ])
+        ))
+
+        #expect(batch.events.contains {
+            if case .sessionPhaseChanged(let sessionID, let phase) = $0 {
+                return sessionID == "file:Orders.cs" && phase.id == "migrating"
+            }
+            return false
+        })
+
+        try? await Task.sleep(for: .milliseconds(50))
+        let replay = await fixture.sessionIndex.localHistoryEvents(
+            sessionID: "file:Orders.cs",
+            customAgentID: "migrate",
+            random: fixture.random
+        )
+        #expect(replay.contains {
+            if case .sessionPhaseChanged(let sessionID, let phase) = $0 {
+                return sessionID == "file:Orders.cs" && phase.id == "migrating"
+            }
+            return false
+        })
+    }
+
+    @Test("foreground phase advance finalizes open assistant text so stages do not concatenate")
+    func foregroundPhaseAdvanceFinalizesAssistant() async {
+        let fixture = ACPDecoderFixture(customAgentID: "migrate")
+        _ = await fixture.openSession(id: "file:Orders.cs")
+
+        _ = await fixture.decode(.notification(
+            method: "session/update",
+            params: .object([
+                "sessionId": .string("file:Orders.cs"),
+                "update": .object([
+                    "sessionUpdate": .string("codemixer.dev/phase_update"),
+                    "status": .string("planned"),
+                ]),
+            ])
+        ))
+        _ = await fixture.decode(.notification(
+            method: "session/update",
+            params: .object([
+                "sessionId": .string("file:Orders.cs"),
+                "update": .object([
+                    "sessionUpdate": .string("agent_message_chunk"),
+                    "content": .object(["text": .string(#"{"plan":"map Order"}"#)]),
+                ]),
+            ])
+        ))
+
+        let advance = await fixture.decode(.notification(
+            method: "session/update",
+            params: .object([
+                "sessionId": .string("file:Orders.cs"),
+                "update": .object([
+                    "sessionUpdate": .string("codemixer.dev/phase_update"),
+                    "status": .string("migrating"),
+                ]),
+            ])
+        ))
+
+        let finalized = advance.events.compactMap { event -> String? in
+            if case .assistantText(_, _, let text, let isFinal) = event, isFinal {
+                return text
+            }
+            return nil
+        }
+        #expect(finalized == [#"{"plan":"map Order"}"#])
+        #expect(advance.events.contains {
+            if case .sessionPhaseChanged(_, let phase) = $0 {
+                return phase.id == "migrating"
+            }
+            return false
+        })
+
+        let next = await fixture.decode(.notification(
+            method: "session/update",
+            params: .object([
+                "sessionId": .string("file:Orders.cs"),
+                "update": .object([
+                    "sessionUpdate": .string("agent_message_chunk"),
+                    "content": .object(["text": .string("export const migrated = true;")]),
+                ]),
+            ])
+        ))
+        #expect(next.events.contains {
+            if case .assistantText(_, _, let text, false) = $0 {
+                return text == "export const migrated = true;"
+            }
+            return false
+        })
+        #expect(!next.events.contains {
+            if case .assistantText(_, _, let text, _) = $0 {
+                return text.contains("plan") && text.contains("migrated")
+            }
             return false
         })
     }
@@ -1030,7 +1153,7 @@ struct ACPEventDecoderTests {
             return false
         }
         if let sessionIdx, let historyIdx {
-            #expect(historyIdx < sessionIdx)
+            #expect(sessionIdx < historyIdx)
         }
     }
 

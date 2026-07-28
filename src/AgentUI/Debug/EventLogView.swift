@@ -96,7 +96,7 @@ private struct Line: Identifiable {
         case .error(let e):                       (kind, body, tint) = ("error", String(describing: e), Theme.signal.danger)
         case .speakBubbleRequested(let eventID, let action):
             (kind, body, tint) = ("tts", "\(eventID.uuidString):\(action.rawValue)", Theme.text.tertiary)
-        case .fileReverted(let p):                (kind, body, tint) = ("revert", p, Theme.signal.warning)
+        case .fileReverted(let file):             (kind, body, tint) = ("revert", file.relativePath, Theme.signal.warning)
         case .prefsChanged(let n):                (kind, body, tint) = ("prefs", "rules=\(n)", Theme.text.tertiary)
         case .appearancePrefChanged(let k, let v): (kind, body, tint) = ("appearance", "\(k.rawValue)=\(v)", Theme.text.tertiary)
         case .snapshotReady(let k, let d):        (kind, body, tint) = ("snapshot", "\(k.rawValue) \(d.count)B", Theme.text.tertiary)
@@ -112,6 +112,8 @@ private struct Line: Identifiable {
             (kind, body, tint) = ("attention", "\(title) (\(id)) \(flag)", Theme.signal.warning)
         case .cachedTranscriptLoaded(let id):
             (kind, body, tint) = ("cached", id, Theme.signal.info)
+        case .sessionPhaseChanged(let id, let phase):
+            (kind, body, tint) = ("phase", "\(id): \(phase.label) (#\(phase.ordinal))", Theme.signal.info)
         }
     }
 }

@@ -132,7 +132,7 @@ public final class ACPAdapter: AgentAdapter {
                 await sessionIndex.appendConversationTurn(
                     sessionID: sessionID,
                     customAgentID: context.customAgentID,
-                    role: "user",
+                    role: .user,
                     text: text
                 )
             }

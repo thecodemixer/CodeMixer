@@ -1,4 +1,5 @@
 import Foundation
+import AgentCore
 
 /// Pure session export helpers shared by the app shell and tests.
 public enum SessionExporter {
@@ -25,17 +26,17 @@ public enum SessionExporter {
         encoder.outputFormatting = .sortedKeys
         let lines = messages.compactMap { message -> Data? in
             struct Line: Encodable {
-                let role: String
+                let role: SnapshotService.TranscriptRole
                 let text: String
             }
             switch message {
             case .user(_, let text):
-                return try? encoder.encode(Line(role: "user", text: text))
+                return try? encoder.encode(Line(role: .user, text: text))
             case .assistant(_, let text), .assistantStreaming(_, let text):
-                return try? encoder.encode(Line(role: "assistant", text: text))
+                return try? encoder.encode(Line(role: .assistant, text: text))
             case .clientAction(let action):
                 let text = action.detail.map { "\(action.title): \($0)" } ?? action.title
-                return try? encoder.encode(Line(role: "action", text: text))
+                return try? encoder.encode(Line(role: .action, text: text))
             case .thinkingChunk, .thinkingComplete, .toolCall:
                 return nil
             }

@@ -1,4 +1,5 @@
 import Foundation
+import AgentProtocol
 
 struct GitReverter: Sendable {
     private let processRunner: ProcessRunner
@@ -7,15 +8,16 @@ struct GitReverter: Sendable {
         self.processRunner = processRunner
     }
 
-    func checkout(path: String, workspace: URL?) async throws {
-        try await runGit(["checkout", "--", path], workspace: workspace)
+    func checkout(file: ChangedFile, workspace: URL?) async throws {
+        try await runGit(["checkout", "--", file.relativePath], workspace: workspace)
     }
 
-    func revertHunk(path: String, hunkID: UUID, workspace: URL?) async throws {
+    func revertHunk(file: ChangedFile, hunkID: UUID, workspace: URL?) async throws {
+        let path = file.relativePath
         guard let workspace else {
             throw AgentError.workspaceInvalid(path: path, detail: "No workspace is open.")
         }
-        let diff = try await GitDiffEngine(workspace: workspace).diff(for: path)
+        let diff = try await GitDiffEngine(workspace: workspace).diff(for: file)
         guard let hunk = diff.hunks.first(where: { $0.id == hunkID }) else {
             throw AgentError.hunkRevertFailed(path: path,
                                               hunkID: hunkID,

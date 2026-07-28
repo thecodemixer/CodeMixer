@@ -482,13 +482,13 @@ struct ACPAdapterTests {
         await index.appendConversationTurn(
             sessionID: "s1",
             customAgentID: "gemini",
-            role: "user",
+            role: .user,
             text: "hi"
         )
         await index.appendConversationTurn(
             sessionID: "s1",
             customAgentID: "gemini",
-            role: "thinking",
+            role: .thinking,
             text: "hmm"
         )
         await index.appendToolTurn(
@@ -503,7 +503,7 @@ struct ACPAdapterTests {
         await index.appendConversationTurn(
             sessionID: "s1",
             customAgentID: "gemini",
-            role: "assistant",
+            role: .assistant,
             text: "hello"
         )
         let replay = await index.localHistoryEvents(

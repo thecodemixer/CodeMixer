@@ -38,8 +38,8 @@ public enum AgentCommand: Sendable, Codable, Hashable {
 
     // MARK: Diff panel
 
-    case revertFile(path: String)
-    case revertHunk(path: String, hunkID: UUID)
+    case revertFile(file: ChangedFile)
+    case revertHunk(file: ChangedFile, hunkID: UUID)
 
     // MARK: Settings (atomic — all clients see the update)
 

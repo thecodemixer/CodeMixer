@@ -33,6 +33,13 @@ struct AgentRuntime {
     /// Session/thread id this process is currently bound to (Claude `/resume`,
     /// Codex thread, ACP session).
     var boundSessionID: String?
+    /// Lightweight transcript snapshot for reactivating an already-bound
+    /// pooled runtime. Adapters do not replay history when the process is
+    /// already on the requested session, so the engine must replay its own
+    /// visible transcript back to the UI.
+    var transcript: [SnapshotService.SnapshotMessage] = []
+    var changedFiles: [ChangedFile] = []
+    var replayEvents: [AgentEvent] = []
     var forwardingTask: Task<Void, Never>?
     var bellTask: Task<Void, Never>?
     var sessionIDContinuation: AsyncStream<String>.Continuation?
