@@ -61,15 +61,9 @@ extension Bootstrap {
         await leaveWorkspaceWithoutPicker()
         isPreparingWorkspace = true
         defer { isPreparingWorkspace = false }
-        do {
-            guard let lifecycle = workspaceLifecycle else { return }
-            try await lifecycle.openEmptyWorkspace(folder)
-            workspace = folder
-        } catch {
-            startupError = error.localizedDescription
-            workspace = nil
-            workspaceLifecycle?.abortOpen()
-        }
+        guard let lifecycle = workspaceLifecycle else { return }
+        await lifecycle.openEmptyWorkspace(folder)
+        workspace = folder
     }
 
     /// File → Close Workspace: clear the active-workspace restore flag, shut
@@ -148,16 +142,9 @@ extension Bootstrap {
         }
         isPreparingWorkspace = true
         defer { isPreparingWorkspace = false }
-        do {
-            guard let lifecycle = workspaceLifecycle else { return }
-            try await lifecycle.openEmptyWorkspace(url)
-            workspace = url
-        } catch {
-            startupError = error.localizedDescription
-            workspace = nil
-            workspaceLifecycle?.abortOpen()
-            try? await viewModel?.workspaceProjects?.clearActiveWorkspace()
-        }
+        guard let lifecycle = workspaceLifecycle else { return }
+        await lifecycle.openEmptyWorkspace(url)
+        workspace = url
     }
 
     func confirmPendingProjectConfiguration(_ info: ProjectDraft) async {
@@ -213,15 +200,8 @@ extension Bootstrap {
 
         // Folder projects are non-agent: register membership and open the browser.
         if projectType.isFolderBacked {
-            do {
-                guard let lifecycle = workspaceLifecycle else { return }
-                try await lifecycle.loadModelCatalogs(at: url, rootProjectType: projectType)
-            } catch {
-                startupError = error.localizedDescription
-                workspace = nil
-                workspaceLifecycle?.abortOpen()
-                return
-            }
+            guard let lifecycle = workspaceLifecycle else { return }
+            await lifecycle.loadModelCatalogs(at: url, rootProjectType: projectType)
             let projectsStore = viewModel?.workspaceProjects
             if let store = projectsStore {
                 _ = await store.projects(for: url, rootProjectType: projectType)
@@ -249,22 +229,19 @@ extension Bootstrap {
         }
 
         guard let engine = engine else {
-            do {
-                guard let lifecycle = workspaceLifecycle else { return }
-                try await lifecycle.loadModelCatalogs(at: url, rootProjectType: projectType)
-            } catch {
-                startupError = error.localizedDescription
-                workspace = nil
-                workspaceLifecycle?.abortOpen()
-                return
-            }
-            await viewModel?.prepareProjectOpen(url: url, projectType: projectType)
+            guard let lifecycle = workspaceLifecycle else { return }
+            await lifecycle.loadModelCatalogs(at: url, rootProjectType: projectType)
             await viewModel?.reloadProjects(rootProjectType: projectType)
-            if let resumeSessionID {
-                viewModel?.beginSessionSwitch(projectPath: url.path,
-                                              sessionID: resumeSessionID)
+            if isTargetProjectModelCatalogReady(url: url, projectType: projectType) {
+                await viewModel?.prepareProjectOpen(url: url, projectType: projectType)
+                if let resumeSessionID {
+                    viewModel?.beginSessionSwitch(projectPath: url.path,
+                                                  sessionID: resumeSessionID)
+                }
+                viewModel?.openProject(path: url.path, resumeSessionID: resumeSessionID)
+            } else {
+                viewModel?.activateDefaultProjectIfNeeded()
             }
-            viewModel?.openProject(path: url.path, resumeSessionID: resumeSessionID)
             try? await viewModel?.workspaceProjects?.markActiveWorkspace(url)
             Task { await configureSlashCommands(for: url, mode: projectType) }
             workspace = url
@@ -292,16 +269,16 @@ extension Bootstrap {
             return
         }
 
-        // Model catalogs for adapters used in this workspace must be ready
-        // before the workspace UI is shown — same path as create / empty open.
-        do {
-            guard let lifecycle = workspaceLifecycle else { return }
-            try await lifecycle.loadModelCatalogs(at: url, rootProjectType: projectType)
-        } catch {
-            startupError = error.localizedDescription
-            workspace = nil
-            workspaceLifecycle?.abortOpen()
-            try? await projectsStore?.clearActiveWorkspace()
+        // Warm catalogs for adapters used in this workspace. Failures land
+        // under Not loaded — sibling projects stay usable.
+        guard let lifecycle = workspaceLifecycle else { return }
+        await lifecycle.loadModelCatalogs(at: url, rootProjectType: projectType)
+        await viewModel?.reloadProjects(rootProjectType: projectType)
+
+        guard isTargetProjectModelCatalogReady(url: url, projectType: projectType) else {
+            viewModel?.activateDefaultProjectIfNeeded()
+            try? await projectsStore?.markActiveWorkspace(url)
+            workspace = url
             return
         }
 
@@ -309,7 +286,6 @@ extension Bootstrap {
             // Gate the composer before spawn so Cursor ACP's ~20s
             // initialize/auth/session-new cannot race an early send.
             await viewModel?.prepareProjectOpen(url: url, projectType: projectType)
-            await viewModel?.reloadProjects(rootProjectType: projectType)
             if let resumeSessionID {
                 viewModel?.beginSessionSwitch(projectPath: url.path,
                                               sessionID: resumeSessionID)
@@ -336,6 +312,22 @@ extension Bootstrap {
         if workspace != nil {
             await configureSlashCommands(for: url, mode: projectType)
         }
+    }
+
+    /// Whether the project being opened has a usable model catalog. Custom /
+    /// folder projects never require a shipping catalog.
+    private func isTargetProjectModelCatalogReady(url: URL, projectType: ProjectType) -> Bool {
+        guard !projectType.isFolderBacked else { return true }
+        if case .custom = projectType { return true }
+        if let ref = viewModel?.projects.first(where: {
+            URL(fileURLWithPath: $0.path).standardizedFileURL.path == url.standardizedFileURL.path
+        }) {
+            return viewModel?.isProjectModelCatalogReady(ref) ?? false
+        }
+        // Root not yet listed as a ProjectRef — gate on the type's adapters.
+        let ids = EngineViewModel.modelCatalogAgentIDs(for: projectType)
+        guard !ids.isEmpty else { return true }
+        return ids.allSatisfy { viewModel?.modelCatalogLoadFailures[$0] == nil }
     }
 
     func configureSlashCommands(for url: URL, mode: ProjectType) async {

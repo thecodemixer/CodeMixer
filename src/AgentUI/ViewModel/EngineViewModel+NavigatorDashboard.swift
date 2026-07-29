@@ -11,6 +11,7 @@ extension EngineViewModel {
             openFolderProject(project, relativePath: nil)
             return
         }
+        if rejectIfModelCatalogUnavailable(forProjectPath: projectPath) { return }
         applyAdapterCapabilities(forProjectPath: projectPath)
         clearFolderBrowserSurface()
         let sameProject = workspace.map {
@@ -72,6 +73,7 @@ extension EngineViewModel {
               }),
               isCustomACPProject(project) else { return }
         guard !isRestartingCustomACPCLI else { return }
+        if rejectIfModelCatalogUnavailable(forProjectPath: projectPath) { return }
 
         let target = URL(fileURLWithPath: projectPath).standardizedFileURL
         workspace = target

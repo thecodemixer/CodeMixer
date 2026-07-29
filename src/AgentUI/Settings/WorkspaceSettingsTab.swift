@@ -52,6 +52,14 @@ struct WorkspaceSettingsTab: View {
                     .font(Theme.typography.caption)
                     .foregroundStyle(Theme.text.tertiary)
             }
+            if let loadError = row.loadError {
+                Text(loadError)
+                    .font(Theme.typography.caption)
+                    .foregroundStyle(Theme.signal.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel("\(row.displayName) model catalog error")
+                    .accessibilityValue(loadError)
+            }
             Button(model.modelCatalogRefreshInFlight == row.agentID ? "Refreshing…" : "Refresh models") {
                 Task { await model.refreshAdapterModels(for: row.agentID) }
             }
@@ -71,6 +79,7 @@ struct WorkspaceSettingsTab: View {
     }
 
     private func modelCountLabel(_ row: EngineViewModel.WorkspaceModelCatalogRow) -> String {
+        if row.loadError != nil { return "Not loaded" }
         switch row.modelCount {
         case 0: return "No models cached"
         case 1: return "1 model"

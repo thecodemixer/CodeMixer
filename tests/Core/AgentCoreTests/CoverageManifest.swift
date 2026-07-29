@@ -618,6 +618,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // acpSessionsFileName
 // acpSessionsURL
 // action
+// activateDefaultProjectIfNeeded
 // activateSlashCommand
 // activeFolderProjectKind
 // activeFolderSelectionRelativePath
@@ -674,6 +675,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // authStatus
 // authURL
 // authenticate
+// autoAllowDecision
 // autoApprovalRules
 // automaticCatalogMaxAge
 // automaticLogShortcuts
@@ -834,6 +836,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // ensureDirectory
 // ensureModels
 // ensureModelsLoaded
+// ensureModelsRecordingFailures
 // ensureParentDirectory
 // entries
 // entry
@@ -964,6 +967,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // isOverview
 // isPreAuthenticated
 // isProjectDefined
+// isProjectModelCatalogReady
 // isRestartingCustomACPCLI
 // isSpeaking
 // isSwitchingSession
@@ -1004,11 +1008,13 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // liveProjectPaths
 // load
 // loadAll
+// loadError
 // loadHookCommands
 // loadModelCatalogs
 // loadOrCreate
 // loadPersisted
 // loadSessions
+// loadedProjects
 // locate
 // locateBinary
 // lockoutSeconds
@@ -1047,6 +1053,8 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // minAttemptInterval
 // modeID
 // model
+// modelCatalogAgentIDs
+// modelCatalogFailureMessage
 // modelCatalogRefreshKind
 // modelCount
 // models
@@ -1072,6 +1080,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // normalized
 // normalizedFolderView
 // note
+// noteHookFallbackAssistantText
 // notification
 // notify
 // now
@@ -1221,6 +1230,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // refreshModelCatalog
 // refreshedAt
 // register
+// rejectIfModelCatalogUnavailable
 // relativePath
 // release
 // reloadProjects
@@ -1318,6 +1328,9 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // sessionAvailableModes
 // sessionBootstrapBytes
 // sessionCurrentModeID
+// sessionHandshakeColdStartTimeout
+// sessionHandshakeResumeTimeout
+// sessionHandshakeWarmTimeout
 // sessionID
 // sessionId
 // sessionLoad
@@ -1500,6 +1513,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // undoToastWindow
 // uninstall
 // uninstallLaunchAgent
+// unloadedProjects
 // unpinFolderPath
 // unsubmittedPrompt
 // unsubscribe
@@ -1557,6 +1571,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // workspaceSidebarMinWidth
 // workspaceStateURL
 // workspaceTrust
+// workspaceTrustToolName
 // workspacesFileName
 // workspacesURL
 // write

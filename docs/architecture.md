@@ -660,9 +660,9 @@ explicit `.error(.unsupportedCommand)` events, never silently skipped.
 
 ### Model catalogs
 
-Composer model pickers are filled **before** the workspace UI becomes usable.
-`WorkspaceLifecycle` (`AgentUI/Workspace/WorkspaceLifecycle.swift`) is the
-shared create/open path:
+Composer model pickers are filled **before** the workspace UI becomes usable
+for projects whose adapters succeed. `WorkspaceLifecycle`
+(`AgentUI/Workspace/WorkspaceLifecycle.swift`) is the shared create/open path:
 
 | Call | When |
 | --- | --- |
@@ -674,6 +674,20 @@ Only shipping adapters **used by projects in that workspace** are warmed
 (pinned types → that agent; `.mixed` → every `SupportedBuiltInAgent.shipping`
 id). Custom projects contribute no shipping catalog.
 
+When a required catalog cannot be populated (empty probe, missing binary,
+timeout, no prior disk cache), that adapter is recorded in
+`EngineViewModel.modelCatalogLoadFailures`. Projects that depend on it appear
+in the session navigator under a **Not loaded** section with the error
+message; sibling projects whose adapters succeeded still open and activate
+normally. Mixed projects are gated on their *default* agent only — a failed
+Cursor catalog does not park a Claude-default mixed project. Create / add /
+undo-restore use the same soft-fail path (`ensureModelsRecordingFailures`) so
+a broken CLI is listed under Not loaded instead of opening empty. Every open
+entry point (`selectProject`, `newChat`, `openSession`, `openOverview`,
+`openProject`, Cmd+K) rejects unloaded projects. A successful Settings →
+Workspace **Refresh models** (or the sidebar Retry action) clears the failure
+and moves the project back to the loaded list.
+
 `ModelCatalogRefreshKind` splits persistence. Each shipping adapter writes
 `<workspace>/.codemixer/workspace-<AgentID.rawValue>.json` (not `workspace.json`):
 
@@ -684,10 +698,10 @@ id). Custom projects contribute no shipping catalog.
 
 Bootstrap sets `isPreparingWorkspace` while create/open awaits catalog warm;
 `RootView` keeps the loading spinner up until that flag clears. Project create /
-add registers the project, refreshes the navigator list, and opens it without
-waiting on a live model probe — probes are bounded by
-`ModelCatalogTiming.probeTimeout` inside `loadModels` so a hung CLI cannot
-leave the New Project sheet on “Creating…”.
+add registers the project and refreshes the navigator list; model warm is
+bounded by `ModelCatalogTiming.probeTimeout` inside `loadModels` so a hung CLI
+cannot leave the New Project sheet on “Creating…”. When warm fails the project
+stays listed under Not loaded and is not opened.
 
 ### Agent modes are provider-owned, not UI-hardcoded
 

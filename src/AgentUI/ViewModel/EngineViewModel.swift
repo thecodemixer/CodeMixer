@@ -200,6 +200,10 @@ public final class EngineViewModel {
     public internal(set) var workspaceModelCatalogRows: [WorkspaceModelCatalogRow] = []
     /// Agent currently running a manual model refresh, if any.
     public internal(set) var modelCatalogRefreshInFlight: AgentID?
+    /// Shipping adapters whose model catalog could not be populated for this
+    /// workspace. Projects that require any of these adapters appear under the
+    /// navigator's Not loaded section instead of blocking the whole open.
+    public internal(set) var modelCatalogLoadFailures: [AgentID: String] = [:]
 
     public var showUsageChip: Bool { appearancePrefs.showUsageChip }
     public var showSilentRecoveryLog: Bool { appearancePrefs.showSilentRecoveryLog }
@@ -475,17 +479,22 @@ public final class EngineViewModel {
         public let refreshKind: ModelCatalogRefreshKind
         public let modelCount: Int
         public let refreshedAt: Date?
+        /// Non-nil when the last warm/refresh for this adapter failed with no
+        /// usable cache — projects that require it appear under Not loaded.
+        public let loadError: String?
 
         public init(agentID: AgentID,
                     displayName: String,
                     refreshKind: ModelCatalogRefreshKind,
                     modelCount: Int,
-                    refreshedAt: Date?) {
+                    refreshedAt: Date?,
+                    loadError: String? = nil) {
             self.agentID = agentID
             self.displayName = displayName
             self.refreshKind = refreshKind
             self.modelCount = modelCount
             self.refreshedAt = refreshedAt
+            self.loadError = loadError
         }
     }
 

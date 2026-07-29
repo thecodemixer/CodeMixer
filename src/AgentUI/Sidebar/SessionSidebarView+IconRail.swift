@@ -22,8 +22,11 @@ extension SessionSidebarView {
 
             ScrollView {
                 VStack(spacing: Theme.spacing.s8) {
-                    ForEach(model.projects) { project in
+                    ForEach(model.loadedProjects) { project in
                         railProjectButton(project)
+                    }
+                    ForEach(model.unloadedProjects) { project in
+                        railUnloadedProjectButton(project)
                     }
                 }
                 .padding(.top, Theme.spacing.s4)
@@ -74,5 +77,22 @@ extension SessionSidebarView {
                 : "Select project \(project.displayName)"
         )
         .accessibilityAddTraits(isCurrent ? [.isSelected] : [])
+    }
+
+    private func railUnloadedProjectButton(_ project: WorkspaceProjectsStore.ProjectRef) -> some View {
+        let message = model.modelCatalogFailureMessage(for: project)
+            ?? "Model catalog unavailable."
+        return Button { } label: {
+            Image(systemName: "folder.badge.questionmark")
+                .accessibilityHidden(true)
+                .imageScale(.medium)
+                .foregroundStyle(Theme.signal.warning)
+                .frame(width: Theme.spacing.s32, height: Theme.spacing.s32)
+        }
+        .buttonStyle(.plain)
+        .disabled(true)
+        .help("\(project.displayName) not loaded: \(message)")
+        .accessibilityLabel("Project \(project.displayName), not loaded")
+        .accessibilityValue(message)
     }
 }

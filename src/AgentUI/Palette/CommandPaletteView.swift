@@ -157,7 +157,7 @@ public struct CommandPaletteView: View {
             })
         }
 
-        for project in model.projects {
+        for project in model.loadedProjects {
             items.append(PaletteCommand(id: "project-\(project.path)",
                                         title: "New chat in \(project.displayName)",
                                         subtitle: project.path,
@@ -165,9 +165,20 @@ public struct CommandPaletteView: View {
                 model.newChat(in: project.path)
             })
         }
+        for project in model.unloadedProjects {
+            let message = model.modelCatalogFailureMessage(for: project)
+                ?? "Model catalog unavailable."
+            items.append(PaletteCommand(id: "project-unloaded-\(project.path)",
+                                        title: "\(project.displayName) (not loaded)",
+                                        subtitle: message,
+                                        systemImage: "folder.badge.questionmark") {
+                _ = model.rejectIfModelCatalogUnavailable(forProjectPath: project.path)
+            })
+        }
 
         if model.hasResumableSessionProjects {
-            for (path, sessions) in model.sessionsByProject {
+            let loadedPaths = Set(model.loadedProjects.map(\.path))
+            for (path, sessions) in model.sessionsByProject where loadedPaths.contains(path) {
                 let name = model.projects.first(where: { $0.path == path })?.displayName
                     ?? URL(fileURLWithPath: path).lastPathComponent
                 for session in sessions {

@@ -134,6 +134,54 @@ struct ClaudeAdapterEventStreamTests {
         hookContinuation.finish()
     }
 
+    @Test("late transcript matching Stop fallback does not emit a second assistantText")
+    func lateTranscriptDoesNotDuplicateStopFallback() async throws {
+        let fileSystem = InMemoryFileSystem()
+        let home = TestPaths.underTemporary("codemixer-adapter-late-dedup")
+        let environment = FakeEnvironment(home: home)
+        let workspace = TestPaths.underTemporary("codemixer-workspace")
+        let sessionID = "late-dedup-session"
+        let projects = ClaudeProjectPaths.projectDirectory(for: workspace,
+                                                           claudeDirectory: environment.claudeDirectory)
+        try fileSystem.createDirectory(at: projects, withIntermediates: true)
+
+        var hookContinuation: AsyncStream<HookRequest>.Continuation!
+        let hookStream = AsyncStream<HookRequest> { hookContinuation = $0 }
+        let hookHandle = HookSocketHandle(incoming: hookStream, respond: { _, _ in })
+        let adapter = ClaudeAdapter(environment: environment, fileSystem: fileSystem)
+        let stream = adapter.makeEventStream(inputs: AgentInputs(
+            outputBytes: AsyncStream { $0.finish() },
+            terminal: EmptyScreen(),
+            hookSocket: hookHandle,
+            workspace: workspace,
+            sessionID: AsyncStream { $0.finish() }
+        ))
+
+        hookContinuation.yield(HookRequest(id: UUID(),
+                                           eventName: "SessionStart",
+                                           jsonPayload: Data(#"{"session_id":"late-dedup-session","cwd":"/tmp/codemixer-workspace"}"#.utf8)))
+        // Stop before any JSONL exists — hook fallback must surface the reply.
+        hookContinuation.yield(HookRequest(id: UUID(),
+                                           eventName: "Stop",
+                                           jsonPayload: Data(#"{"hook_event_name":"Stop","session_id":"late-dedup-session","last_assistant_message":"first-turn reply"}"#.utf8)))
+
+        let first = await nextAssistantText(from: stream)
+        guard case .assistantText(_, _, "first-turn reply", true)? = first else {
+            Issue.record("expected hook fallback assistantText, got \(String(describing: first))")
+            hookContinuation.finish()
+            return
+        }
+
+        // Late flush of the same reply — must not paint a second bubble.
+        try fileSystem.writeAtomically(
+            Data(#"{"type":"assistant","uuid":"answer-late","sessionId":"late-dedup-session","message":{"role":"assistant","content":[{"type":"text","text":"first-turn reply"}]}}"#.utf8),
+            to: projects.appendingPathComponent("\(sessionID).jsonl")
+        )
+        let duplicate = await nextAssistantText(from: stream)
+        #expect(duplicate == nil, "late transcript must not re-emit Stop fallback text")
+        hookContinuation.finish()
+    }
+
     @Test("TUI fallback scrapes before hooks fire, then is suppressed once a hook arrives")
     func tuiScrapesUntilHooksBecomeActiveThenSuppressed() async throws {
         let fileSystem = InMemoryFileSystem()

@@ -54,8 +54,8 @@ extension EngineViewModel {
     }
 
     /// Create a new project (subfolder of the workspace) and switch to it.
-    /// Returns once the project is listed and opened; model-catalog warm runs
-    /// on the open path and must not block the New Project sheet.
+    /// Returns once the project is listed; when its model catalog cannot be
+    /// populated it stays under Not loaded and is not opened.
     public func createProject(_ info: ProjectDraft, projectType: ProjectType) async {
         guard let workspaceRoot, let store = workspaceProjects else { return }
         do {
@@ -72,8 +72,9 @@ extension EngineViewModel {
     }
 
     /// Register an existing folder as a project of the workspace.
-    /// Returns once the project is listed and opened. Vendor history import
-    /// continues in the background so a large catalog cannot freeze the sheet.
+    /// Returns once the project is listed. Vendor history import continues in
+    /// the background. When its model catalog cannot be populated the project
+    /// stays under Not loaded and is not opened.
     public func addExistingProject(_ info: ProjectDraft,
                                    url: URL,
                                    projectType: ProjectType) async {
@@ -143,9 +144,11 @@ extension EngineViewModel {
             openFolderProject(ref, relativePath: nil)
             return
         }
-        // Model warm is bounded inside `loadModels` and runs from
-        // `applyAdapterCapabilities` — never block sheet dismissal on a live
-        // CLI probe (`claude -p`, `cursor-agent models`, …).
+        // Soft-warm: record per-adapter failures so a broken CLI lands under
+        // Not loaded instead of opening with an empty model picker. Probe is
+        // still bounded by `ModelCatalogTiming.probeTimeout`.
+        let ready = await ensureModelsRecordingFailures(for: projectType)
+        guard ready else { return }
         applyAdapterCapabilities(for: projectType, projectURL: URL(fileURLWithPath: ref.path))
         newChat(in: ref.path)
     }
@@ -202,7 +205,8 @@ extension EngineViewModel {
     }
 
     /// Restore the most recently removed project at its former position.
-    /// Blocks until the project is restored and its model catalog is ready.
+    /// Soft-warms its model catalog; if the catalog cannot be populated the
+    /// project is restored under Not loaded instead of aborting undo.
     public func undoRemoveProject() async {
         guard let workspaceRoot, let store = workspaceProjects,
               let removed = removedProjectUndo else { return }
@@ -211,9 +215,9 @@ extension EngineViewModel {
         removedProjectUndo = nil
         do {
             try await store.restoreProject(removed, in: workspaceRoot)
-            try await WorkspaceLifecycle(model: self).ensureModels(for: removed.ref.projectType)
             let refs = await store.projects(for: workspaceRoot)
             await applyProjectList(refs)
+            _ = await ensureModelsRecordingFailures(for: removed.ref.projectType)
         } catch {
             recordProjectError(error)
         }
@@ -249,8 +253,9 @@ extension EngineViewModel {
 
     /// Opens a freshly created workspace folder without starting an agent.
     /// Project type is chosen later via File → New Project…
-    /// Awaits model-catalog warm so callers can gate the UI until catalogs are ready.
-    public func adoptEmptyWorkspace(_ url: URL) async throws {
+    /// Awaits model-catalog warm so callers can gate the UI until ready
+    /// catalogs are known (failures land under Not loaded).
+    public func adoptEmptyWorkspace(_ url: URL) async {
         workspaceRoot = url
         workspace = nil
         sessionID = nil
@@ -276,8 +281,9 @@ extension EngineViewModel {
         availableAgentModes = []
         selectedAgentModeID = ""
         slashCommands = []
+        modelCatalogLoadFailures = [:]
         await reloadProjects()
-        try await warmWorkspaceModelCatalogs()
+        await warmWorkspaceModelCatalogs()
     }
 
     /// Clears navigator + conversation chrome after File → Close Workspace.
@@ -307,6 +313,7 @@ extension EngineViewModel {
         availableAgentModes = []
         selectedAgentModeID = ""
         workspaceModelCatalogRows = []
+        modelCatalogLoadFailures = [:]
         slashCommands = []
         livePooledProjectPaths = []
     }

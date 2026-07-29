@@ -101,14 +101,87 @@ public struct SessionSidebarView: View {
     private var projectList: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: Theme.spacing.s4) {
-                ForEach(model.projects) { project in
+                ForEach(model.loadedProjects) { project in
                     projectSection(project)
+                }
+                if !model.unloadedProjects.isEmpty {
+                    notLoadedSectionHeader
+                    ForEach(model.unloadedProjects) { project in
+                        unloadedProjectRow(project)
+                    }
                 }
             }
             .padding(.horizontal, Theme.spacing.s8)
             .padding(.vertical, Theme.spacing.s8)
         }
         .scrollContentBackground(.hidden)
+    }
+
+    private var notLoadedSectionHeader: some View {
+        Text("Not loaded")
+            .font(Theme.typography.caption)
+            .fontWeight(.semibold)
+            .foregroundStyle(Theme.text.tertiary)
+            .textCase(.uppercase)
+            .padding(.top, Theme.spacing.s16)
+            .padding(.bottom, Theme.spacing.s4)
+            .padding(.horizontal, Theme.spacing.s8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    private func unloadedProjectRow(_ project: WorkspaceProjectsStore.ProjectRef) -> some View {
+        let message = model.modelCatalogFailureMessage(for: project)
+            ?? "Model catalog unavailable."
+        return VStack(alignment: .leading, spacing: Theme.spacing.s4) {
+            HStack(spacing: Theme.spacing.s8) {
+                Text(project.displayName)
+                    .font(Theme.typography.body)
+                    .fontWeight(.bold)
+                    .foregroundStyle(Theme.text.tertiary)
+                    .lineLimit(1)
+                if shouldShowProjectTypeLabel(for: project) {
+                    projectTypeLabel(project.projectType, isCurrent: false)
+                }
+                Spacer(minLength: 0)
+            }
+            Text(message)
+                .font(Theme.typography.caption)
+                .foregroundStyle(Theme.signal.warning)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .contentShape(Rectangle())
+        .padding(.top, Theme.spacing.s8)
+        .padding(.bottom, Theme.spacing.s4)
+        .padding(.horizontal, Theme.spacing.s8)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Project \(project.displayName), not loaded")
+        .accessibilityValue(message)
+        .contextMenu {
+            Button("Retry model load") {
+                retryModelCatalog(for: project)
+            }
+            .accessibilityLabel("Retry model load for \(project.displayName)")
+            Button("Reveal in Finder") { revealInFinder(project.path) }
+            Divider()
+            if canRenameProject(project) {
+                Button("Rename…") { beginRename(project) }
+            }
+            if project.path != model.workspace?.path {
+                Button("Remove from Navigator", role: .destructive) {
+                    model.removeProject(path: project.path)
+                }
+            }
+        }
+    }
+
+    private func retryModelCatalog(for project: WorkspaceProjectsStore.ProjectRef) {
+        let agentIDs = EngineViewModel.modelCatalogAgentIDs(for: project.projectType)
+        Task {
+            for agentID in agentIDs {
+                await model.refreshAdapterModels(for: agentID)
+            }
+        }
     }
 
     @ViewBuilder

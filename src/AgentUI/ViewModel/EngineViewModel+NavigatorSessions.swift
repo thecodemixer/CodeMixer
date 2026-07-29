@@ -47,6 +47,7 @@ extension EngineViewModel {
             openFolderProject(project, relativePath: nil)
             return
         }
+        if rejectIfModelCatalogUnavailable(forProjectPath: projectPath) { return }
         if isCurrentSession(projectPath: projectPath, sessionID: id) {
             detailPane = .conversation
             return
@@ -85,6 +86,7 @@ extension EngineViewModel {
             openFolderProject(project, relativePath: nil)
             return
         }
+        if rejectIfModelCatalogUnavailable(forProjectPath: projectPath) { return }
         guard projectPath != workspace?.path else {
             // Re-clicking the active overview project re-focuses the dashboard.
             if supportsOverviewDashboard(forProjectPath: projectPath) {
@@ -108,15 +110,18 @@ extension EngineViewModel {
     }
 
     /// After adopting a workspace shell with projects but no active project,
-    /// open the first concrete agent project (else first folder project) so the
-    /// workbench is not stuck on "No workspace open".
+    /// open the first ready concrete agent project (else first folder project)
+    /// so the workbench is not stuck on "No workspace open". Projects whose
+    /// model catalogs failed stay under Not loaded.
     public func activateDefaultProjectIfNeeded() {
         guard workspace == nil, !projects.isEmpty else { return }
-        if let agent = projects.first(where: { !$0.projectType.isFolderBacked }) {
+        if let agent = projects.first(where: {
+            !$0.projectType.isFolderBacked && isProjectModelCatalogReady($0)
+        }) {
             selectProject(path: agent.path)
             return
         }
-        if let folder = projects.first {
+        if let folder = projects.first(where: { $0.projectType.isFolderBacked }) {
             selectProject(path: folder.path)
         }
     }
@@ -137,6 +142,7 @@ extension EngineViewModel {
     /// Claude `/clear`).
     public func newChat(in projectPath: String) {
         guard !projectPath.isEmpty else { return }
+        if rejectIfModelCatalogUnavailable(forProjectPath: projectPath) { return }
         if let project = projectRef(at: projectPath), project.projectType.isFolderBacked {
             openFolderProject(project, relativePath: nil)
             return

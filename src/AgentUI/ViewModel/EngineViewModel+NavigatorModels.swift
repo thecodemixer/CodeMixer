@@ -73,17 +73,120 @@ extension EngineViewModel {
     /// Loads model catalogs for every shipping adapter used by projects in this
     /// workspace. Catalogs are read from per-adapter workspace files when
     /// fresh enough; otherwise adapters are probed and the result is persisted.
-    /// Throws if any required catalog cannot be populated.
-    public func warmWorkspaceModelCatalogs() async throws {
+    ///
+    /// Failures are recorded per adapter in `modelCatalogLoadFailures` instead
+    /// of aborting the workspace open — sibling projects whose adapters
+    /// succeeded stay usable.
+    public func warmWorkspaceModelCatalogs() async {
         guard workspaceRoot != nil, workspaceProjects != nil else {
             workspaceModelCatalogRows = []
+            modelCatalogLoadFailures = [:]
             return
         }
+        var failures: [AgentID: String] = [:]
         let agentIDs = Self.modelCatalogAgentIDs(in: projects)
         for agentID in agentIDs {
-            try await ensureModelsLoaded(for: agentID)
+            do {
+                try await ensureModelsLoaded(for: agentID)
+            } catch {
+                failures[agentID] = Self.modelCatalogFailureMessage(for: error)
+            }
+        }
+        modelCatalogLoadFailures = failures
+        await reloadWorkspaceModelCatalogStatus()
+    }
+
+    /// Projects whose required shipping model catalogs are ready.
+    public var loadedProjects: [WorkspaceProjectsStore.ProjectRef] {
+        projects.filter { isProjectModelCatalogReady($0) }
+    }
+
+    /// Projects blocked because a required adapter's model catalog failed.
+    public var unloadedProjects: [WorkspaceProjectsStore.ProjectRef] {
+        projects.filter { !isProjectModelCatalogReady($0) }
+    }
+
+    /// Whether this project can be opened given current catalog failures.
+    ///
+    /// Pinned single-agent projects require that agent's catalog. Mixed
+    /// projects require the catalog for their *default* agent (the adapter
+    /// `ProjectAgentRouter` would spawn on New Chat) — sibling shipping
+    /// adapters that failed stay unavailable until refreshed but do not park
+    /// the whole mixed project under Not loaded. Custom / folder projects
+    /// never require a shipping catalog.
+    public func isProjectModelCatalogReady(_ project: WorkspaceProjectsStore.ProjectRef) -> Bool {
+        modelCatalogFailureMessage(for: project) == nil
+    }
+
+    /// User-facing reason a project is under Not loaded, or `nil` when ready.
+    public func modelCatalogFailureMessage(
+        for project: WorkspaceProjectsStore.ProjectRef
+    ) -> String? {
+        let ids = Self.modelCatalogAgentIDs(for: project.projectType)
+        guard !ids.isEmpty else { return nil }
+        switch project.projectType {
+        case .mixed(let defaultAgent):
+            if let openID = defaultAgent {
+                return modelCatalogLoadFailures[openID]
+            }
+            // No default — openable only while at least one shipping catalog works.
+            let failures = ids.compactMap { modelCatalogLoadFailures[$0] }
+            guard failures.count == ids.count else { return nil }
+            return failures.first
+        default:
+            for agentID in ids {
+                if let message = modelCatalogLoadFailures[agentID] {
+                    return message
+                }
+            }
+            return nil
+        }
+    }
+
+    /// Records a diagnostic and returns `true` when `projectPath` cannot be
+    /// opened because a required model catalog failed.
+    @discardableResult
+    public func rejectIfModelCatalogUnavailable(forProjectPath projectPath: String) -> Bool {
+        guard let project = projectRef(at: projectPath),
+              let message = modelCatalogFailureMessage(for: project) else {
+            return false
+        }
+        diagnostics.append(diagnostic(level: .error, message: message))
+        return true
+    }
+
+    /// Soft-ensures catalogs for `projectType`: records per-adapter failures,
+    /// clears successes, and returns whether the project is openable.
+    @discardableResult
+    public func ensureModelsRecordingFailures(for projectType: ProjectType) async -> Bool {
+        let ids = Self.modelCatalogAgentIDs(for: projectType)
+        guard !ids.isEmpty else {
+            await reloadWorkspaceModelCatalogStatus()
+            return true
+        }
+        for agentID in ids {
+            do {
+                try await ensureModelsLoaded(for: agentID)
+                modelCatalogLoadFailures.removeValue(forKey: agentID)
+            } catch {
+                modelCatalogLoadFailures[agentID] = Self.modelCatalogFailureMessage(for: error)
+            }
         }
         await reloadWorkspaceModelCatalogStatus()
+        // Synthetic ref — only projectType matters for readiness.
+        let probe = WorkspaceProjectsStore.ProjectRef(
+            path: "/__catalog-probe__",
+            displayName: "probe",
+            projectType: projectType
+        )
+        return isProjectModelCatalogReady(probe)
+    }
+
+    static func modelCatalogFailureMessage(for error: any Error) -> String {
+        if let agentError = error as? AgentError {
+            return agentError.userMessage
+        }
+        return error.localizedDescription
     }
 
     /// Ensures every shipping adapter required by `projectType` has a
@@ -195,6 +298,7 @@ extension EngineViewModel {
                 in: workspaceRoot
             )
             adapter.seedModelCatalog(models)
+            modelCatalogLoadFailures.removeValue(forKey: agentID)
             await reloadWorkspaceModelCatalogStatus()
             if let activePath = workspace?.path,
                let activeType = projects.first(where: { $0.path == activePath })?.projectType,
@@ -204,11 +308,14 @@ extension EngineViewModel {
         } catch {
             if let previous, !previous.models.isEmpty {
                 adapter.seedModelCatalog(previous.models)
+            } else {
+                modelCatalogLoadFailures[agentID] = Self.modelCatalogFailureMessage(for: error)
             }
             diagnostics.append(diagnostic(
                 level: .error,
                 message: "Model refresh failed: \(error.localizedDescription)"
             ))
+            await reloadWorkspaceModelCatalogStatus()
         }
     }
 
@@ -234,7 +341,8 @@ extension EngineViewModel {
                 displayName: entry.displayLabel,
                 refreshKind: kind,
                 modelCount: modelCount,
-                refreshedAt: cached?.refreshedAt
+                refreshedAt: cached?.refreshedAt,
+                loadError: modelCatalogLoadFailures[agentID]
             ))
         }
         workspaceModelCatalogRows = rows
@@ -301,7 +409,7 @@ extension EngineViewModel {
     /// Shipping agents whose model catalogs are required for `projectType`.
     /// Mixed projects can switch among all shipping CLIs, so every shipping
     /// adapter is required. Custom projects have no shipping catalog.
-    static func modelCatalogAgentIDs(for projectType: ProjectType) -> [AgentID] {
+    public static func modelCatalogAgentIDs(for projectType: ProjectType) -> [AgentID] {
         switch projectType {
         case .claudeCode, .codex, .cursorCLI:
             if let id = projectType.primaryAgentID { return [id] }
@@ -314,7 +422,7 @@ extension EngineViewModel {
     }
 
     /// Deduped shipping agent IDs required by the current workspace projects.
-    static func modelCatalogAgentIDs(
+    public static func modelCatalogAgentIDs(
         in projects: [WorkspaceProjectsStore.ProjectRef]
     ) -> [AgentID] {
         var ordered: [AgentID] = []

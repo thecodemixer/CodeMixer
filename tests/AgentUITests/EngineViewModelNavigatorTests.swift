@@ -801,7 +801,7 @@ struct EngineViewModelNavigatorTests {
         defer { vm.unsubscribe() }
 
         let workspace = TestPaths.workspace("ws")
-        try await vm.adoptEmptyWorkspace(workspace)
+        await vm.adoptEmptyWorkspace(workspace)
 
         await AdapterRegistry.shared.register(MockAdapter(
             id: .claudeCode,
@@ -849,7 +849,7 @@ struct EngineViewModelNavigatorTests {
         defer { vm.unsubscribe() }
 
         let workspace = TestPaths.workspace("ws-info-create")
-        try await vm.adoptEmptyWorkspace(workspace)
+        await vm.adoptEmptyWorkspace(workspace)
         await AdapterRegistry.shared.register(MockAdapter(
             id: .claudeCode,
             displayName: "Claude Code",
@@ -889,7 +889,7 @@ struct EngineViewModelNavigatorTests {
         defer { vm.unsubscribe() }
 
         let workspace = TestPaths.workspace("ws-info-add")
-        try await vm.adoptEmptyWorkspace(workspace)
+        await vm.adoptEmptyWorkspace(workspace)
         await AdapterRegistry.shared.register(MockAdapter(
             id: .claudeCode,
             displayName: "Claude Code",
@@ -931,7 +931,7 @@ struct EngineViewModelNavigatorTests {
         defer { vm.unsubscribe() }
 
         let workspace = TestPaths.workspace("ws-add-existing")
-        try await vm.adoptEmptyWorkspace(workspace)
+        await vm.adoptEmptyWorkspace(workspace)
         await AdapterRegistry.shared.register(MockAdapter(
             id: .codex,
             displayName: "Codex",
@@ -960,8 +960,8 @@ struct EngineViewModelNavigatorTests {
         await bus.shutdown()
     }
 
-    @Test("createProject lists and opens even when model catalog probe fails")
-    func createProjectDoesNotBlockOnFailedModelProbe() async throws {
+    @Test("createProject lists under Not loaded when model catalog probe fails")
+    func createProjectListsUnloadedWhenModelProbeFails() async throws {
         let port = RecordingPort()
         let bus = MulticastEventBus()
         let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
@@ -973,7 +973,7 @@ struct EngineViewModelNavigatorTests {
         defer { vm.unsubscribe() }
 
         let workspace = TestPaths.workspace("ws-failed-catalog")
-        try await vm.adoptEmptyWorkspace(workspace)
+        await vm.adoptEmptyWorkspace(workspace)
         await AdapterRegistry.shared.register(MockAdapter(
             id: .claudeCode,
             displayName: "Claude Code",
@@ -987,12 +987,51 @@ struct EngineViewModelNavigatorTests {
 
         let projectPath = workspace.appendingPathComponent("api").path
         #expect(vm.projects.contains { $0.path == projectPath })
-        #expect(port.commands.contains {
-            if case .openProject(let path, let resume) = $0 {
-                return path == projectPath && resume == nil
-            }
+        #expect(vm.unloadedProjects.map(\.path) == [projectPath])
+        #expect(vm.loadedProjects.isEmpty)
+        #expect(vm.modelCatalogLoadFailures[.claudeCode] != nil)
+        #expect(!port.commands.contains {
+            if case .openProject = $0 { return true }
             return false
         })
+
+        await bus.shutdown()
+    }
+
+    @Test("openSession rejects projects whose model catalog failed")
+    func openSessionRejectsUnloadedProject() async throws {
+        let port = RecordingPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
+        let fileSystem = InMemoryFileSystem()
+        let environment = FakeEnvironment(home: TestPaths.fakeHome)
+        let store = WorkspaceProjectsStore(environment: environment, fileSystem: fileSystem)
+        vm.workspaceProjects = store
+
+        let workspace = TestPaths.workspace("ws-open-session-gate")
+        try fileSystem.createDirectory(at: workspace, withIntermediates: true)
+        let ref = try await store.createProject(name: "cur", projectType: .cursorCLI, in: workspace)
+        vm.workspaceRoot = workspace
+        await vm.reloadProjects()
+        vm.modelCatalogLoadFailures[.cursorCLI] = "Cursor returned no models."
+        vm.sessionsByProject[ref.path] = [
+            SessionSummary(
+                id: "s1",
+                agentID: .cursorCLI,
+                workspace: URL(fileURLWithPath: ref.path),
+                title: "Prior",
+                lastActivity: Date(timeIntervalSince1970: 1),
+                messageCount: 1
+            )
+        ]
+
+        vm.openSession(projectPath: ref.path, id: "s1")
+
+        #expect(!port.commands.contains {
+            if case .openProject = $0 { return true }
+            return false
+        })
+        #expect(vm.diagnostics.contains { $0.message.contains("Cursor") })
 
         await bus.shutdown()
     }
@@ -1010,7 +1049,7 @@ struct EngineViewModelNavigatorTests {
         defer { vm.unsubscribe() }
 
         let workspace = TestPaths.workspace("ws-folder")
-        try await vm.adoptEmptyWorkspace(workspace)
+        await vm.adoptEmptyWorkspace(workspace)
         await vm.createProject(name: "logs", projectType: .folder(.logs))
         try? await Task.sleep(for: .milliseconds(40))
 
@@ -1038,7 +1077,7 @@ struct EngineViewModelNavigatorTests {
         vm.workspaceProjects = store
 
         let workspace = TestPaths.workspace("ws-folder-select")
-        try await vm.adoptEmptyWorkspace(workspace)
+        await vm.adoptEmptyWorkspace(workspace)
         let ref = try await store.createProject(name: "docs", projectType: .folder(.docs), in: workspace)
         await vm.applyProjectList(await store.projects(for: workspace))
         vm.selectProject(path: ref.path)
@@ -1061,7 +1100,7 @@ struct EngineViewModelNavigatorTests {
         vm.workspaceProjects = store
 
         let workspace = TestPaths.workspace("ws-folder-pin")
-        try await vm.adoptEmptyWorkspace(workspace)
+        await vm.adoptEmptyWorkspace(workspace)
         let ref = try await store.createProject(name: "docs", projectType: .folder(.docs), in: workspace)
         await vm.applyProjectList(await store.projects(for: workspace))
 
@@ -1089,7 +1128,7 @@ struct EngineViewModelNavigatorTests {
         vm.workspaceProjects = store
 
         let workspace = TestPaths.workspace("ws-folder-files-pin")
-        try await vm.adoptEmptyWorkspace(workspace)
+        await vm.adoptEmptyWorkspace(workspace)
         let ref = try await store.createProject(name: "files", projectType: .folder(.files), in: workspace)
         await vm.applyProjectList(await store.projects(for: workspace))
 
@@ -1144,7 +1183,7 @@ struct EngineViewModelNavigatorTests {
 
         let workspace = TestPaths.workspace("ws")
         try? fileSystem.createDirectory(at: workspace, withIntermediates: true)
-        try await vm.adoptEmptyWorkspace(workspace)
+        await vm.adoptEmptyWorkspace(workspace)
 
         let ref = try! await store.createProject(name: "api", projectType: .claudeCode, in: workspace)
         let refs = await store.projects(for: workspace)

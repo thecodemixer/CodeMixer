@@ -14,6 +14,7 @@ extension EngineViewModel {
     }
 
     public func openProject(path: String, resumeSessionID: String? = nil) {
+        if rejectIfModelCatalogUnavailable(forProjectPath: path) { return }
         send(.openProject(path: path, resumeSessionID: resumeSessionID))
     }
 

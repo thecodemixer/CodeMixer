@@ -15,7 +15,7 @@ struct WorkspaceLifecycleTests {
         let folder = TestPaths.workspace("ws-empty")
         try fileSystem.createDirectory(at: folder, withIntermediates: true)
 
-        try await WorkspaceLifecycle(model: vm).openEmptyWorkspace(folder)
+        await WorkspaceLifecycle(model: vm).openEmptyWorkspace(folder)
 
         #expect(vm.workspaceRoot?.path == folder.path)
         #expect(vm.projects.isEmpty)
@@ -50,7 +50,7 @@ struct WorkspaceLifecycleTests {
             models: [AgentModelOption(id: "sonnet", label: "Sonnet")]
         ))
 
-        try await WorkspaceLifecycle(model: vm).openEmptyWorkspace(folder)
+        await WorkspaceLifecycle(model: vm).openEmptyWorkspace(folder)
 
         #expect(vm.workspaceRoot?.path == folder.path)
         #expect(vm.projects.map(\.path) == [child.path])
@@ -61,6 +61,173 @@ struct WorkspaceLifecycleTests {
         // Shell with a single agent project auto-starts a new chat there.
         #expect(vm.workspace?.path == child.path)
         #expect(vm.sessionActivation == .awaitingAdapter(sessionID: ""))
+
+        await bus.shutdown()
+    }
+
+    @Test("openEmptyWorkspace keeps ready projects when one adapter catalog fails")
+    func openEmptyWorkspaceSoftFailsBrokenAdapter() async throws {
+        let (vm, bus, store, fileSystem, _) = makeHarness()
+        let folder = TestPaths.workspace("ws-partial-catalog")
+        let claude = folder.appendingPathComponent("claude", isDirectory: true)
+        let cursor = folder.appendingPathComponent("cursor", isDirectory: true)
+        try fileSystem.createDirectory(at: folder, withIntermediates: true)
+        try fileSystem.createDirectory(at: claude, withIntermediates: true)
+        try fileSystem.createDirectory(at: cursor, withIntermediates: true)
+
+        let claudeRef = WorkspaceProjectsStore.ProjectRef(
+            path: claude.path,
+            displayName: "claude",
+            projectType: .claudeCode
+        )
+        let cursorRef = WorkspaceProjectsStore.ProjectRef(
+            path: cursor.path,
+            displayName: "cursor",
+            projectType: .cursorCLI
+        )
+        try ProjectLocalStateStore.save(ref: claudeRef, fileSystem: fileSystem)
+        try ProjectLocalStateStore.save(ref: cursorRef, fileSystem: fileSystem)
+        try WorkspaceLocalStateStore.save(
+            projects: [claudeRef, cursorRef],
+            to: folder,
+            fileSystem: fileSystem
+        )
+
+        await AdapterRegistry.shared.register(MockAdapter(
+            id: .claudeCode,
+            displayName: "Claude Code",
+            models: [AgentModelOption(id: "sonnet", label: "Sonnet")]
+        ))
+        await AdapterRegistry.shared.register(MockAdapter(
+            id: .cursorCLI,
+            displayName: "Cursor",
+            models: [],
+            refreshKind: .automatic,
+            refreshResult: []
+        ))
+
+        await WorkspaceLifecycle(model: vm).openEmptyWorkspace(folder)
+
+        #expect(vm.workspaceRoot?.path == folder.path)
+        #expect(vm.loadedProjects.map(\.path) == [claude.path])
+        #expect(vm.unloadedProjects.map(\.path) == [cursor.path])
+        #expect(vm.modelCatalogLoadFailures[.cursorCLI] != nil)
+        #expect(vm.modelCatalogFailureMessage(for: cursorRef)?.contains("Cursor") == true)
+        // Ready sibling activates; broken Cursor stays Not loaded.
+        #expect(vm.workspace?.path == claude.path)
+        #expect(await store.activeWorkspaceURL()?.path == folder.path)
+
+        await bus.shutdown()
+    }
+
+    @Test("loadModelCatalogs records failure without throwing when catalog is empty")
+    func loadModelCatalogsSoftFailsEmptyCatalog() async throws {
+        let (vm, bus, store, fileSystem, _) = makeHarness()
+        let folder = TestPaths.workspace("ws-cursor-empty")
+        try fileSystem.createDirectory(at: folder, withIntermediates: true)
+        _ = try await store.createProject(name: "cur", projectType: .cursorCLI, in: folder)
+
+        await AdapterRegistry.shared.register(MockAdapter(
+            id: .cursorCLI,
+            displayName: "Cursor",
+            models: [],
+            refreshKind: .automatic,
+            refreshResult: []
+        ))
+
+        await WorkspaceLifecycle(model: vm).loadModelCatalogs(
+            at: folder,
+            rootProjectType: .cursorCLI
+        )
+
+        #expect(vm.workspaceRoot?.path == folder.path)
+        #expect(vm.modelCatalogLoadFailures[.cursorCLI] != nil)
+        #expect(vm.unloadedProjects.count == 1)
+        #expect(vm.loadedProjects.isEmpty)
+        #expect(vm.workspaceModelCatalogRows.first?.loadError != nil)
+
+        await bus.shutdown()
+    }
+
+    @Test("mixed project stays loaded when only a non-default shipping adapter fails")
+    func mixedStaysLoadedWhenNonDefaultAdapterFails() async throws {
+        let (vm, bus, store, fileSystem, _) = makeHarness()
+        let folder = TestPaths.workspace("ws-mixed-partial")
+        try fileSystem.createDirectory(at: folder, withIntermediates: true)
+        _ = try await store.createProject(
+            name: "mix",
+            projectType: .mixed(defaultAgent: .claudeCode),
+            in: folder
+        )
+
+        await AdapterRegistry.shared.register(MockAdapter(
+            id: .claudeCode,
+            displayName: "Claude Code",
+            models: [AgentModelOption(id: "sonnet", label: "Sonnet")]
+        ))
+        await AdapterRegistry.shared.register(MockAdapter(
+            id: .codex,
+            displayName: "Codex",
+            models: [AgentModelOption(id: "gpt", label: "GPT")]
+        ))
+        await AdapterRegistry.shared.register(MockAdapter(
+            id: .cursorCLI,
+            displayName: "Cursor",
+            models: [],
+            refreshKind: .automatic,
+            refreshResult: []
+        ))
+
+        await WorkspaceLifecycle(model: vm).loadModelCatalogs(
+            at: folder,
+            rootProjectType: .mixed(defaultAgent: .claudeCode)
+        )
+
+        #expect(vm.modelCatalogLoadFailures[.cursorCLI] != nil)
+        #expect(vm.modelCatalogLoadFailures[.claudeCode] == nil)
+        #expect(vm.loadedProjects.count == 1)
+        #expect(vm.unloadedProjects.isEmpty)
+
+        await bus.shutdown()
+    }
+
+    @Test("mixed project is Not loaded when its default agent catalog fails")
+    func mixedUnloadedWhenDefaultAdapterFails() async throws {
+        let (vm, bus, store, fileSystem, _) = makeHarness()
+        let folder = TestPaths.workspace("ws-mixed-default-fail")
+        try fileSystem.createDirectory(at: folder, withIntermediates: true)
+        _ = try await store.createProject(
+            name: "mix",
+            projectType: .mixed(defaultAgent: .cursorCLI),
+            in: folder
+        )
+
+        await AdapterRegistry.shared.register(MockAdapter(
+            id: .claudeCode,
+            displayName: "Claude Code",
+            models: [AgentModelOption(id: "sonnet", label: "Sonnet")]
+        ))
+        await AdapterRegistry.shared.register(MockAdapter(
+            id: .codex,
+            displayName: "Codex",
+            models: [AgentModelOption(id: "gpt", label: "GPT")]
+        ))
+        await AdapterRegistry.shared.register(MockAdapter(
+            id: .cursorCLI,
+            displayName: "Cursor",
+            models: [],
+            refreshKind: .automatic,
+            refreshResult: []
+        ))
+
+        await WorkspaceLifecycle(model: vm).loadModelCatalogs(
+            at: folder,
+            rootProjectType: .mixed(defaultAgent: .cursorCLI)
+        )
+
+        #expect(vm.modelCatalogLoadFailures[.cursorCLI] != nil)
+        #expect(vm.unloadedProjects.count == 1)
+        #expect(vm.loadedProjects.isEmpty)
 
         await bus.shutdown()
     }
@@ -83,11 +250,12 @@ struct WorkspaceLifecycleTests {
             models: [AgentModelOption(id: "auto", label: "Auto")]
         ))
 
-        try await WorkspaceLifecycle(model: vm).loadModelCatalogs(at: folder, rootProjectType: .claudeCode)
+        await WorkspaceLifecycle(model: vm).loadModelCatalogs(at: folder, rootProjectType: .claudeCode)
 
         #expect(vm.workspaceRoot?.path == folder.path)
         #expect(vm.workspaceModelCatalogRows.map(\.agentID) == [.claudeCode])
         #expect(vm.workspaceModelCatalogRows.first?.modelCount == 1)
+        #expect(vm.modelCatalogLoadFailures.isEmpty)
 
         await bus.shutdown()
     }
@@ -97,7 +265,7 @@ struct WorkspaceLifecycleTests {
         let (vm, bus, store, fileSystem, _) = makeHarness()
         let folder = TestPaths.workspace("ws-add")
         try fileSystem.createDirectory(at: folder, withIntermediates: true)
-        try await WorkspaceLifecycle(model: vm).openEmptyWorkspace(folder)
+        await WorkspaceLifecycle(model: vm).openEmptyWorkspace(folder)
 
         await AdapterRegistry.shared.register(MockAdapter(
             id: .cursorCLI,
@@ -180,7 +348,7 @@ struct WorkspaceLifecycleTests {
         )
         await AdapterRegistry.shared.register(adapter)
 
-        try await WorkspaceLifecycle(model: vm).loadModelCatalogs(at: folder, rootProjectType: .claudeCode)
+        await WorkspaceLifecycle(model: vm).loadModelCatalogs(at: folder, rootProjectType: .claudeCode)
 
         #expect(adapter.refreshCallCount == 0)
         #expect(adapter.availableModels().map(\.id) == ["sonnet"])
@@ -212,7 +380,7 @@ struct WorkspaceLifecycleTests {
         )
         await AdapterRegistry.shared.register(adapter)
 
-        try await WorkspaceLifecycle(model: vm).loadModelCatalogs(at: folder, rootProjectType: .cursorCLI)
+        await WorkspaceLifecycle(model: vm).loadModelCatalogs(at: folder, rootProjectType: .cursorCLI)
 
         #expect(adapter.refreshCallCount == 0)
         #expect(adapter.availableModels().map(\.id) == ["cached"])
@@ -243,7 +411,7 @@ struct WorkspaceLifecycleTests {
         )
         await AdapterRegistry.shared.register(adapter)
 
-        try await WorkspaceLifecycle(model: vm).loadModelCatalogs(at: folder, rootProjectType: .cursorCLI)
+        await WorkspaceLifecycle(model: vm).loadModelCatalogs(at: folder, rootProjectType: .cursorCLI)
 
         #expect(adapter.refreshCallCount == 1)
         #expect(adapter.availableModels().map(\.id) == ["probed"])
@@ -278,7 +446,7 @@ struct WorkspaceLifecycleTests {
         )
         await AdapterRegistry.shared.register(adapter)
 
-        try await WorkspaceLifecycle(model: vm).loadModelCatalogs(at: folder, rootProjectType: .codex)
+        await WorkspaceLifecycle(model: vm).loadModelCatalogs(at: folder, rootProjectType: .codex)
 
         #expect(adapter.refreshCallCount == 1)
         #expect(adapter.availableModels().map(\.id) == ["new"])
@@ -309,7 +477,7 @@ struct WorkspaceLifecycleTests {
         )
         await AdapterRegistry.shared.register(adapter)
 
-        try await WorkspaceLifecycle(model: vm).loadModelCatalogs(at: folder, rootProjectType: .cursorCLI)
+        await WorkspaceLifecycle(model: vm).loadModelCatalogs(at: folder, rootProjectType: .cursorCLI)
 
         #expect(adapter.refreshCallCount == 1)
         #expect(adapter.availableModels().map(\.id) == ["cached"])
@@ -350,7 +518,7 @@ struct WorkspaceLifecycleTests {
         )
         await AdapterRegistry.shared.register(adapter)
 
-        try await WorkspaceLifecycle(model: vm).loadModelCatalogs(at: folder, rootProjectType: .cursorCLI)
+        await WorkspaceLifecycle(model: vm).loadModelCatalogs(at: folder, rootProjectType: .cursorCLI)
 
         #expect(adapter.refreshCallCount == 1)
         #expect(adapter.availableModels().map(\.id) == ["cached"])
@@ -369,7 +537,7 @@ struct WorkspaceLifecycleTests {
         let (vm, bus, store, fileSystem, _) = makeHarness()
         let folder = TestPaths.workspace("ws-folder-models")
         try fileSystem.createDirectory(at: folder, withIntermediates: true)
-        try await WorkspaceLifecycle(model: vm).openEmptyWorkspace(folder)
+        await WorkspaceLifecycle(model: vm).openEmptyWorkspace(folder)
         _ = try await store.createProject(name: "docs", projectType: .folder(.docs), in: folder)
         await vm.reloadProjects()
         try await WorkspaceLifecycle(model: vm).ensureModels(for: .folder(.docs))
