@@ -1,4 +1,5 @@
 import SwiftUI
+import AgentCore
 
 /// A single executable entry in the command palette.
 public struct PaletteCommand: Identifiable {
@@ -167,7 +168,7 @@ public struct CommandPaletteView: View {
         }
         for project in model.unloadedProjects {
             let message = model.modelCatalogFailureMessage(for: project)
-                ?? "Model catalog unavailable."
+                ?? ModelCatalogTiming.unavailableProjectMessage
             items.append(PaletteCommand(id: "project-unloaded-\(project.path)",
                                         title: "\(project.displayName) (not loaded)",
                                         subtitle: message,

@@ -107,24 +107,33 @@ extension EngineViewModel {
     }
 
     /// Whether this project can be opened given current catalog failures.
-    ///
-    /// Pinned single-agent projects require that agent's catalog. Mixed
-    /// projects require the catalog for their *default* agent (the adapter
-    /// `ProjectAgentRouter` would spawn on New Chat) — sibling shipping
-    /// adapters that failed stay unavailable until refreshed but do not park
-    /// the whole mixed project under Not loaded. Custom / folder projects
-    /// never require a shipping catalog.
     public func isProjectModelCatalogReady(_ project: WorkspaceProjectsStore.ProjectRef) -> Bool {
-        modelCatalogFailureMessage(for: project) == nil
+        isProjectTypeModelCatalogReady(project.projectType)
+    }
+
+    /// Same readiness rule as `isProjectModelCatalogReady`, keyed by type only
+    /// (used before a `ProjectRef` exists, e.g. create/add warm).
+    public func isProjectTypeModelCatalogReady(_ projectType: ProjectType) -> Bool {
+        modelCatalogFailureMessage(for: projectType) == nil
     }
 
     /// User-facing reason a project is under Not loaded, or `nil` when ready.
     public func modelCatalogFailureMessage(
         for project: WorkspaceProjectsStore.ProjectRef
     ) -> String? {
-        let ids = Self.modelCatalogAgentIDs(for: project.projectType)
+        modelCatalogFailureMessage(for: project.projectType)
+    }
+
+    /// Catalog failure message for a project type (pinned / mixed default rules).
+    ///
+    /// Pinned single-agent types require that agent's catalog. Mixed types
+    /// require the catalog for their *default* agent (what `ProjectAgentRouter`
+    /// would spawn on New Chat). Custom / folder types never require a shipping
+    /// catalog.
+    public func modelCatalogFailureMessage(for projectType: ProjectType) -> String? {
+        let ids = Self.modelCatalogAgentIDs(for: projectType)
         guard !ids.isEmpty else { return nil }
-        switch project.projectType {
+        switch projectType {
         case .mixed(let defaultAgent):
             if let openID = defaultAgent {
                 return modelCatalogLoadFailures[openID]
@@ -173,13 +182,7 @@ extension EngineViewModel {
             }
         }
         await reloadWorkspaceModelCatalogStatus()
-        // Synthetic ref — only projectType matters for readiness.
-        let probe = WorkspaceProjectsStore.ProjectRef(
-            path: "/__catalog-probe__",
-            displayName: "probe",
-            projectType: projectType
-        )
-        return isProjectModelCatalogReady(probe)
+        return isProjectTypeModelCatalogReady(projectType)
     }
 
     static func modelCatalogFailureMessage(for error: any Error) -> String {
@@ -237,7 +240,7 @@ extension EngineViewModel {
                     adapter.seedModelCatalog(cached.models)
                     noteRetainedModelCatalog(
                         for: adapter,
-                        reason: "empty catalog"
+                        reason: ModelCatalogTiming.retainedEmptyCatalogReason
                     )
                     return cached.models
                 }

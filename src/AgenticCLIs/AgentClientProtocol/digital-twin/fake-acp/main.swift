@@ -132,7 +132,7 @@ private struct FakeACPServer: ACPTwinServer {
             case .permission:
                 return [permissionRequest(id: .number(9001))]
             case .fsRead:
-                let path = (workspacePath ?? "/tmp").appending("/probe.txt")
+                let path = ACPTwinFixtures.fsReadProbePath(workspacePath: workspacePath)
                 return [ACPRPCCodec.request(
                     id: .number(9002),
                     method: "fs/read_text_file",

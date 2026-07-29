@@ -19,12 +19,8 @@ public extension EngineViewModel {
         model.applyPreviewState(
             workspace: PreviewFixtures.workspace,
             projects: [
-                .init(path: PreviewFixtures.workspace.path,
-                      displayName: "Sample",
-                      projectType: .claudeCode),
-                .init(path: PreviewFixtures.workspace.appendingPathComponent("api").path,
-                      displayName: "api",
-                      projectType: .codex),
+                PreviewFixtures.sampleProjectRef,
+                PreviewFixtures.apiProjectRef,
             ],
             sessions: [
                 PreviewFixtures.workspace.path: [

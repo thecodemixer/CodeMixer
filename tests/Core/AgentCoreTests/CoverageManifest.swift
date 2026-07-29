@@ -258,6 +258,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // ACPTerminalSession
 // ACPTurnRole
 // ACPTwin
+// ACPTwinFixtures
 // ACPTwinScenario
 // ACPTwinServer
 // ActivitySubstate
@@ -891,6 +892,8 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // fontSizeScale
 // frame
 // from
+// fsReadProbeFileName
+// fsReadProbePath
 // gentle
 // git
 // gitBranch
@@ -968,6 +971,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // isPreAuthenticated
 // isProjectDefined
 // isProjectModelCatalogReady
+// isProjectTypeModelCatalogReady
 // isRestartingCustomACPCLI
 // isSpeaking
 // isSwitchingSession
@@ -1278,6 +1282,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // resumeSessionID
 // resumeThread
 // resumeUnsupportedAfterInitialize
+// retainedEmptyCatalogReason
 // revealInFinder
 // review
 // reviewOff
@@ -1509,6 +1514,7 @@ private func _truncateTranscript(adapter: any AgentAdapter) async {
 // txt
 // type
 // typography
+// unavailableProjectMessage
 // undoRemoveProject
 // undoToastWindow
 // uninstall

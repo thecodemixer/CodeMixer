@@ -53,7 +53,7 @@ struct FakeACPIntegrationTests {
     @Test("spawned fake-acp fs-read reverse RPC returns workspace file content in reply")
     func spawnedFSReadTurn() async throws {
         let workspace = try makeWorkspace()
-        let probe = workspace.appendingPathComponent("probe.txt")
+        let probe = workspace.appendingPathComponent(ACPTwinFixtures.fsReadProbeFileName)
         try Data("acp-probe".utf8).write(to: probe)
 
         try await runScenario(

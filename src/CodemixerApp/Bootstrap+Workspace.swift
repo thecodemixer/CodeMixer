@@ -325,9 +325,7 @@ extension Bootstrap {
             return viewModel?.isProjectModelCatalogReady(ref) ?? false
         }
         // Root not yet listed as a ProjectRef — gate on the type's adapters.
-        let ids = EngineViewModel.modelCatalogAgentIDs(for: projectType)
-        guard !ids.isEmpty else { return true }
-        return ids.allSatisfy { viewModel?.modelCatalogLoadFailures[$0] == nil }
+        return viewModel?.isProjectTypeModelCatalogReady(projectType) ?? false
     }
 
     func configureSlashCommands(for url: URL, mode: ProjectType) async {
