@@ -45,7 +45,7 @@ When documents disagree: plan > `architecture.md` (on structure) > `code-style.m
 ```
 Codemixer/
 ├── README.md, AGENTS.md
-├── scripts/                                 local automation + validation helpers
+├── scripts/                                 local automation + validation helpers — [`scripts/README.md`](scripts/README.md)
 ├── docs/                                    architecture + style + reference patterns
 ├── Package.swift, src/, tests/               the SPM package (repo root)
 ├── migration-tool/                          Bun/TS Custom ACP migrator (API+DB → MongoDB); not SPM
@@ -168,6 +168,7 @@ Codemixer/
 | Command/event interaction coverage map | `AgentUI/Interaction/InteractionCoverage.swift` |
 | Root scene (split view) | `AgentUI/Workspace/WorkspaceScene.swift` |
 | Shared create/open workspace paths (catalog warm) | `AgentUI/Workspace/WorkspaceLifecycle.swift` |
+| Per-adapter catalog failures / Not loaded projects | `EngineViewModel.modelCatalogLoadFailures`, `loadedProjects` / `unloadedProjects` (`EngineViewModel+NavigatorModels.swift`); sidebar in `SessionSidebarView` |
 | GUI app entry point | `CodemixerApp/CodemixerApp.swift`, `RootView.swift` |
 | LaunchAgent installer | `CodemixerApp/External/LaunchAgentInstaller.swift` |
 | Daemon entry point | `Remote/CodemixerDaemon/main.swift` |
@@ -343,7 +344,7 @@ Full recipe in `docs/reference/patterns/plugin-adapter-protocol.md`. Canonical m
 
 - Scripts in this repo are Swift (`.swift`) only.
 - Do not add new shell scripts (`.sh`); migrate touched shell automation to Swift.
-- Read [`scripts/README.md`](scripts/README.md) before changing script behavior.
+- Read [`scripts/README.md`](scripts/README.md) before creating or changing anything in `scripts/` — the catalog there documents every script (build gates, policy checks, live spikes, local developer setup).
 
 ---
 

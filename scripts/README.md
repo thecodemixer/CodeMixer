@@ -65,6 +65,31 @@ This directory contains local automation and validation helpers for Codemixer.
   - Usage:
     - `scripts/check-no-personal-paths.swift`
 
+### Local developer setup
+
+- `configure-cursor-cli-file-credentials.swift`
+  - Adds `export AGENT_CLI_CREDENTIAL_STORE=file` to `~/.zprofile` so `cursor-agent`
+    stores CLI auth in a file instead of macOS Keychain.
+  - **When you need this:** Cursor CLI on macOS can fail to read Keychain-backed
+    tokens after auto-updates or `cursor-agent login` — symptoms include
+    `Keychain operation timed out after 30000ms`, `Authentication required` on
+    `cursor-agent models`, or an empty model list in Codemixer even though the IDE
+    is signed in. Codemixer discovers Cursor models by shelling out to
+    `cursor-agent models` with the resolved interactive-shell environment; if
+    that probe cannot read credentials, the composer model menu stays empty.
+  - **What it does:** Idempotent append to `~/.zprofile`. Skips when the export
+    is already present. Does not run `cursor-agent login` — authenticate
+    separately after enabling file storage.
+  - **Alternatives:** `CURSOR_API_KEY` (dashboard User API key) also bypasses
+    Keychain; see [Cursor CLI authentication](https://cursor.com/docs/cli/reference/authentication).
+  - Usage:
+    - `scripts/configure-cursor-cli-file-credentials.swift`
+  - After running:
+    - `source ~/.zprofile` or open a new terminal
+    - `cursor-agent login` (if not already authenticated with file storage)
+    - `cursor-agent models` (should list models)
+    - Restart Codemixer or refresh models from Workspace settings
+
 ### Live Spikes (Manual Validation)
 
 Prefer the **SPM live harness** for automated opt-in checks when a logged-in
@@ -135,4 +160,11 @@ scripts/spike-events.swift --self-test
 ```bash
 # Live hook capture for 2 minutes
 scripts/spike-events.swift . --duration-secs 120
+```
+
+```bash
+# Cursor CLI Keychain auth failures → file-based credential store in ~/.zprofile
+scripts/configure-cursor-cli-file-credentials.swift
+source ~/.zprofile
+cursor-agent models
 ```
