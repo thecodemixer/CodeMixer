@@ -199,6 +199,10 @@ public final class ClaudeAdapter: AgentAdapter, @unchecked Sendable {
                     if case .sessionStarted(let id, _, _) = event {
                         await tailer.bind(sessionID: id)
                     }
+                    if case .assistantText(_, _, let text, _) = event {
+                        // If the hook fallback wins the transcript race, suppress the late duplicate.
+                        await tailer.noteHookFallbackAssistantText(text)
+                    }
                     continuation.yield(event)
                     // Hook protocol requires a JSON acknowledgement; an
                     // empty object is always valid for non-permission events.

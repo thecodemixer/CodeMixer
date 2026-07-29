@@ -34,6 +34,10 @@ public actor ClaudeTranscriptTailer {
     private var watchTask: Task<Void, Never>?
     private var continuation: AsyncStream<AgentEvent>.Continuation?
     private var assistantTextEmitted = false
+    /// Normalized text of a Stop-hook `last_assistant_message` that was emitted
+    /// as fallback because the JSONL reply was not yet visible. A later matching
+    /// transcript record is consumed without emitting a second bubble.
+    private var hookFallbackAssistantText: String?
 
     public init(claudeDirectory: URL,
                 workspace: URL,
@@ -55,7 +59,7 @@ public actor ClaudeTranscriptTailer {
 
     public func bind(sessionID: String) {
         if self.sessionID != sessionID {
-            assistantTextEmitted = false
+            resetAssistantTextFusionState()
         }
         self.sessionID = sessionID
         log.debug("bound transcript session=\(sessionID, privacy: .public)")
@@ -67,7 +71,7 @@ public actor ClaudeTranscriptTailer {
         let sid = transcriptURL.deletingPathExtension().lastPathComponent
         if !sid.isEmpty {
             if sessionID != sid {
-                assistantTextEmitted = false
+                resetAssistantTextFusionState()
             }
             sessionID = sid
         }
@@ -80,6 +84,16 @@ public actor ClaudeTranscriptTailer {
     /// on Stop hooks when the JSONL transcript already surfaced the reply.
     public func hasEmittedAssistantText() -> Bool {
         assistantTextEmitted
+    }
+
+    /// Records that Stop/SubagentStop already painted `last_assistant_message`
+    /// because `drain()` saw no JSONL reply yet (common on the first turn of a
+    /// fresh session). A later matching transcript `assistantText` is suppressed.
+    public func noteHookFallbackAssistantText(_ text: String) {
+        let normalized = Self.normalizeAssistantText(text)
+        guard !normalized.isEmpty else { return }
+        hookFallbackAssistantText = normalized
+        log.debug("noted hook fallback assistantText (\(normalized.count) chars)")
     }
 
     /// Decodes one complete vendor transcript for the add-existing-project
@@ -247,14 +261,38 @@ public actor ClaudeTranscriptTailer {
 
         var emitted = false
         for event in events(from: record, recordID: id) {
+            if case .assistantText(_, _, let text, _) = event,
+               shouldSuppressTranscriptAssistantText(text) {
+                log.debug("suppressing late transcript duplicate record=\(id, privacy: .public)")
+                continue
+            }
             if case .assistantText = event {
                 assistantTextEmitted = true
+                hookFallbackAssistantText = nil
                 log.debug("emitting assistantText record=\(id, privacy: .public)")
             }
             continuation?.yield(event)
             emitted = true
         }
         return (parsed: true, emitted: emitted)
+    }
+
+    private func resetAssistantTextFusionState() {
+        assistantTextEmitted = false
+        hookFallbackAssistantText = nil
+    }
+
+    private func shouldSuppressTranscriptAssistantText(_ text: String) -> Bool {
+        guard let fallback = hookFallbackAssistantText else { return false }
+        let normalized = Self.normalizeAssistantText(text)
+        guard normalized == fallback else { return false }
+        hookFallbackAssistantText = nil
+        assistantTextEmitted = true
+        return true
+    }
+
+    private static func normalizeAssistantText(_ text: String) -> String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func events(from record: Record, recordID: String) -> [AgentEvent] {
