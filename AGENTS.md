@@ -409,7 +409,7 @@ When extending the codebase after the 2026 maintainability pass:
 | `DaemonDefaults` | Headless idle-check interval and exit threshold |
 | `AppIdentity` | Bundle id, log subsystem, LaunchAgent label/plist/log paths/throttle, Keychain service names, queue labels, app-support/caches relative paths |
 | `ActivityTiming` | Activity escalation thresholds, status phrases (`idle`/`thinking`/optimistic send), TUI poll interval |
-| `ModelCatalogTiming` | Automatic model-catalog max age (24h) before re-probe |
+| `ModelCatalogTiming` | Automatic model-catalog max age (24h) before re-probe; probe timeout; retained-empty-catalog and unavailable-project messages |
 | `StreamBufferDefaults` | Named `AsyncStream` buffer sizes per layer (event history 500, etc.) |
 | `SystemPaths` | `/usr/bin/env`, `/usr/bin/git`, `/usr/bin/openssl`, Terminal.app |
 | `AppSupportPaths` | `prefs.json`, `sessions.json`, `workspaces.json`, attachments dir, `remote-server.p12` |

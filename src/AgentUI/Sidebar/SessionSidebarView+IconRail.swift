@@ -1,4 +1,5 @@
 import SwiftUI
+import AgentCore
 
 /// The collapsed "focus mode" rail: New Chat, one icon button per project
 /// (with an attention dot), and the expand toggle. Self-contained — it reads
@@ -81,7 +82,7 @@ extension SessionSidebarView {
 
     private func railUnloadedProjectButton(_ project: WorkspaceProjectsStore.ProjectRef) -> some View {
         let message = model.modelCatalogFailureMessage(for: project)
-            ?? "Model catalog unavailable."
+            ?? ModelCatalogTiming.unavailableProjectMessage
         return Button { } label: {
             Image(systemName: "folder.badge.questionmark")
                 .accessibilityHidden(true)

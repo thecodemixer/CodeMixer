@@ -6,16 +6,45 @@ import AgentProtocol
 /// Shared sample data for SwiftUI `#Preview` blocks.
 enum PreviewFixtures {
 
+    enum ProjectNames {
+        static let sample = "Sample"
+        static let api = "api"
+    }
+
+    enum ProjectPaths {
+        static let apiSubpath = ProjectNames.api
+    }
+
     static let workspace = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-        .appendingPathComponent("CodemixerPreview/Sample", isDirectory: true)
+        .appendingPathComponent("CodemixerPreview/\(ProjectNames.sample)", isDirectory: true)
+
+    static var apiProjectURL: URL {
+        workspace.appendingPathComponent(ProjectPaths.apiSubpath, isDirectory: true)
+    }
+
+    static var sampleProjectRef: WorkspaceProjectsStore.ProjectRef {
+        WorkspaceProjectsStore.ProjectRef(
+            path: workspace.path,
+            displayName: ProjectNames.sample,
+            projectType: .claudeCode
+        )
+    }
+
+    static var apiProjectRef: WorkspaceProjectsStore.ProjectRef {
+        WorkspaceProjectsStore.ProjectRef(
+            path: apiProjectURL.path,
+            displayName: ProjectNames.api,
+            projectType: .codex
+        )
+    }
 
     static let recentProjects: [SessionStore.ProjectRecord] = [
         .init(path: workspace.path,
-              displayName: "Sample",
+              displayName: ProjectNames.sample,
               lastOpened: Date(),
               lastSessionID: "s1"),
-        .init(path: workspace.appendingPathComponent("api").path,
-              displayName: "api",
+        .init(path: apiProjectURL.path,
+              displayName: ProjectNames.api,
               lastOpened: Date().addingTimeInterval(-86_400),
               lastSessionID: nil),
     ]

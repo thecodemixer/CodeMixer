@@ -132,7 +132,7 @@ public struct SessionSidebarView: View {
 
     private func unloadedProjectRow(_ project: WorkspaceProjectsStore.ProjectRef) -> some View {
         let message = model.modelCatalogFailureMessage(for: project)
-            ?? "Model catalog unavailable."
+            ?? ModelCatalogTiming.unavailableProjectMessage
         return VStack(alignment: .leading, spacing: Theme.spacing.s4) {
             HStack(spacing: Theme.spacing.s8) {
                 Text(project.displayName)
