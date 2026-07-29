@@ -1,10 +1,14 @@
 --swiftversion 6.0
 --indent 4
 --maxwidth 120
---wraparguments before-first
---wrapparameters before-first
---wrapcollections before-first
---closingparen balanced
+# Wrapped arguments align under the first one (paren-aligned). This must stay
+# `after-first`: SwiftLint enforces the same shape via
+# `vertical_parameter_alignment_on_call` + `collection_alignment`, and
+# `before-first` would make the two tools demand opposite layouts.
+--wraparguments after-first
+--wrapparameters after-first
+--wrapcollections after-first
+--closingparen same-line
 
 # Spacing
 --commas always
@@ -26,7 +30,7 @@
 --stripunusedargs closure-only
 
 # Rules — keep the project's characteristic style
---rules trailingCommas,redundantSelf,unusedArguments,blankLinesBetweenScopes,spaceAroundBraces,spaceAroundBrackets,spaceAroundComments,sortImports
+--rules trailingCommas,redundantSelf,unusedArguments,blankLinesBetweenScopes,spaceAroundBraces,spaceAroundBrackets,spaceAroundComments,sortImports,wrapArguments
 
 # Do not add //swiftformat:... comments automatically.
 --disable fileHeader

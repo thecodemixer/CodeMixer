@@ -36,6 +36,8 @@ disabled_rules:
   - line_length        # handled by SwiftFormat --maxwidth 120
   - todo               # we allow TODO comments in source
   - nesting            # deeply-nested closures are fine for actors
+  - trailing_comma     # handled by SwiftFormat --commas always (which requires the
+                       # opposite of this rule; the formatter owns comma policy)
 
 line_length:
   warning: 130
