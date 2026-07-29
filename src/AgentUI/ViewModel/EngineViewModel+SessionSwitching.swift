@@ -13,6 +13,7 @@ extension EngineViewModel {
     }
 
     public func beginSessionSwitch(projectPath: String, sessionID id: String) {
+        rememberSupersededSessionSwitch(replacingWith: id)
         workspace = URL(fileURLWithPath: projectPath).standardizedFileURL
         sessionID = id
         clearConversationState()
@@ -42,12 +43,18 @@ extension EngineViewModel {
     }
 
     func notePromptReady(sessionID id: String) {
-        // Engine `sessionPromptReady` is authoritative for the in-flight
-        // handshake. Do not require the navigator's resume id to match — ACP
-        // session/load can return the same chat under a normalized id, and a
-        // mismatched guard left the composer locked forever after a successful
-        // adapter ready signal.
+        // Drop ready signals for sessions the user already navigated away from.
+        if !id.isEmpty, supersededSessionSwitchIDs.contains(id) {
+            return
+        }
+        // Before history lands, require an exact match — remapping is only
+        // allowed after `sessionHistoryRestored` confirmed the requested id
+        // (ACP session/load may then report a normalized ready id).
+        if case .restoringHistory(let expected) = sessionActivation {
+            guard id.isEmpty || expected.isEmpty || id == expected else { return }
+        }
         cancelSessionHandshakeTimeout()
+        supersededSessionSwitchIDs.removeAll(keepingCapacity: true)
         if !id.isEmpty {
             sessionID = id
         }
@@ -62,7 +69,30 @@ extension EngineViewModel {
 
     func clearSessionActivation() {
         cancelSessionHandshakeTimeout()
+        supersededSessionSwitchIDs.removeAll(keepingCapacity: true)
         sessionActivation = .idle
+    }
+
+    /// Marks the previous in-flight / ready resume id as stale so late bus
+    /// events from that switch cannot complete a newer handshake.
+    private func rememberSupersededSessionSwitch(replacingWith id: String) {
+        func consider(_ previous: String) {
+            guard !previous.isEmpty, previous != id else { return }
+            supersededSessionSwitchIDs.insert(previous)
+        }
+        switch sessionActivation {
+        case .restoringHistory(let previous),
+             .awaitingAdapter(let previous),
+             .ready(let previous),
+             .failed(let previous, _):
+            consider(previous)
+        case .idle:
+            break
+        }
+        if let sessionID {
+            consider(sessionID)
+        }
+        supersededSessionSwitchIDs.remove(id)
     }
 
     /// Fail the composer gate if `sessionPromptReady` never arrives.

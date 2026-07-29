@@ -324,6 +324,10 @@ public final class EngineViewModel {
     var sessionHandshakeTimeoutTask: Task<Void, Never>?
     /// Bumped whenever a handshake wait starts; timeouts ignore stale generations.
     var sessionHandshakeGeneration = 0
+    /// Resume ids abandoned by a newer `beginSessionSwitch`. Stale
+    /// `sessionPromptReady` / history events for these ids must not unlock the
+    /// composer while a later switch is still in flight (rapid sidebar clicks).
+    var supersededSessionSwitchIDs: Set<String> = []
     var removedProjectUndoTask: Task<Void, Never>?
     var adapterCapabilitiesGeneration = 0
     var stalledToastFiredThisTurn = false

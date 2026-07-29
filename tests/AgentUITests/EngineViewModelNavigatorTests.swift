@@ -618,6 +618,48 @@ struct EngineViewModelNavigatorTests {
         await bus.shutdown()
     }
 
+    @Test("stale sessionPromptReady from a superseded switch does not unlock the composer")
+    func stalePromptReadyFromSupersededSwitchIsIgnored() async {
+        let port = RecordingPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port,
+                                 bus: bus,
+                                 clock: FakeClock(),
+                                 random: FakeRandomSource())
+        let projectPath = TestPaths.workspacePath("ws/stale-ready")
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        vm.openSession(projectPath: projectPath, id: "session-a")
+        vm.openSession(projectPath: projectPath, id: "session-b")
+        await drain()
+
+        #expect(vm.sessionActivation == .restoringHistory(sessionID: "session-b"))
+
+        await bus.publish(.sessionHistoryRestored(sessionID: "session-a"))
+        await bus.publish(.sessionPromptReady(sessionID: "session-a"))
+        await drain()
+
+        #expect(vm.sessionActivation == .restoringHistory(sessionID: "session-b"))
+        #expect(vm.sessionID == "session-b")
+        #expect(vm.isComposerLockedForSessionResume)
+
+        await bus.publish(.sessionHistoryRestored(sessionID: "session-b"))
+        await drain()
+        #expect(vm.sessionActivation == .awaitingAdapter(sessionID: "session-b"))
+
+        await bus.publish(.sessionPromptReady(sessionID: "session-a"))
+        await drain()
+        #expect(vm.sessionActivation == .awaitingAdapter(sessionID: "session-b"))
+
+        await bus.publish(.sessionPromptReady(sessionID: "session-b"))
+        await drain()
+        #expect(vm.sessionActivation == .ready(sessionID: "session-b"))
+        #expect(!vm.isComposerLockedForSessionResume)
+
+        await bus.shutdown()
+    }
+
     @Test("rapid session selection ignores stale restoration and readiness events")
     func rapidSessionSelectionKeepsNewestActivation() async {
         let port = RecordingPort()
