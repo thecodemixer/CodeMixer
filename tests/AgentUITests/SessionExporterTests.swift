@@ -1,3 +1,4 @@
+import A2UICore
 import Foundation
 import Testing
 @testable import AgentUI
@@ -73,6 +74,47 @@ struct SessionExporterTests {
         #expect(md.contains("**You:** Hello"))
         #expect(md.contains("*Mode: Think*"))
         #expect(md.contains("World"))
+    }
+
+    @Test("A2UI surface rows export the redacted text summary, not raw JSON")
+    func exportsA2UISurfaceSummary() throws {
+        let batch = A2UIServerBatch(
+            agentID: "other",
+            transcriptKey: .init(projectRootPath: "/tmp/p", namespace: "other", sessionID: "s1"),
+            resourceURI: "a2ui://review",
+            items: [
+                .init(index: 0, message: .createSurface(
+                    surfaceID: "review",
+                    catalogID: A2UISchemaProfile.testScopedCatalogID,
+                    theme: nil,
+                    sendDataModel: false
+                )),
+                .init(index: 1, message: .updateComponents(
+                    surfaceID: "review",
+                    components: [
+                        try A2UIComponent.decodeKnown(json: .object([
+                            "id": .string("root"),
+                            "component": .string("Text"),
+                            "text": .string("Human review required"),
+                        ])),
+                    ]
+                )),
+            ],
+            recordedAt: Date(timeIntervalSince1970: 1)
+        )
+        let surface = try #require(A2UISurfaceReducer.apply(batch, to: [:], at: Date()).surfaces["review"])
+
+        let msgs: [EngineViewModel.Message] = [
+            .user(bubbleID: UUID(), text: "migrate"),
+            .a2uiSurface(surfaceID: "review"),
+        ]
+        let md = try #require(String(
+            data: SessionExporter.markdown(msgs, a2uiSurfaces: ["review": surface]),
+            encoding: .utf8
+        ))
+        #expect(md.contains("Human review required"))
+        #expect(!md.contains("createSurface"))
+        #expect(!md.contains("\"component\""))
     }
 
     private func messages() -> [EngineViewModel.Message] {

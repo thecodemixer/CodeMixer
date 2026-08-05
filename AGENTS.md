@@ -2,7 +2,7 @@
 
 Companion file for AI coding agents (and fast-onboarding humans). Read this once, end-to-end, before editing anything. It is intentionally short — links carry the weight.
 
-If you only have time for three sections: **[Read in this order](#read-in-this-order)**, **[Where things live](#where-things-live)**, **[Tripwires](#tripwires)**.
+If you only have time for four sections: **[Read in this order](#read-in-this-order)**, **[Where things live](#where-things-live)**, **[Validate via the API path (not the GUI)](#validate-via-the-api-path-not-the-gui)**, **[Tripwires](#tripwires)**.
 
 ---
 
@@ -108,6 +108,14 @@ Codemixer/
 | ACP dashboard / attention / parked permissions | `ACPEventDecoder` (`agentDashboard`, `sessionAttentionChanged`); background `session/request_permission` parks until `session/load` |
 | ACP reverse-terminal process wrapper | `AgenticCLIs/AgentClientProtocol/External/ACPTerminalProcess.swift` |
 | ACP digital twin | `AgenticCLIs/AgentClientProtocol/digital-twin/Twin/ACPTwin.swift` |
+| A2UI wire DTOs (schema profile, typed component body + per-component props, dynamic/action/resolved value types, opaque unknown replay, function name, theme, server message shapes, batch/interaction/action/client-error envelopes) | `Core/AgentProtocol/A2UI/{A2UISchemaProfile,A2UIComponent,A2UIDynamicValue,A2UIAction,A2UIResolvedValue,A2UIOpaqueJSON,A2UIFunctionName,A2UIServerMessage,A2UIServerBatch}.swift` — the public A2UI boundary is fully typed: `A2UIComponentBody` (associated per-component `*Props`), `A2UIDynamic{Value,String,Number,Boolean,StringList}`, `A2UIAction`, `A2UIResolvedValue` / `A2UIDataDocument` / `A2UILocalOverlay`, `A2UIJSONPointerPath`, `A2UIFunctionName`. **Zero `JSONValue` on the public surface** — no bare `JSONValue`, no `[String: JSONValue]` property bag, and no public wire-JSON accessor. Unknown catalogs/kinds are preserved losslessly via `A2UIOpaqueComponent`/`A2UIOpaqueJSON`; every wire seam (`A2UIComponent.decodeKnown(json:)`, `A2UIActionEnvelope.contextWireJSON`, the opaque raw accessors) is `package`, so public callers only ever see `Codable` plus typed values. See `docs/architecture.md` §36.1a |
+| A2UI core logic (limits, catalog descriptor, JSON Pointer, canonical surface state, validator, reducer, evaluator, text summary, action resolver) | `Core/A2UICore/*.swift` |
+| A2UI engine command handling (`submitA2UIInteraction`/`reportA2UIClientError`, the client→server trust boundary) | `Core/AgentCore/Engine/AgentEngine+A2UI.swift` |
+| A2UI durable transcript entry/mutation | `Core/AgentCore/Conversation/{TranscriptEntry,TranscriptMutation,SessionTranscript,SessionTranscriptRepository}.swift` (`.a2uiSurface` case, `applyA2UIBatch`) |
+| A2UI ACP decode (MIME-typed `EmbeddedResource` → typed batch) | `AgenticCLIs/AgentClientProtocol/Common/ACPEventDecoder+A2UI.swift`, hooked from `ACPEventDecoder+Streaming.swift` |
+| A2UI ACP encode (capability advertisement, action, client-error) | `AgenticCLIs/AgentClientProtocol/Common/ACPInputEncoding.swift` (`bootstrap`, `a2uiAction`, `a2uiClientError`) |
+| A2UI `EngineViewModel` bridge (submits a rendered interaction as a command) | `AgentUI/ViewModel/EngineViewModel+A2UI.swift` |
+| A2UI native SwiftUI Basic Catalog renderer | `AgentUI/Conversation/A2UISurfaceView.swift` |
 | Shipping ACP CLIs (Cursor) | `AgenticCLIs/ACPCLIs/Cursor/` — `CursorACPAdapter`, binary locator, mode commands |
 | Cursor catalog import + SQLite wrapper | `AgenticCLIs/ACPCLIs/Cursor/{Common,External}/` |
 | Custom ACP CLIs | `AgenticCLIs/ACPCLIs/Custom/` — `CustomACPAdapter` + `CustomACPAdapterFactory`; project `.codemixer/acp/<id>/` |
@@ -194,7 +202,7 @@ tests/
 ├── TestSupport/
 │   ├── AgentTestSupport/           # shared fakes (Clock, FS, MockAdapter)
 │   └── AgentTestSupportTests/
-├── Core/                           # AgentProtocolTests, AgentCoreTests
+├── Core/                           # AgentProtocolTests, AgentCoreTests, A2UICoreTests
 ├── Remote/                         # AgentRemoteControlTests, RemoteParityTests
 ├── AgenticCLIs/                    # per-agent adapter + twin suites — see AgenticCLIs/README.md
 │   └── ClaudeCode/
@@ -213,6 +221,7 @@ tests/
 | Suite | Lives in |
 | --- | --- |
 | Wire frame round-trip | `Core/AgentProtocolTests/WireFrameRoundTripTests.swift` |
+| A2UI schema/limits/catalog/pointer/state/validator/reducer/evaluator/text-summary/action-resolver | `Core/A2UICoreTests/*.swift` |
 | Prefs + decisions Codable | `Core/AgentProtocolTests/PrefsAndDecisionsCodableTests.swift` |
 | PTY lifecycle | `Core/AgentCoreTests/PTYHostTests.swift` |
 | Child reaping | `Core/AgentCoreTests/ChildReaperTests.swift` |
@@ -291,7 +300,7 @@ tests/
 5. Update `Remote/RemoteParityTests` if a new wire round-trip needs coverage, and add
    `Remote/AgentRemoteControlTests/RemoteControlE2ETests` coverage when remote clients need a specific result
    or event ordering guarantee.
-6. Confirm `swift test --no-parallel` is green.
+6. Confirm `scripts/swift-test.swift` is green.
 
 ### Add a new `AgentEvent` case
 
@@ -309,6 +318,34 @@ Use `ClientAction` + `AgentCommand.recordClientAction` (see `Core/AgentProtocol/
 **Do not** write markers into Claude/Codex/Cursor session files. Action rows are
 persisted in Codemixer's project-local `SessionTranscript`, so they reappear on
 reopen/resume without mutating vendor history.
+
+### Give a custom ACP tool richer UI than markdown prose
+
+Use A2UI instead of hand-rolled text-sniffing in `AgentUI` — see
+`docs/architecture.md` §36 for the full wire/trust-boundary walkthrough.
+
+1. In the custom ACP server, gate emission on the client having advertised
+   `A2UISchemaProfile.clientCapabilitiesMetaKey` at `initialize` (see
+   `AcpServer.negotiatesA2UI` in `migration-tool/src/acp/server.ts` for the
+   reference check) and keep a plain-text fallback for non-A2UI clients.
+2. Emit `createSurface` + `updateComponents` (+ `updateDataModel` if needed)
+   as one `session/update`/`tool_call` content block: `{ type: "resource",
+   resource: { uri, mimeType: "application/a2ui+json", text } }` — see
+   `migration-tool/src/acp/a2ui.ts` for a from-scratch builder using the
+   Basic Catalog subset (`Card`/`Column`/`Row`/`Text`/`Divider`/`Button`).
+3. For a server-bound decision, give the relevant `Button` component an
+   `action: { event: { name, context } }` and correlate the returned
+   `clientAction` (parsed the same way `parseA2UIClientMessage` does) back
+   to your pending state — add a nonce to `context` if the action must not
+   be replayable.
+4. Delete-then-recreate a surface id when its content structurally changes;
+   CodeMixer bumps the surface's generation on `deleteSurface`, so a stale
+   client-side interaction against the old generation is rejected rather
+   than silently misapplied.
+5. **Do not** add a new heuristic to `AgentUI` for your tool's structured
+   output — `A2UISurfaceView` renders any Basic Catalog surface generically.
+   If it needs a component the Basic Catalog doesn't have, that's a
+   catalog/spec gap, not a reason to special-case text in `AgentUI`.
 
 ### Add a new adapter (e.g. CursorCLI)
 
@@ -338,7 +375,24 @@ Full recipe in `docs/reference/patterns/plugin-adapter-protocol.md`. Canonical m
 - One `@Suite` per behaviour; suite name reads like a sentence.
 - `@Test` names also read like sentences.
 - Inject fakes from `AgentTestSupport` — never read the real clock, random, env, or filesystem.
+- Cover behaviour on the **API path** (`AgentCommand` / `AgentEvent` / adapter encode-decode / engine harness) — see [Validate via the API path (not the GUI)](#validate-via-the-api-path-not-the-gui). Do not treat a SwiftUI click path as sufficient coverage.
 - **Live/opt-in probes** (`Live*Harness`, `LiveGUIPathProbeTests`, `LiveRuntimePoolProbeTests`) must take workspace/project paths from env vars (`CODEMIXER_LIVE_*`) or neutral placeholders (`/path/to/…`, `$HOME/…`, `/workspace/…` fixtures). Never commit a real macOS home-directory path. After adding or editing paths in tests or docs, run `swift scripts/check-no-personal-paths.swift`.
+
+### Validate via the API path (not the GUI)
+
+The product surface is the typed alphabet — `AgentCommand` in, `AgentEvent` out — plus the adapter wire that carries those into CLIs. The GUI is one consumer of that alphabet, not the system under test.
+
+**Rule:** nothing required for correctness may depend on a GUI-only path. Unit, integration, and live validation all drive Codemixer through the API (in-process `AgentEngine.send`, ACP encode/decode, or the remote WebSocket command port). When a human asks an AI agent to “run live and test”, use that API path — not Codemixer.app click-through, screenshots, or computer-use against SwiftUI.
+
+| Do | Don’t |
+| --- | --- |
+| `scripts/swift-test.swift` (and `--filter …`) for unit/integration; `--allow-live` only for intentional live harnesses | Raw `swift test` while leftover `CODEMIXER_LIVE_*=1` / `MIGRATION_LIVE=1` are exported (looks like a hang) |
+| `AgentEngine.send(.submitA2UIInteraction(…))` / `.reportA2UIClientError(…)` / other commands | Click `A2UISurfaceView` buttons in the GUI to prove the trust boundary |
+| Assert adapter encode bytes / bus events / `SilentDiagnostics` / transport writes | Treat a screenshot or manual GUI smoke as the pass criterion |
+| Live harnesses under `tests/AgenticCLIs/**` (`Live*Harness`, Custom/Cursor ACP, migration ACP) | Launch Xcode GUI and drive the workbench by hand (or via computer-use) as the primary test |
+| Cover A2UI decode/encode/resolver/engine in `A2UICoreTests`, `ACP*Tests`, `AgentEngineA2UICommandTests` | Add heuristics or one-off GUI probes that bypass `AgentCommand` |
+
+GUI launch (`Codemixer.xcodeproj`) remains for **visual** checks only — layout, Theme tokens, a11y labels — after the API path already proves behaviour. If a behaviour cannot be exercised via `AgentCommand`/`AgentEvent`, that is a product gap: add the command/event (or adapter encode hook), then test it.
 
 ### Add or edit a script in `scripts/`
 
@@ -358,12 +412,23 @@ swift build --product codemixerd         # daemon only
 swift build --product codemixer          # GUI only
 swift build --target AgentCore           # one module
 
-swift test --no-parallel                 # full suite (~2s, required flag)
-swift test --filter PTYHostTests         # one suite
-swift test --filter "WireCodec"          # any matching suite
+scripts/swift-test.swift                 # preferred full suite (clears live gates + --no-parallel)
+scripts/swift-test.swift --filter PTYHostTests
+scripts/swift-test.swift --filter "WireCodec"
+# Opt-in live harnesses only — keep CODEMIXER_LIVE_* / MIGRATION_LIVE* from the shell:
+scripts/swift-test.swift --allow-live --filter LiveCustomACPIntegrationTests
 
 swift run codemixerd                     # start the daemon (127.0.0.1:8421)
 ```
+
+**Prefer `scripts/swift-test.swift` over raw `swift test`.** It always injects
+`--no-parallel` and, by default, strips leftover `CODEMIXER_LIVE_*` /
+`MIGRATION_LIVE*` environment gates. Those gates are sticky in agent/developer
+shells after a live run; if left set, a plain `swift test --no-parallel` can
+silently arm multi-minute live pipelines (especially
+`CODEMIXER_LIVE_CUSTOM_ACP` + `CODEMIXER_LIVE_MIGRATION_PIPELINE`) and look like
+a hang. Use `--allow-live` only when you intentionally want those harnesses.
+See [`scripts/README.md`](scripts/README.md).
 
 GUI app launch is the exception: **do not use `swift run codemixer` for UI
 validation.** The real macOS app target is defined in
@@ -394,7 +459,14 @@ For manual live-account spike validation prerequisites (`claude`, `socat`, `jq`)
 see the README section
 [`Spike-script prerequisites`](README.md#spike-script-prerequisites).
 
-`swift test --no-parallel` must be green before any commit. The `--no-parallel` flag is mandatory: a handful of tests own kernel-level resources (PTYs, signal sources, `NWListener`s) that race when scheduled across parallel workers. Serial execution finishes the full suite in under two seconds. SwiftFormat (`.swiftformat`) and SwiftLint (`.swiftlint.yml`) configs are checked locally via `scripts/pre-commit.swift`; treat `docs/style/code-style.md` as the canonical style reference.
+`scripts/swift-test.swift` (or equivalent `swift test --no-parallel` with live
+gates cleared) must be green before any commit. The `--no-parallel` flag is
+mandatory: a handful of tests own kernel-level resources (PTYs, signal sources,
+`NWListener`s) that race when scheduled across parallel workers. Serial
+execution finishes the full suite in under a minute when live gates are off.
+SwiftFormat (`.swiftformat`) and SwiftLint (`.swiftlint.yml`) configs are
+checked locally via `scripts/pre-commit.swift`; treat `docs/style/code-style.md`
+as the canonical style reference.
 
 ---
 
@@ -411,6 +483,8 @@ When extending the codebase after the 2026 maintainability pass:
 | `ActivityTiming` | Activity escalation thresholds, status phrases (`idle`/`thinking`/optimistic send), TUI poll interval |
 | `ModelCatalogTiming` | Automatic model-catalog max age (24h) before re-probe; probe timeout; retained-empty-catalog and unavailable-project messages |
 | `StreamBufferDefaults` | Named `AsyncStream` buffer sizes per layer (event history 500, etc.) |
+| `A2UILimits` | A2UI safety ceilings — payload bytes, batch items, JSON depth/nodes, surfaces/components per session, list expansion, expression depth/call-count, pointer/regex/resolved-string length |
+| `A2UISchemaProfile` | A2UI version/MIME/catalog-id/`_meta`-key constants and the pinned upstream schema manifest (URL + commit + SHA-256 per file) |
 | `SystemPaths` | `/usr/bin/env`, `/usr/bin/git`, `/usr/bin/openssl`, Terminal.app |
 | `AppSupportPaths` | `prefs.json`, `sessions.json`, `workspaces.json`, attachments dir, `remote-server.p12` |
 | `ProjectPaths` | per-project `.codemixer/project.json`, per-workspace `.codemixer/workspace.json`, per-adapter `workspace-<AgentID>.json` |
@@ -423,17 +497,17 @@ When extending the codebase after the 2026 maintainability pass:
 Validation before merge:
 
 ```bash
-swift build && swift test --no-parallel
+swift build && scripts/swift-test.swift
 swift scripts/check-package-layout.swift
 swift scripts/check-no-swiftui-imports.swift
 swift scripts/check-no-personal-paths.swift
 swift scripts/check-direct-framework-calls.swift
 swift scripts/check-a11y.swift
 swift scripts/regen-coverage-manifest.swift --check
-swift test --no-parallel 2>&1 | scripts/check-test-runtime.swift   # per-suite runtime budgets
+scripts/swift-test.swift 2>&1 | scripts/check-test-runtime.swift   # per-suite runtime budgets
 ```
 
-`scripts/pre-commit.swift` is a **narrow** local hook (build + serial tests + SwiftFormat/SwiftLint). It does **not** replace the full merge gate below. Install with
+`scripts/pre-commit.swift` is a **narrow** local hook (build + `scripts/swift-test.swift` + SwiftFormat/SwiftLint). It does **not** replace the full merge gate below. Install with
 `ln -sf ../../scripts/pre-commit.swift .git/hooks/pre-commit`. See
 [`scripts/README.md`](scripts/README.md) for the full catalog.
 
@@ -458,6 +532,8 @@ These will break the build, the tests, or a future-you's review.
 
 - Files where the public surface isn't visible in the first 30 lines (§1.1).
 - Booleans modelling state that should be an enum (§1.2).
+- Magic strings modelling a closed set of values that should be an enum. Prefer typed values (`enum` / typed constants) over string literals for discriminants, catalog kinds, modes, status codes, and similar — e.g. `A2UIComponentBody.text(…)` / `A2UITextVariant.caption`, not `"Text"` / `"caption"`. Wire payloads may still carry strings; decode them into the typed form at the boundary and switch on the type thereafter.
+- Generic `JSONValue` (or `[String: JSONValue]` property bags) on a public domain API where a closed, typed model belongs. `JSONValue` is a *wire* type: decode it into typed values (`A2UIComponentBody`/`A2UIDynamicValue`/`A2UIResolvedValue`/…) at the boundary. If a payload is genuinely open-ended or unknown, wrap it in an opaque carrier (see `A2UIOpaqueJSON`/`A2UIOpaqueComponent`) whose `JSONValue` accessor is `package`, not `public` — never re-expose a raw `JSONValue` getter.
 - Functions whose name + signature don't tell you what they do without a doc comment (§1.3).
 - Magic numbers (durations, sizes, timeouts) that aren't named constants (§1.6).
 - Comments that narrate what the code already says (`// increment counter`). Comments explain *why*, *trade-offs*, *constraints* — not *what*.
@@ -474,6 +550,8 @@ These will break the build, the tests, or a future-you's review.
 - Tests that share state across suites.
 - Tests with sleeps longer than a few milliseconds — use `FakeClock.advance(by:)`.
 - **Machine-specific paths in tests or docs** — a contributor's macOS home-directory path, leaked workspace fixtures, or hardcoded live-probe fallbacks. Use `CODEMIXER_LIVE_*` env vars or neutral placeholders; enforced by `scripts/check-no-personal-paths.swift`.
+- **Leftover live gates in the shell** — `CODEMIXER_LIVE_*=1` / `MIGRATION_LIVE=1` left exported after a live run will arm multi-minute harnesses during a plain suite and look like a hang. Always use `scripts/swift-test.swift` (clears gates by default); pass `--allow-live` only for intentional live harnesses.
+- **GUI-path-as-test** — validating product behaviour by clicking Codemixer.app (or computer-use against SwiftUI) instead of `AgentCommand` / engine / ACP / live harness API paths. See [Validate via the API path (not the GUI)](#validate-via-the-api-path-not-the-gui).
 
 ---
 
@@ -535,7 +613,7 @@ log.notice("PTY spawned pid=\(pid, privacy: .public)")
 Walk the §26 checklist from `code-style.md`. The short version:
 
 - [ ] `swift build` clean (zero warnings on changed files).
-- [ ] `swift test --no-parallel` green.
+- [ ] `scripts/swift-test.swift` green.
 - [ ] New behaviour has a test.
 - [ ] Public surface has doc comments; non-obvious decisions have rationale comments.
 - [ ] No new literal colors / fonts / spacing in SwiftUI views.
@@ -550,4 +628,4 @@ If any of those isn't true, you aren't ready to merge yet. That's the bar.
 
 ---
 
-*Last revised after per-adapter workspace model caches (`workspace-<AgentID>.json`, daily `.automatic` TTL, Claude `.manual` without TTL). Update this file in the same PR as any change to module layout, top-level types, or merge gates.*
+*Last revised after adding `scripts/swift-test.swift` (clears sticky live gates + `--no-parallel`) and documenting API-path-only validation. Update this file in the same PR as any change to module layout, top-level types, or merge gates.*

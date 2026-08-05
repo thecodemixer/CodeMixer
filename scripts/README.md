@@ -20,8 +20,19 @@ This directory contains local automation and validation helpers for Codemixer.
     - `scripts/generate-xcodeproj.swift --no-open`
     - `scripts/generate-xcodeproj.swift --clean`
 
+- `swift-test.swift`
+  - Preferred way to run the SPM suite. Always injects `--no-parallel`, and by
+    default clears leftover `CODEMIXER_LIVE_*` / `MIGRATION_LIVE*` environment
+    gates so a prior live session cannot arm multi-minute harnesses during a
+    normal unit/integration run.
+  - Usage:
+    - `scripts/swift-test.swift`
+    - `scripts/swift-test.swift --filter A2UIActionResolverTests`
+    - `scripts/swift-test.swift --allow-live --filter LiveCustomACPIntegrationTests`
+  - Extra args after optional flags are forwarded to `swift test`.
+
 - `pre-commit.swift`
-  - Local pre-commit hook: `swift build`, `swift test --no-parallel`, SwiftFormat lint, SwiftLint.
+  - Local pre-commit hook: `swift build`, `scripts/swift-test.swift`, SwiftFormat lint, SwiftLint.
   - This is a **narrow** gate — it does not run the full merge checklist (`check-package-layout`, `check-a11y`, `regen-coverage-manifest --check`, `check-test-runtime`, etc.). Run those manually before opening a PR.
   - Typical install:
     - `ln -sf ../../scripts/pre-commit.swift .git/hooks/pre-commit`
@@ -29,7 +40,7 @@ This directory contains local automation and validation helpers for Codemixer.
 - `check-test-runtime.swift`
   - Parses `swift test` output from `stdin` and fails if suite runtime budgets are exceeded.
   - Usage:
-    - `swift test --no-parallel 2>&1 | scripts/check-test-runtime.swift`
+    - `scripts/swift-test.swift 2>&1 | scripts/check-test-runtime.swift`
   - Uses overrides from `test-runtime-overrides.json`.
 
 ### Architecture / Policy Checks

@@ -95,6 +95,8 @@ public enum WireCodec {
                 sessionID: sessionID,
                 phase: WireSessionPhase(id: phase.id, label: phase.label, ordinal: phase.ordinal, group: phase.group.rawValue)
             )
+        case .a2uiBatch(let batch):
+            return .a2uiBatch(batch)
         }
     }
 
@@ -193,6 +195,8 @@ public enum WireCodec {
                 sessionID: sessionID,
                 phase: SessionPhase(id: wirePhase.id, label: wirePhase.label, ordinal: wirePhase.ordinal, group: group)
             )
+        case .a2uiBatch(let batch):
+            return .a2uiBatch(batch)
         }
     }
 

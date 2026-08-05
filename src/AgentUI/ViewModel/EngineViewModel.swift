@@ -1,3 +1,4 @@
+import A2UICore
 import Foundation
 import Observation
 import SwiftUI
@@ -104,6 +105,17 @@ public final class EngineViewModel {
     public var workspaceRoot: URL?
     public internal(set) var messages: [Message] = []
     public internal(set) var activeToolCalls: [ToolCallEntry] = []
+    /// Canonical, generation-keyed A2UI surfaces for the live session, keyed
+    /// by surfaceId. Read live from `.a2uiSurface(surfaceID:)` message rows —
+    /// this is the one generalized replacement for every vendor-specific
+    /// "reviewer output" / "structured output" text heuristic (see
+    /// `docs/architecture.md` A2UI section).
+    public internal(set) var a2uiSurfaces: [String: A2UISurfaceState] = [:]
+    /// Highest generation ever assigned per surfaceId this session, threaded
+    /// through `A2UISurfaceReducer.apply` so a delete-then-recreate keeps
+    /// bumping forward even though the live projection discards deleted
+    /// surfaces outright.
+    var a2uiRetiredGenerations: [String: Int] = [:]
     /// Pending permission prompts keyed by owning session id.
     ///
     /// Background ACP reviews stay parked until that session is foregrounded;
@@ -541,6 +553,11 @@ public extension EngineViewModel {
         /// Codemixer-owned history marker for an agent-affecting client intent
         /// (mode, slash, permission). Live session + export only.
         case clientAction(ClientAction)
+        /// An ordering marker for a rendered A2UI surface. Like `.toolCall`,
+        /// the live content is read from `EngineViewModel.a2uiSurfaces` by
+        /// `surfaceID` so the row keeps updating in place as the agent
+        /// streams `updateComponents`/`updateDataModel`.
+        case a2uiSurface(surfaceID: String)
 
         public var id: String {
             switch self {
@@ -557,6 +574,7 @@ public extension EngineViewModel {
             case .thinkingComplete(let id, _, _):  return "thinking-\(id)"
             case .toolCall(let id):             return "tool-\(id)"
             case .clientAction(let action):     return "action-\(action.id)"
+            case .a2uiSurface(let surfaceID):   return "a2ui-\(surfaceID)"
             }
         }
 
@@ -569,6 +587,7 @@ public extension EngineViewModel {
             case .toolCall: return nil
             case .clientAction(let action):
                 return action.detail.map { "\(action.title): \($0)" } ?? action.title
+            case .a2uiSurface: return nil
             }
         }
     }

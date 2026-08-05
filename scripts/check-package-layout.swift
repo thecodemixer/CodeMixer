@@ -85,6 +85,7 @@ let requiredTestSuites = [
     "tests/TestSupport/AgentTestSupport",
     "tests/Core/AgentProtocolTests",
     "tests/Core/AgentCoreTests",
+    "tests/Core/A2UICoreTests",
     "tests/AgenticCLIs/ClaudeCode/ClaudeAdapterTests",
     "tests/AgenticCLIs/Codex/CodexAdapterTests",
     "tests/AgenticCLIs/AgentClientProtocol/ACPAdapterTests",

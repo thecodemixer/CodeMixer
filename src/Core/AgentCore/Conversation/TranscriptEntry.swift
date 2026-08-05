@@ -1,5 +1,6 @@
 /// Defines the semantic blocks held by a `SessionTranscript`. These values are
 /// independent of both the wire protocol and the JSONL persistence envelope.
+import A2UICore
 import AgentProtocol
 import Foundation
 
@@ -21,6 +22,12 @@ enum TranscriptBlock: Sendable, Codable, Equatable {
     case file(relativePath: String, kind: FileChangeKind)
     case phase(sessionID: String, phase: SessionPhase)
     case clientAction(ClientAction)
+    /// One durable, generation-keyed A2UI surface. Folded in place per
+    /// `surfaceID` exactly like `.tool`; a `deleteSurface` message removes
+    /// the entry outright rather than leaving a tombstone (plan §1/§4 — a
+    /// product wanting a static "completed" card instead of deletion should
+    /// emit a final `updateComponents` rather than `deleteSurface`).
+    case a2uiSurface(A2UISurfaceState)
 }
 
 struct ToolTranscript: Sendable, Codable, Equatable {

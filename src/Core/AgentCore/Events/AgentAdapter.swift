@@ -215,6 +215,16 @@ public protocol AgentAdapter: Sendable {
     func truncateTranscript(afterUserTurnID turnID: String,
                             sessionID: String,
                             workspace: URL) async -> Bool
+
+    // MARK: A2UI (optional)
+
+    /// Encode a resolved `client_to_server` action for the wire. `nil` means
+    /// this adapter has no A2UI transport binding — the engine surfaces
+    /// `.unsupportedCommand` rather than silently dropping the interaction.
+    func encodeA2UIAction(_ envelope: A2UIActionEnvelope) -> Data?
+
+    /// Encode a `client_to_server` error report for the wire. Default `nil`.
+    func encodeA2UIClientError(_ envelope: A2UIClientErrorEnvelope) -> Data?
 }
 
 public extension AgentAdapter {
@@ -235,6 +245,10 @@ public extension AgentAdapter {
     func truncateTranscript(afterUserTurnID turnID: String,
                             sessionID: String,
                             workspace: URL) async -> Bool { false }
+
+    func encodeA2UIAction(_ envelope: A2UIActionEnvelope) -> Data? { nil }
+
+    func encodeA2UIClientError(_ envelope: A2UIClientErrorEnvelope) -> Data? { nil }
 
     func availableModels() -> [AgentModelOption] { [] }
 

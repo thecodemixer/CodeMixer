@@ -43,6 +43,10 @@ extension ACPEventDecoder {
             return await handleSessionOpen(purpose: purpose, result: result)
         case .sessionPrompt:
             return await finalizePromptTurn()
+        case .a2uiFeedbackPrompt:
+            // Never finalizes a turn or touches heartbeat/idle state — an A2UI
+            // action/error Resource is host-to-agent feedback, not a chat turn.
+            return Batch()
         case .sessionList:
             await mergeListedSessions(result)
             return Batch()

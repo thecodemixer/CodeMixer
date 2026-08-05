@@ -100,8 +100,12 @@ extension EngineViewModel {
             openOverview(projectPath: projectPath)
             return
         }
-        if let recent = sessionsByProject[projectPath]?.first(where: { !$0.isOverview })
-            ?? sessionsByProject[projectPath]?.first {
+        // Same visibility rules as the sidebar — skip overview + archived rows.
+        let chats = SessionNavigatorFiltering.chatSessions(
+            from: sessionsByProject[projectPath] ?? [],
+            dashboardTitle: nil
+        )
+        if let recent = chats.first {
             openSession(projectPath: projectPath, id: recent.id)
             return
         }

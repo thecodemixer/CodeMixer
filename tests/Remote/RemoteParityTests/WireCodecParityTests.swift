@@ -1,3 +1,4 @@
+import A2UICore
 import Foundation
 import Testing
 import AgentTestSupport
@@ -254,6 +255,21 @@ struct WireCodecParityTests {
                 sessionID: "file-1",
                 phase: SessionPhase(id: "reviewing", label: "Review", ordinal: 2, group: .review)
             ),
+            .a2uiBatch(A2UIServerBatch(
+                agentID: "custom-acp-1",
+                transcriptKey: .init(projectRootPath: cwd.path, namespace: "custom-acp-1", sessionID: "s1"),
+                resourceURI: "a2ui://migration/plan/example",
+                items: [
+                    .init(index: 0,
+                         message: .createSurface(surfaceID: "plan", catalogID: A2UISchemaProfile.testScopedCatalogID,
+                                                 theme: nil, sendDataModel: false),
+                         validationError: nil),
+                    .init(index: 1, message: nil,
+                         validationError: .init(code: "VALIDATION_FAILED", surfaceID: "plan",
+                                               message: "example rejected item")),
+                ],
+                recordedAt: Date(timeIntervalSince1970: 1_700_000_002)
+            )),
         ]
     }
 }
@@ -299,6 +315,7 @@ extension AgentEvent {
         case .historyImportProgress:    "historyImportProgress"
         case .historyImportFinished:    "historyImportFinished"
         case .sessionPhaseChanged:      "sessionPhaseChanged"
+        case .a2uiBatch:                "a2uiBatch"
         }
     }
 
@@ -392,6 +409,8 @@ extension AgentEvent {
             return p1.path == p2.path && i1 == i2 && f1 == f2
         case (.sessionPhaseChanged(let s1, let p1), .sessionPhaseChanged(let s2, let p2)):
             return s1 == s2 && p1 == p2
+        case (.a2uiBatch(let b1), .a2uiBatch(let b2)):
+            return b1 == b2
         default:
             return false
         }

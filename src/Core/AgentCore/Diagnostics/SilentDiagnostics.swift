@@ -20,6 +20,7 @@ public actor SilentDiagnostics {
         case modeBFallback
         case enginePartialStartRollback
         case permissionDeliveryFailed
+        case a2uiActionRejected
         case other
     }
 

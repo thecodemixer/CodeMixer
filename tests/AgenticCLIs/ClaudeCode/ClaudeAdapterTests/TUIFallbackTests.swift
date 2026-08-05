@@ -111,7 +111,7 @@ struct TUIFallbackTests {
         let snapshot = TerminalSnapshot(plainText: """
         \(nulSeparated("Accessing workspace:"))
 
-        \(nulSeparated("/Users/hari/Hub/CodePeek/MongoMixer/MongoMixer/claude"))
+        \(nulSeparated("/workspace/example/claude"))
 
         \(nulSeparated("Quick safety check: Is this a project you created or one you trust? (Like your own code, a well-known open source project, or work from your team). If not,"))
         \(nulSeparated("take a moment to review what's in this folder first."))
@@ -126,7 +126,7 @@ struct TUIFallbackTests {
         #expect(events.contains {
             if case .permissionRequest(let prompt) = $0 {
                 return prompt.toolName == ClaudeTUIFallback.workspaceTrustToolName
-                    && prompt.argumentsSummary == "/Users/hari/Hub/CodePeek/MongoMixer/MongoMixer/claude"
+                    && prompt.argumentsSummary == "/workspace/example/claude"
             }
             return false
         })

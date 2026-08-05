@@ -82,4 +82,9 @@ public enum AgentEvent: Sendable {
     /// order from the project-local transcript, so
     /// the rail can phase-group reopened history, not just the live tail.
     case sessionPhaseChanged(sessionID: String, phase: SessionPhase)
+
+    /// One ordered, schema-validated A2UI resource decoded from an ACP
+    /// `EmbeddedResource` (or replayed from the durable transcript). Never
+    /// disguised as assistant text — see `docs/architecture.md` A2UI section.
+    case a2uiBatch(A2UIServerBatch)
 }

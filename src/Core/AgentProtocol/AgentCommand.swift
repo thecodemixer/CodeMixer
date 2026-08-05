@@ -57,6 +57,19 @@ public enum AgentCommand: Sendable, Codable, Hashable {
     /// Publish a Codemixer-owned conversation marker without writing to the
     /// agent CLI transcript. See `ClientAction` for persistence limits.
     case recordClientAction(ClientAction)
+
+    // MARK: - A2UI
+
+    /// A renderer-observed interaction intent (not a forged action — the
+    /// engine re-resolves the actual event/context against the canonical
+    /// surface it owns before anything is encoded onto the wire). See
+    /// `A2UIInteractionIntent` and `docs/architecture.md` A2UI section.
+    case submitA2UIInteraction(A2UIInteractionIntent)
+
+    /// A client-observed A2UI error (e.g. a stale/foreign action). The
+    /// engine — not the renderer — decides whether this is safe to forward
+    /// as `client_to_server.error`.
+    case reportA2UIClientError(A2UIClientErrorEnvelope)
 }
 
 /// Which slash-command namespace an agent command targets.

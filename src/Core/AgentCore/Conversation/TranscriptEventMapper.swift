@@ -22,6 +22,9 @@ enum TranscriptEventMapper {
                                  phase: phase,
                                  recordedAt: recordedAt)]
         }
+        if case .a2uiBatch(let batch) = event {
+            return [.applyA2UIBatch(batch, recordedAt: recordedAt)]
+        }
         return []
     }
 

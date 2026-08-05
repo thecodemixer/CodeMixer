@@ -162,6 +162,12 @@ extension AgentEngine {
         case .closeSession:
             await shutdownActiveSlot(reason: .userCancel)
 
+        case .submitA2UIInteraction(let intent):
+            try await handleSubmitA2UIInteraction(intent, adapter: adapter)
+
+        case .reportA2UIClientError(let envelope):
+            try await handleReportA2UIClientError(envelope, adapter: adapter)
+
         case .openProject,
              .listSessions,
              .importProjectHistory,
@@ -498,7 +504,7 @@ extension AgentEngine {
         return text.isEmpty ? refs : "\(text)\n\(refs)"
     }
 
-    private func writePromptBytes(_ bytes: Data) async throws {
+    func writePromptBytes(_ bytes: Data) async throws {
         guard let transport else {
             throw AgentError.internalInvariant(detail: "transport closed before prompt write")
         }

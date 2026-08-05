@@ -469,6 +469,8 @@ public extension EngineViewModel {
                    entry.finished, !entry.success {
                     anyToolFailed = true
                 }
+            case .a2uiSurface:
+                hasContent = true
             case .clientAction:
                 break
             }
@@ -543,7 +545,7 @@ public extension EngineViewModel {
                    entry.finished, !entry.success {
                     anyToolFailed = true
                 }
-            case .assistant, .assistantStreaming, .clientAction:
+            case .assistant, .assistantStreaming, .clientAction, .a2uiSurface:
                 break
             }
         }

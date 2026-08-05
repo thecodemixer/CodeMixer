@@ -144,6 +144,14 @@ public final class ACPAdapter: AgentAdapter {
         }
     }
 
+    public func encodeA2UIAction(_ envelope: A2UIActionEnvelope) -> Data? {
+        ACPInputEncoding.a2uiAction(envelope, state: state)
+    }
+
+    public func encodeA2UIClientError(_ envelope: A2UIClientErrorEnvelope) -> Data? {
+        ACPInputEncoding.a2uiClientError(envelope, state: state)
+    }
+
     public func encodeResumeSession(sessionID: String) -> Data? {
         let data = ACPInputEncoding.sessionLoad(sessionID: sessionID, state: state)
         return data.isEmpty ? nil : data

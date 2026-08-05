@@ -4,9 +4,13 @@ import AgentCore
 
 /// Pure helpers for the session navigator — overview row vs chat list.
 enum SessionNavigatorFiltering {
-    /// Chat rows under a project. Hides the overview/control session and any
+    /// Chat rows under a project. Hides the overview/control session, any
     /// orphaned control chats that share its title (including before
-    /// `dashboardTitle` arrives from `agentDashboard`).
+    /// `dashboardTitle` arrives from `agentDashboard`), and archived sessions.
+    ///
+    /// Archived rows are dropped because archiving is how an agent retires a
+    /// session it no longer owns — a migration Restart archives every per-file
+    /// session so the navigator reflects the new run, not the superseded one.
     static func chatSessions(from sessions: [SessionSummary],
                              dashboardTitle: String?) -> [SessionSummary] {
         let overviewTitles = Set(
@@ -18,6 +22,7 @@ enum SessionNavigatorFiltering {
         }
         return sessions.filter { session in
             if session.isOverview { return false }
+            if session.archived { return false }
             if hiddenTitles.contains(session.title) { return false }
             return true
         }

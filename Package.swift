@@ -13,6 +13,7 @@ let package = Package(
     ],
     products: [
         .library(name: "AgentProtocol", targets: ["AgentProtocol"]),
+        .library(name: "A2UICore", targets: ["A2UICore"]),
         .library(name: "AgentCore", targets: ["AgentCore"]),
         .library(name: "ClaudeCode", targets: ["ClaudeCode"]),
         .library(name: "Codex", targets: ["Codex"]),
@@ -42,10 +43,17 @@ let package = Package(
             swiftSettings: swiftSettings
         ),
         .target(
+            name: "A2UICore",
+            dependencies: ["AgentProtocol"],
+            path: "src/Core/A2UICore",
+            swiftSettings: swiftSettings
+        ),
+        .target(
             name: "AgentCore",
             dependencies: [
                 "CPosixBridge",
                 "AgentProtocol",
+                "A2UICore",
                 .product(name: "SwiftTerm", package: "SwiftTerm"),
             ],
             path: "src/Core/AgentCore",
@@ -72,7 +80,7 @@ let package = Package(
         ),
         .target(
             name: "AgentClientProtocol",
-            dependencies: ["AgentCore", "AgentProtocol"],
+            dependencies: ["AgentCore", "AgentProtocol", "A2UICore"],
             path: "src/AgenticCLIs/AgentClientProtocol",
             exclude: [
                 "README.md",
@@ -100,11 +108,11 @@ let package = Package(
         ),
         .target(
             name: "AgentUI",
-            dependencies: ["AgentCore"],
+            dependencies: ["AgentCore", "A2UICore"],
             path: "src/AgentUI",
             resources: [.process("Resources")],
             swiftSettings: swiftSettings,
-            linkerSettings: [.linkedFramework("WebKit")]
+            linkerSettings: [.linkedFramework("WebKit"), .linkedFramework("AVKit")]
         ),
         .target(
             name: "AgentTestSupport",
@@ -158,8 +166,14 @@ let package = Package(
             swiftSettings: swiftSettings
         ),
         .testTarget(
+            name: "A2UICoreTests",
+            dependencies: ["A2UICore", "AgentProtocol", "AgentTestSupport"],
+            path: "tests/Core/A2UICoreTests",
+            swiftSettings: swiftSettings
+        ),
+        .testTarget(
             name: "AgentCoreTests",
-            dependencies: ["AgentCore", "AgentTestSupport", "ClaudeCode"],
+            dependencies: ["AgentCore", "A2UICore", "AgentTestSupport", "ClaudeCode"],
             path: "tests/Core/AgentCoreTests",
             swiftSettings: swiftSettings
         ),

@@ -148,6 +148,38 @@ struct SessionTranscriptRepositoryTests {
         try await repository.shutdown()
     }
 
+    @Test("archiving a session is carried on the listed summary and reversible")
+    func archivedFlagRoundTripsThroughSessionListing() async throws {
+        let fileSystem = InMemoryFileSystem()
+        let clock = FakeClock()
+        let key = makeKey("archived")
+        let repository = makeRepository(
+            fileSystem: fileSystem,
+            clock: clock,
+            ownerPID: 402
+        )
+        try await repository.registerSession(
+            key.sessionID,
+            namespace: key.namespace,
+            agentID: .other,
+            in: key.projectRoot
+        )
+
+        try await repository.markArchived(key.sessionID, archived: true, in: key.projectRoot)
+        let archived = try await repository.sessions(
+            inProject: key.projectRoot,
+            attentionSessionIDs: [key.sessionID]
+        )
+        #expect(archived.first?.archived == true)
+        // An archived row must not keep pulling the navigator's attention badge.
+        #expect(archived.first?.needsAttention == false)
+
+        try await repository.markArchived(key.sessionID, archived: false, in: key.projectRoot)
+        let restored = try await repository.sessions(inProject: key.projectRoot)
+        #expect(restored.first?.archived == false)
+        try await repository.shutdown()
+    }
+
     @Test("large imported catalogs remain ordered and replay complete session histories")
     func largeCatalogImportRemainsOrdered() async throws {
         let sessionCount = 250

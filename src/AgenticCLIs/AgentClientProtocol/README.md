@@ -15,6 +15,7 @@ Agent Client Protocol launch an ACP agent server over stdio JSON-RPC
 | Cancel | `session/cancel` notification |
 | Updates | `session/update` → `AgentEvent`s |
 | Reverse RPCs | `fs/*`, `terminal/*`, `session/request_permission` |
+| A2UI | `initialize` advertises `A2UISchemaProfile.clientCapabilitiesMetaKey` capability (test-scoped catalog id only, see `docs/architecture.md` §36); a MIME-typed (`application/a2ui+json`) `EmbeddedResource` inside `session/update`/`tool_call` content decodes to `AgentEvent.a2uiBatch` via `ACPEventDecoder+A2UI`; client actions/errors encode back as `session/prompt` via `ACPInputEncoding.a2uiAction`/`a2uiClientError` under `RequestPurpose.a2uiFeedbackPrompt` (never finalizes a chat turn) |
 | Sessions | AgentCore's project-local `SessionTranscriptRepository` owns listing and visible history. `session/load` restores only agent state; replayed history chunks are discarded. Foreign live updates enter the repository through `recordBackgroundSessionEvents`. |
 | Existing-project import | `ACPSessionCatalogImporter` reads the retired Custom ACP `.codemixer/acp/<id>/sessions-index.json` format once; no live ACP turn cache remains. |
 
@@ -24,8 +25,9 @@ Production custom projects register `CustomACPAdapterFactory` from `ACPCLIs`
 
 ## Layout
 
-- `Adapter/ACPAdapter.swift` — production `AgentAdapter`
+- `Adapter/ACPAdapter.swift` — production `AgentAdapter` (implements `encodeA2UIAction`/`encodeA2UIClientError`)
 - `Common/` — framing, codec, state, decoder, retired-catalog importer, FS/terminal helpers
+- `Common/ACPEventDecoder+A2UI.swift` — decodes MIME-typed A2UI `EmbeddedResource` content into `A2UIServerBatch`
 - `External/ACPTerminalProcess.swift` — sole `Process()` site for reverse terminals
 - `digital-twin/Twin/ACPTwin.swift` — deterministic test twin
 - `digital-twin/Twin/ACPTwinScenario.swift` — scripted scenarios for `fake-acp`

@@ -56,10 +56,15 @@ if run(swift, ["build"], cwd: packageDir) != 0 {
     fail("Build failed — fix errors before committing.")
 }
 
-step("swift test --no-parallel")
-// `--no-parallel` is required: several suites own kernel-level resources
-// (PTYs, NWListeners, SIGCHLD handlers) that race under parallel scheduling.
-if run(swift, ["test", "--no-parallel"], cwd: packageDir) != 0 {
+step("scripts/swift-test.swift")
+// Routes through scripts/swift-test.swift so leftover CODEMIXER_LIVE_* /
+// MIGRATION_LIVE* exports cannot arm multi-minute live harnesses, and so
+// `--no-parallel` is always applied (PTYs / NWListeners / SIGCHLD race under
+// parallel scheduling).
+let swiftTestScript = packageDir
+    .appendingPathComponent("scripts")
+    .appendingPathComponent("swift-test.swift")
+if run(swift, [swiftTestScript.path], cwd: packageDir) != 0 {
     fail("Tests failed — fix before committing.")
 }
 

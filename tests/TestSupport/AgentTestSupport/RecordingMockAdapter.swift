@@ -15,6 +15,8 @@ public final class RecordingMockAdapter: AgentAdapter, @unchecked Sendable {
         case userPrompt(String)
         case cancel
         case permissionResponse(PermissionDecision, promptID: UUID)
+        case a2uiAction(surfaceID: String, eventName: String)
+        case a2uiClientError(surfaceID: String, code: String)
     }
 
     public let id: AgentID = .other
@@ -113,4 +115,21 @@ public final class RecordingMockAdapter: AgentAdapter, @unchecked Sendable {
 
     public func enumerateProjectCommands(workspace: URL) async -> [SlashCommand] { [] }
     public func resumeArgvAddition(sessionID: String) -> [String] { [] }
+
+    public func encodeA2UIAction(_ envelope: A2UIActionEnvelope) -> Data? {
+        lock.lock()
+        _recorded.append(.a2uiAction(surfaceID: envelope.surfaceID, eventName: envelope.eventName))
+        lock.unlock()
+        // Wire-shaped enough for transport-write assertions; not ACP JSON-RPC.
+        let body = "a2ui-action:\(envelope.surfaceID):\(envelope.eventName)"
+        return Data(body.utf8)
+    }
+
+    public func encodeA2UIClientError(_ envelope: A2UIClientErrorEnvelope) -> Data? {
+        lock.lock()
+        _recorded.append(.a2uiClientError(surfaceID: envelope.surfaceID, code: envelope.code))
+        lock.unlock()
+        let body = "a2ui-client-error:\(envelope.surfaceID):\(envelope.code)"
+        return Data(body.utf8)
+    }
 }

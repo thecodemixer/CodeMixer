@@ -199,4 +199,87 @@ struct ACPInputEncodingTests {
         )
         #expect(cancelled.contains("\"outcome\":\"cancelled\""))
     }
+
+    @Test("a2uiAction encodes a MIME-typed clientAction EmbeddedResource")
+    func a2uiActionEncodesClientAction() {
+        let state = ACPClientState()
+        _ = ACPInputEncoding.bootstrap(
+            context: LaunchContext(workspace: workspace, permissionMode: .default),
+            state: state,
+            customAgentID: "x",
+            displayName: "Agent"
+        )
+        state.setSessionID("s1")
+        let envelope = A2UIActionEnvelope(
+            transcriptKey: .init(projectRootPath: workspace.path, namespace: "x", sessionID: "s1"),
+            agentID: "x",
+            surfaceID: "review",
+            sourceComponentID: "btn",
+            eventName: "migrationReviewDecision",
+            context: ["optionId": .string("accept_a"), "nonce": .string("n1")],
+            timestamp: Date(timeIntervalSince1970: 1)
+        )
+        let text = String(decoding: ACPInputEncoding.a2uiAction(envelope, state: state)!, as: UTF8.self)
+        #expect(text.contains("\"method\":\"session/prompt\""))
+        #expect(text.contains(A2UISchemaProfile.embeddedResourceMIMEType))
+        #expect(text.contains("clientAction"))
+        #expect(text.contains("migrationReviewDecision"))
+        #expect(text.contains("a2ui://client-action/review/btn"))
+    }
+
+    @Test("a2uiClientError encodes a MIME-typed clientError EmbeddedResource")
+    func a2uiClientErrorEncodes() {
+        let state = ACPClientState()
+        _ = ACPInputEncoding.bootstrap(
+            context: LaunchContext(workspace: workspace, permissionMode: .default),
+            state: state,
+            customAgentID: "x",
+            displayName: "Agent"
+        )
+        state.setSessionID("s1")
+        let envelope = A2UIClientErrorEnvelope(
+            transcriptKey: .init(projectRootPath: workspace.path, namespace: "x", sessionID: "s1"),
+            agentID: "x",
+            surfaceID: "review",
+            code: "VALIDATION_FAILED",
+            message: "stale generation"
+        )
+        let text = String(decoding: ACPInputEncoding.a2uiClientError(envelope, state: state)!, as: UTF8.self)
+        #expect(text.contains("clientError"))
+        #expect(text.contains("VALIDATION_FAILED"))
+        #expect(text.contains("a2ui://client-error/review"))
+    }
+
+    @Test("a2uiAction returns nil while an ordinary session/prompt is in flight")
+    func a2uiActionBlockedDuringActivePrompt() {
+        let state = ACPClientState()
+        _ = ACPInputEncoding.bootstrap(
+            context: LaunchContext(workspace: workspace, permissionMode: .default),
+            state: state,
+            customAgentID: "x",
+            displayName: "Agent"
+        )
+        state.setSessionID("s1")
+        _ = state.nextRequestID(for: .sessionPrompt)
+        let envelope = A2UIActionEnvelope(
+            transcriptKey: .init(projectRootPath: workspace.path, namespace: "x", sessionID: "s1"),
+            agentID: "x",
+            surfaceID: "review",
+            sourceComponentID: "btn",
+            eventName: "migrationReviewDecision",
+            context: [:],
+            timestamp: Date(timeIntervalSince1970: 1)
+        )
+        #expect(ACPInputEncoding.a2uiAction(envelope, state: state) == nil)
+        #expect(ACPInputEncoding.a2uiClientError(
+            A2UIClientErrorEnvelope(
+                transcriptKey: envelope.transcriptKey,
+                agentID: "x",
+                surfaceID: "review",
+                code: "VALIDATION_FAILED",
+                message: "x"
+            ),
+            state: state
+        ) == nil)
+    }
 }

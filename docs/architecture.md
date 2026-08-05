@@ -42,6 +42,8 @@ When documents disagree, this file wins on structural decisions, `code-style.md`
 32. [Trade-offs and rejected alternatives](#32-trade-offs-and-rejected-alternatives)
 33. [Glossary](#33-glossary)
 34. [When in doubt](#34-when-in-doubt)
+35. [Chat workbench](#35-chat-workbench)
+36. [A2UI — generalized custom-tool UI](#36-a2ui--generalized-custom-tool-ui)
 
 ---
 
@@ -1955,6 +1957,373 @@ Recorded here per the guide's own "update the doc in the same PR" rule; full det
 - **§12 (layout):** the centered 720pt column is superseded by the 3-lane workbench; `messageMaxWidth` remains only as the transcript's inner readable cap.
 - **§13.3/§14 (thinking):** `ThinkingFocusView` keeps the live/selected turn's thinking expanded and prominent above assistant prose — the opposite of §13.3's "collapsed by default" rule. History (every other turn) keeps the unchanged §13.3 treatment via `ThinkingBlockView`.
 - **§1.15 (density):** `Theme.DensityMode` gained a third case, `.focus`, the workbench's zen reading mode.
+
+---
+
+## 36. A2UI — generalized custom-tool UI
+
+Custom ACP tools (the migration tool is the reference implementation) used to
+get their structured output — reviewer verdicts, plans, human-review
+decisions — onto screen by having `AgentUI` **guess**: sniff assistant text
+for `Reviewer A: {…}` prefixes, regex-balance a JSON object out of the
+string, and hand-render a "reviewer comment" card. That heuristic was
+per-tool, flaky (any prose containing `{"verdict":...}`-shaped text was fair
+game), and meant every new custom tool needed a bespoke text-sniffing branch
+in `AgentUI` before its structured output looked like anything but a JSON
+wall. **A2UI replaces that entirely.** Any custom ACP tool that wants richer
+UI than markdown prose now emits a typed
+[A2UI](https://github.com/a2ui-project/a2ui) v0.9.1 Basic Catalog surface —
+`AgentUI` renders it generically, with zero per-tool knowledge.
+
+### 36.1 Scope and non-goals
+
+- **Basic Catalog only.** CodeMixer implements the A2UI v0.9.1 Basic Catalog
+  (`Text`, `Divider`, `Icon`, `Image`, `Video`, `AudioPlayer`, `Row`,
+  `Column`, `List`, `Card`, `Tabs`, `Button`, `CheckBox`, `TextField`,
+  `DateTimeInput`, `ChoicePicker`, `Slider`, `Modal`). It does not implement
+  custom app-specific catalogs, and it does not execute arbitrary
+  `functionCall` client actions — only server-bound `event` actions are
+  wired end to end (plan decision: client-side `functionCall` execution is
+  out of scope until a concrete custom-catalog consumer needs it).
+- **`Video`/`AudioPlayer`/`DateTimeInput` are simplified.** They render as an
+  external-open link (`Video`/`AudioPlayer`) or a plain ISO-8601 text field
+  (`DateTimeInput`) rather than full native media/calendar widgets — see
+  `A2UISurfaceView`'s file header for the exact fallback behavior.
+- **Test-scoped catalog id in production.** `ACPInputEncoding.bootstrap`
+  currently advertises only `A2UISchemaProfile.testScopedCatalogID`
+  (`com.codecave.codemixer.test/basic-catalog-v0_9_1`), not
+  `A2UISchemaProfile.basicCatalogID` (the official schema-backed id). This is
+  a deliberate no-partial-component-claim decision: CodeMixer will not claim
+  full spec conformance until the complete component/accessibility/security
+  matrix has an explicit sign-off. Custom ACP servers that gate A2UI emission
+  on capability negotiation (the migration tool does — see §36.6) already
+  see this exact id and degrade correctly if/when the id changes.
+- **Not interpreted as a live JSON Schema.** `A2UICore` does not run a
+  generic Draft 2020-12 validator against the vendored schema files at
+  runtime. `A2UISchemaProfile.schemaManifest` pins each upstream file (URL +
+  commit + SHA-256) purely as provenance/manifest; `A2UICatalog` /
+  `A2UIValidator` are a hand-written, behavior-matched structural validator
+  audited against those pinned files. Re-vendoring requires re-auditing both
+  in the same change.
+
+### 36.1a Typed boundary — no `JSONValue` on the public surface
+
+`JSONValue` is a **wire** type. It appears only at the ACP decode edge; every
+public A2UI DTO is a closed, typed model:
+
+- `A2UIComponent` is common fields (`id`/`weight`/`accessibility`) plus a
+  typed `A2UIComponentBody` enum whose cases carry per-component `*Props`
+  structs (`A2UITextProps`, `A2UIButtonProps`, …). There is no `kind: String`
+  + `properties: [String: JSONValue]` bag — the per-component required/known
+  property matrix is enforced by `A2UIComponent.decodeKnown(json:)`, which
+  rejects unknown kinds, missing required fields, and undeclared keys.
+- Dynamic slots are typed per return type: `A2UIDynamicString` /
+  `A2UIDynamicNumber` / `A2UIDynamicBoolean` / `A2UIDynamicStringList` (each a
+  `literal` / `binding` / `call` sum), with `A2UIDataBinding` and
+  `A2UIFunctionCall`/`A2UIFunctionArgument` for the expression language.
+- Resolved data is `A2UIResolvedValue` (a closed literal JSON tree); the
+  surface data model is `A2UIDataDocument`; renderer-local unsynced edits are
+  `A2UILocalOverlay` keyed by `A2UIJSONPointerPath`. The evaluator, resolver,
+  reducer, and renderer all speak these types — none takes a bare
+  `[String: JSONValue]`.
+- **Unknown catalogs / unknown component kinds** are preserved losslessly for
+  replay via `A2UIOpaqueComponent` (kept as `A2UIComponentBody.unknown`) and
+  `A2UIOpaqueJSON`. These wrap a `JSONValue` behind a `package` accessor so no
+  public getter re-exposes raw JSON; the renderer degrades them to a bounded
+  "unsupported component" card and the validator flags `UNKNOWN_COMPONENT`
+  when the surface's catalog is known.
+
+There is **no** `JSONValue` on the public A2UI surface — not one parameter,
+property, or return type. The seams that must cross back into wire JSON are
+`package`, so only in-package decoders/encoders can reach them:
+
+| Seam | Used by |
+| --- | --- |
+| `A2UIComponent.decodeKnown(json:)` / `decode(json:allowUnknown:)` | ACP decode, `A2UIServerMessage` Codable, tests. Public callers get `Codable` (permissive: unknown kinds become opaque). |
+| `A2UIActionEnvelope.contextWireJSON` | `ACPInputEncoding.a2uiAction` only. Lives on the envelope (a wire DTO) rather than as a generic `A2UIResolvedValue → JSONValue` accessor. |
+| `A2UIOpaqueJSON` / `A2UIOpaqueComponent` raw accessors | Lossless re-encode of unknown payloads. |
+
+`A2UIComponentCodableTests` pins this: known kinds re-encode to the exact
+object they decoded from, strict decode rejects unknown kinds / missing
+required / undeclared keys, and an unknown kind (or a known kind on an unknown
+catalog) survives as `A2UIOpaqueComponent` and re-encodes unchanged.
+
+### 36.2 Module map
+
+| Concern | Lives in |
+| --- | --- |
+| Pinned schema provenance, version/MIME/catalog-id/`_meta`-key constants | `Core/AgentProtocol/A2UI/A2UISchemaProfile.swift` |
+| Decoded component tree (`A2UIComponent` = common fields + typed `A2UIComponentBody` with per-component `*Props`) + theme (`A2UITheme`) | `Core/AgentProtocol/A2UI/A2UIComponent.swift` |
+| Typed dynamic expressions (`A2UIDynamic{Value,String,Number,Boolean,StringList}`, `A2UIDataBinding`, `A2UIFunctionCall`/`A2UIFunctionArgument`) and actions/child-lists/checks/variants (`A2UIAction`, `A2UIChildList`, `A2UICheckRule`, catalog variant enums) | `Core/AgentProtocol/A2UI/{A2UIDynamicValue,A2UIAction}.swift` |
+| Typed resolved data (`A2UIResolvedValue`), root data document (`A2UIDataDocument`), renderer-local overlay (`A2UILocalOverlay`), pointer newtype (`A2UIJSONPointerPath`), and opaque lossless carriers for unknown catalogs/kinds (`A2UIOpaqueJSON`/`A2UIOpaqueComponent`) — the public boundary carries no bare `JSONValue` | `Core/AgentProtocol/A2UI/{A2UIResolvedValue,A2UIOpaqueJSON}.swift` |
+| The four `server_to_client` message shapes (`createSurface`/`updateComponents`/`updateDataModel`/`deleteSurface`) | `Core/AgentProtocol/A2UI/A2UIServerMessage.swift` |
+| Transcript key ref, validation issues, the ordered batch envelope, the interaction intent / action envelope / client-error envelope | `Core/AgentProtocol/A2UI/A2UIServerBatch.swift` |
+| Safety limits (payload size, batch size, JSON depth/nodes, list expansion, expression depth/call-count, regex bounds, resolved-string length) | `Core/A2UICore/A2UILimits.swift` |
+| Semantic companion for the Basic Catalog — cross-cutting sets (checkable / two-way-bound bodies, catalog function names, void functions, known-catalog id). Per-component required/known-property matrices are now enforced by typed `A2UIComponent` decoding, not a runtime descriptor table | `Core/A2UICore/A2UICatalog.swift` |
+| RFC 6901 JSON Pointer get/set + repeated-list scope resolution | `Core/A2UICore/A2UIJSONPointer.swift` |
+| Canonical, generation-keyed per-surface state | `Core/A2UICore/A2UISurfaceState.swift` |
+| Structural message validation against the catalog + limits | `Core/A2UICore/A2UIValidator.swift` |
+| Pure reducer: `A2UIServerBatch` → mutated `A2UISurfaceState` | `Core/A2UICore/A2UISurfaceReducer.swift` |
+| Dynamic-value expression evaluator (`DataBinding`/`FunctionCall`, repeated-list scoping) | `Core/A2UICore/A2UIEvaluator.swift` |
+| Plain-text summary of a surface (search/export/TTS fallback) | `Core/A2UICore/A2UITextSummary.swift` |
+| Server-side action trust boundary (re-resolves a client intent against the canonical surface) | `Core/A2UICore/A2UIActionResolver.swift` |
+| Engine-side command handling (`submitA2UIInteraction`/`reportA2UIClientError`) | `Core/AgentCore/Engine/AgentEngine+A2UI.swift` |
+| Durable transcript entry + mutation + repository accessor | `Core/AgentCore/Conversation/{TranscriptEntry,TranscriptMutation,SessionTranscript,SessionTranscriptRepository}.swift` |
+| ACP decode of MIME-typed `EmbeddedResource` batches | `AgenticCLIs/AgentClientProtocol/Common/ACPEventDecoder+A2UI.swift` (hooked from `ACPEventDecoder+Streaming.swift`) |
+| ACP encode of capability advertisement + actions + client errors | `AgenticCLIs/AgentClientProtocol/Common/ACPInputEncoding.swift` |
+| `EngineViewModel` projection (`a2uiSurfaces`, `a2uiRetiredGenerations`, `.a2uiSurface` message marker) | `AgentUI/ViewModel/{EngineViewModel,EngineViewModel+ConversationReduction}.swift` |
+| `EngineViewModel` → engine command bridge for user interactions | `AgentUI/ViewModel/EngineViewModel+A2UI.swift` |
+| The native SwiftUI Basic Catalog renderer | `AgentUI/Conversation/A2UISurfaceView.swift` |
+| Transcript-lane wiring (renders `.a2uiSurface` rows, feeds search) | `AgentUI/Workbench/TranscriptLaneView.swift` |
+| Migration-tool surface builders (plan / review duel / human review / completion / error) | `migration-tool/src/acp/a2ui.ts` |
+| Migration-tool capability negotiation + surface lifecycle + inbound action routing | `migration-tool/src/acp/server.ts` (`negotiatesA2UI`, `emitA2UI`, `deleteA2UI`, `resolveA2UIReviewDecision`) |
+
+### 36.3 Wire types and `WireVersion`
+
+`AgentEvent.a2uiBatch(A2UIServerBatch)` and two new `AgentCommand` cases —
+`submitA2UIInteraction(A2UIInteractionIntent)` and
+`reportA2UIClientError(A2UIClientErrorEnvelope)` — shipped on `WireVersion.v4`
+(`Core/AgentProtocol/WireVersion.swift`). Unlike most other domain types,
+`A2UIServerBatch` / `A2UIInteractionIntent` / `A2UIClientErrorEnvelope` are
+defined directly in `AgentProtocol` (not mirrored into a separate
+`AgentEventWire` shape) and passed through `WireCodec` unchanged — the same
+pattern already used for `PermissionPrompt`. This keeps one `Codable` shape
+canonical for the durable transcript, the live wire, and the ACP JSON-RPC
+payload, instead of three near-duplicate structs that could drift.
+
+```swift
+public enum AgentEvent {
+    // ...
+    case a2uiBatch(A2UIServerBatch)
+}
+
+public enum AgentCommand {
+    // ...
+    case submitA2UIInteraction(A2UIInteractionIntent)
+    case reportA2UIClientError(A2UIClientErrorEnvelope)
+}
+```
+
+### 36.4 Server → client flow (rendering a surface)
+
+```
+Custom ACP tool
+  │ session/update or tool_call content block:
+  │   { type: "resource", resource: { uri, mimeType: "application/a2ui+json", text } }
+  ▼
+ACPEventDecoder+Streaming (agentMessageChunk / toolCall / toolCallUpdate)
+  │ detects mimeType == A2UISchemaProfile.embeddedResourceMIMEType
+  ▼
+ACPEventDecoder+A2UI.a2uiBatchEvent(uri:text:sessionID:)
+  │ size/array/count guards (A2UILimits) → per-item decode into
+  │ A2UIServerMessage, or an indexed A2UIValidationIssue on failure
+  ▼
+AgentEvent.a2uiBatch(A2UIServerBatch)
+  │ published on MulticastEventBus like any other event
+  ├──────────────────────────────┐
+  ▼                              ▼
+TranscriptEventMapper            EngineViewModel+ConversationReduction.apply(_:)
+  │ .applyA2UIBatch(batch, at:)  │ A2UISurfaceReducer.apply(batch, into: a2uiSurfaces)
+  ▼                              │ updates a2uiSurfaces[id] / a2uiRetiredGenerations
+SessionTranscript                │ appends/updates a .a2uiSurface(surfaceID:) message
+  │ A2UISurfaceReducer.apply     ▼
+  │ (same reducer, same rules)  TranscriptLaneView
+  ▼                              │ renders A2UISurfaceView(state: a2uiSurfaces[id])
+Durable `.a2uiSurface` entry     ▼
+(replays via                    Native SwiftUI Basic Catalog UI
+ synthesizedReplayMessages())
+```
+
+Both the live path (`EngineViewModel`) and the durable path
+(`SessionTranscript`) run the **same** `A2UISurfaceReducer` over the same
+`A2UIServerBatch` — there is exactly one place that decides how a batch
+mutates surface state, so a session reopened from disk renders identically
+to how it looked live. `SessionTranscript.events(for:)` replays a stored
+`.a2uiSurface(A2UISurfaceState)` entry by calling
+`A2UISurfaceState.synthesizedReplayMessages()`, which reconstructs a
+`createSurface` + `updateComponents` (+ `updateDataModel` if needed) sequence
+from the canonical state — so replay never depends on having kept every
+historical raw batch.
+
+**Generation and delete-then-create.** `A2UISurfaceState.generation`
+increments every time a surface with a given id is deleted and re-created.
+`A2UIInteractionIntent.generation` pins an interaction to the generation the
+renderer actually saw; the server-side resolver (§36.5) rejects an action
+whose generation doesn't match current state, so a stale click racing a
+surface refresh cannot resolve against the wrong version.
+
+**Validation is per-item, not per-batch.** A malformed message at index 3
+does not discard messages 0–2 or 4+; `A2UIServerBatch.Item.validationError`
+carries a `code`/`surfaceID`/`path`/`message` for the one offending item, and
+`A2UITextSummary`/`EventLogView` surface it without crashing the surface.
+
+### 36.5 Client → server flow (a user interacting with a surface)
+
+```
+A2UISurfaceView (Button with an `event` action fires)
+  │ onInteract(sourceComponentID, repeatedListScopePaths, localOverlay)
+  ▼
+EngineViewModel.submitA2UIInteraction(...)
+  │ builds A2UIInteractionIntent — what the renderer directly observed:
+  │ surfaceID, generation, sourceComponentID, scope paths, unsynced overlay
+  ▼
+AgentCommand.submitA2UIInteraction(intent)  ──over the wire, Mode B──▶
+  ▼
+AgentEngine.handleSubmitA2UIInteraction(intent:adapter:)
+  │ loads the CANONICAL durable surface from SessionTranscriptRepository
+  │ (never trusts the client's copy of the surface)
+  ▼
+A2UIActionResolver.resolve(intent, against: canonicalSurface)
+  │ checks generation match, component existence, that the component
+  │ actually carries an `event` action, and evaluates its `context`
+  │ DynamicValues against the canonical dataModel + the intent's overlay
+  ├─ .failure → SilentDiagnostics.record(.a2uiActionRejected, ...); no wire write
+  └─ .success(eventName, resolvedContext)
+        ▼
+     A2UIActionEnvelope (server-computed, not client-supplied)
+        ▼
+     adapter.encodeA2UIAction(envelope) → ACPInputEncoding.a2uiAction(...)
+        │ session/prompt with one EmbeddedResource:
+        │   [{ type: "clientAction", surfaceId, sourceComponentId,
+        │      eventName, context }]
+        ▼
+     Custom ACP tool (parseA2UIClientMessage in acp/a2ui.ts)
+```
+
+**This is the trust boundary.** The renderer's `A2UIInteractionIntent` is
+*what was observed*, never *what should happen*. Only the engine — using the
+durable, server-authored surface it already owns — computes the actual
+`eventName`/`context` pair that goes on the wire. A forged or stale client
+intent cannot smuggle an arbitrary event name or context value past this
+boundary; at worst it fails resolution and gets silently diagnosed.
+
+`reportA2UIClientError` follows the same shape without a resolver step (the
+engine only ever produces one after it can already attribute a
+version/owner/surface id — see `AgentEngine+A2UI.handleReportA2UIClientError`)
+and is encoded via `ACPInputEncoding.a2uiClientError`.
+
+Both `a2uiAction` and `a2uiClientError` route through
+`ACPClientState.RequestPurpose.a2uiFeedbackPrompt` rather than the normal
+`.sessionPrompt` purpose, and are refused outright while any ordinary prompt
+is in flight (`state.hasActivePrompt()`). This keeps an A2UI action from
+creating or finalizing a chat turn, and prevents a racing/stale click from
+queuing behind — or corrupting — an active turn (v0.9.1 has no action
+id/acknowledgement to correlate against, so "never queue" is the only safe
+rule).
+
+### 36.6 ACP capability negotiation
+
+CodeMixer's `ACPInputEncoding.bootstrap` advertises A2UI support on
+`initialize` via a namespaced `_meta` key:
+
+```json
+{
+  "clientCapabilities": {
+    "_meta": {
+      "com.codecave.codemixer/a2ui": {
+        "supportedVersions": ["v0.9", "v0.9.1"],
+        "supportedCatalogIds": ["com.codecave.codemixer.test/basic-catalog-v0_9_1"]
+      }
+    }
+  }
+}
+```
+
+`A2UISchemaProfile.clientCapabilitiesMetaKeyAlias` (`"a2ui"`, unnamespaced)
+is accepted as an inbound compatibility alias when reading a *server's*
+capabilities, but CodeMixer never emits the bare alias itself. A Custom ACP
+server that wants to emit A2UI (the migration tool does) should gate
+emission on this capability being present, and fall back to plain text for
+non-A2UI clients — see `AcpServer.negotiatesA2UI` / `emitA2UI` in
+`migration-tool/src/acp/server.ts`. Because CodeMixer already advertises
+this capability in production, the migration tool's A2UI path — not its
+legacy plain-text fallback — is what a real CodeMixer session exercises
+today; the fallback exists for other, non-CodeMixer ACP clients.
+
+### 36.7 The migration tool as the reference custom-tool integration
+
+`migration-tool/src/acp/a2ui.ts` builds five surfaces deterministically from
+existing pipeline data — no new state, just a rendering of what the
+orchestrator already computed:
+
+| Surface | Built from | Replaces this legacy chat text |
+| --- | --- | --- |
+| `migration.plan.<file>` | The planner's free-text plan, split into paragraphs | A raw thought bubble with the planner's prose |
+| `migration.review-duel.<file>` | `buildReviewerDuel(a.verdict, b.verdict)` — the same helper the dashboard already used | `Reviewer A: {"verdict":...}\nReviewer B: {"verdict":...}` — the exact text the removed heuristic (§36.8) used to scrape |
+| `migration.human-review.<file>` (also reused for control-session proceed/canary/wave gates) | The review brief + `ReviewOption[]`, with one nonce-carrying `event` Button per option | ACP `session/request_permission` |
+| `migration.complete.<file>` / `migration.complete.__run__` | Per-file confidence/fix-round summary, or the run's verified-file count | A plain completion chat line |
+| `migration.error.<file>` / `migration.error.__run__` | Characterization/pipeline error title + message | A plain error chat line |
+
+`AcpServer` (`server.ts`) owns surface lifecycle: `emitA2UI` sends
+`deleteSurface` before re-creating a surface with the same id (so
+CodeMixer's generation counter advances instead of silently reusing stale
+component ids), and `a2uiSurfaceOwners` tracks which session owns which
+surface for cleanup. The human-review Button contexts carry a per-file
+random `nonce` (`reviewNonces`) that `resolveA2UIReviewDecision` must match
+before honoring a `migrationReviewDecision` action — defense in depth
+alongside the pre-existing first-wins `resolvedReviewFiles` gate, since
+v0.9.1 has no built-in action replay protection.
+
+Inbound actions arrive as an ordinary `session/prompt` whose `prompt` carries
+one MIME-typed `EmbeddedResource`; `parseA2UIClientMessage` (`acp/a2ui.ts`)
+recognizes the `clientAction`/`clientError` shape `ACPInputEncoding` emits
+and `AcpServer.sessionPrompt` dispatches to `resolveA2UIReviewDecision`
+*before* falling through to normal text-prompt handling — an A2UI action
+never becomes a chat message.
+
+### 36.8 What A2UI replaced (and why the heuristics are gone)
+
+Before A2UI, `AgentUI` guessed at custom-tool structure in two places:
+
+- `MessageViews.swift`'s `StreamingAssistantContentView.isReviewerOutput` /
+  `isStructuredOutput` — regex/prefix sniffing during live token streaming to
+  decide whether to show a "Reviewer comment streaming" / "Structured output
+  streaming" placeholder instead of raw text.
+- `MarkdownProseView.swift`'s `reviewerContent(from:)` — a hand-rolled
+  balanced-brace JSON extractor that pulled `Reviewer A: {...}` / bare
+  `{"verdict":...}` objects out of assistant prose (even mid-sentence) and
+  rendered them as `ReviewerCommentView` cards.
+
+Both were removed once (a) the migration tool emits the equivalent content
+as an A2UI human-review / review-duel surface (§36.7) and (b) the legacy,
+non-A2UI-capable fallback (plain `Reviewer A: {"verdict":...}` chat text) was
+verified to still work end to end without needing UI-side reconstruction —
+see `migration-tool/tests/acp-integration.test.ts` (`emits an A2UI
+human-review surface...`) and `migration-tool/tests/a2ui.test.ts`. Any
+*other* custom ACP tool that still emits ad hoc structured text (rather than
+an A2UI surface) now renders as plain prose — exactly the generalization
+the user-facing complaint asked for: no tool gets bespoke text-sniffing in
+`AgentUI` again. `MarkdownProseView.codeLikeSnippet` (unfenced-code/JSON
+collapse in `.collapsed` transcript mode) is unrelated to this and was kept
+— it is a generic prose-readability affordance for any agent's plain text,
+not a custom-tool structure guess.
+
+### 36.9 Safety limits and sensitive data
+
+Every numeric ceiling used while decoding, reducing, or evaluating A2UI
+content is a named constant in `A2UILimits` (payload bytes, batch items,
+JSON depth/nodes, surfaces per session, components per surface, list
+expansion, expression depth/call-count, pointer length, regex pattern/input
+length, resolved-string length, data-model update coalescing interval) —
+there is no ad hoc magic number at any A2UI call site. `A2UIEvaluator`
+enforces the expression-depth/call-count/regex/string-length limits during
+evaluation so a maliciously deep or wide expression graph fails closed
+rather than degrading render performance or looping. Text resolved through
+`A2UIEvaluator` still flows through the same `.private`-by-default logging
+discipline as the rest of the transcript (§23) — A2UI content is user/agent
+data, not a name or diagnostic string.
+
+### 36.10 Testing
+
+| Layer | Coverage |
+| --- | --- |
+| Schema/limit/catalog structural rules | `tests/Core/A2UICoreTests/*` |
+| Wire round-trip (`AgentEvent.a2uiBatch`, both new `AgentCommand` cases) | `tests/Remote/RemoteParityTests/WireCodecParityTests.swift`, `tests/Core/AgentProtocolTests/WireFrameRoundTripTests.swift` (`WireVersion.current == .v4`) |
+| ACP decode/encode (capability, resource extraction, action/error encoding) | `tests/AgenticCLIs/AgentClientProtocol/ACPAdapterTests/*` |
+| Durable persistence/replay | `tests/Core/AgentCoreTests/SessionTranscriptTests.swift` |
+| `EngineViewModel` reduction | `tests/AgentUITests/EngineViewModelTests.swift` |
+| Migration-tool surface builders + client-message parsing (pure, no process spawn) | `migration-tool/tests/a2ui.test.ts` |
+| End-to-end capability negotiation + human-review surface + action round-trip | `migration-tool/tests/acp-integration.test.ts` (`emits an A2UI human-review surface...`), driven by `migration-tool/tests/live/LiveMigrationHarness.ts`'s `a2uiCapable` flow |
 
 ---
 

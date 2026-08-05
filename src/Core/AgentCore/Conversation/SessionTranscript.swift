@@ -1,5 +1,6 @@
 /// Owns the durable, semantic conversation state for one session. The
 /// repository serializes mutation; this value owns folding and projections.
+import A2UICore
 import AgentProtocol
 import Foundation
 
@@ -9,11 +10,20 @@ struct SessionTranscript: Sendable {
     let key: SessionTranscriptKey
     private(set) var entries: [TranscriptEntry]
     private(set) var changedFiles: [ChangedFile]
+    /// Canonical, generation-keyed A2UI surfaces derived from the folded
+    /// `.a2uiSurface` entries — the same shape `AgentEngine+A2UI` reads when
+    /// resolving a trusted client action against the durable surface.
+    private(set) var a2uiSurfaces: [String: A2UISurfaceState]
+    /// Highest generation ever assigned per surfaceId, preserved across
+    /// delete so recreate keeps bumping forward. Derived purely from
+    /// surviving entries on rebuild — see note on `rebuildIndexes()`.
+    private(set) var a2uiRetiredGenerations: [String: Int]
     private var userIndexesByID: [String: Int]
     private var assistantIndexesByBlockID: [String: Int]
     private var thinkingIndexesByID: [UUID: Int]
     private var toolIndexesByID: [String: Int]
     private var fileIndexesByPath: [String: Int]
+    private var a2uiSurfaceIndexesByID: [String: Int]
 
     init(key: SessionTranscriptKey,
          entries: [TranscriptEntry] = [],
@@ -21,11 +31,14 @@ struct SessionTranscript: Sendable {
         self.key = key
         self.entries = entries
         self.changedFiles = changedFiles
+        self.a2uiSurfaces = [:]
+        self.a2uiRetiredGenerations = [:]
         self.userIndexesByID = [:]
         self.assistantIndexesByBlockID = [:]
         self.thinkingIndexesByID = [:]
         self.toolIndexesByID = [:]
         self.fileIndexesByPath = [:]
+        self.a2uiSurfaceIndexesByID = [:]
         rebuildIndexes()
     }
 
@@ -94,9 +107,57 @@ struct SessionTranscript: Sendable {
                           recordedAt: recordedAt)
         case .truncateAfterUser(let id, _):
             return truncate(afterUserTurnID: id)
+        case .applyA2UIBatch(let batch, let recordedAt):
+            return applyA2UIBatch(batch, recordedAt: recordedAt)
         default:
             return false
         }
+    }
+
+    /// Runs `batch` through `A2UISurfaceReducer` against the transcript's own
+    /// canonical surface set, then folds every touched surface into its
+    /// single durable `.a2uiSurface` entry (create/update in place; delete
+    /// removes the entry — see `TranscriptBlock.a2uiSurface`).
+    private mutating func applyA2UIBatch(_ batch: A2UIServerBatch, recordedAt: Date) -> Bool {
+        let result = A2UISurfaceReducer.apply(batch,
+                                              to: a2uiSurfaces,
+                                              retiredGenerations: a2uiRetiredGenerations,
+                                              at: recordedAt)
+        a2uiRetiredGenerations = result.retiredGenerations
+        let appliedIndexes = Set(result.outcomes.filter(\.applied).map(\.index))
+        guard !appliedIndexes.isEmpty else { return false }
+
+        var deletedIDs: Set<String> = []
+        var touchedIDs: [String] = []
+        for item in batch.items where appliedIndexes.contains(item.index) {
+            guard let message = item.message else { continue }
+            if case .deleteSurface(let surfaceID) = message {
+                deletedIDs.insert(surfaceID)
+            } else {
+                touchedIDs.append(message.surfaceID)
+            }
+        }
+
+        a2uiSurfaces = result.surfaces
+        if !deletedIDs.isEmpty {
+            entries.removeAll { entry in
+                if case .a2uiSurface(let state) = entry.block { return deletedIDs.contains(state.surfaceID) }
+                return false
+            }
+        }
+        for surfaceID in touchedIDs where !deletedIDs.contains(surfaceID) {
+            guard let state = a2uiSurfaces[surfaceID] else { continue }
+            if let index = a2uiSurfaceIndexesByID[surfaceID], index < entries.count,
+               case .a2uiSurface(let existing) = entries[index].block, existing.surfaceID == surfaceID {
+                entries[index].block = .a2uiSurface(state)
+            } else {
+                entries.append(.init(id: .init(rawValue: "a2ui:\(surfaceID)"),
+                                     recordedAt: recordedAt,
+                                     block: .a2uiSurface(state)))
+            }
+        }
+        rebuildIndexes()
+        return true
     }
 
     @discardableResult
@@ -138,6 +199,11 @@ struct SessionTranscript: Sendable {
                 let detail = action.detail.map { " — \($0)" } ?? ""
                 return .init(role: .action,
                              text: action.title + detail,
+                             timestamp: entry.recordedAt)
+            case .a2uiSurface(let state):
+                guard state.isRenderable else { return nil }
+                return .init(role: .assistant,
+                             text: A2UITextSummary.summary(for: state),
                              timestamp: entry.recordedAt)
             default:
                 return nil
@@ -304,12 +370,24 @@ struct SessionTranscript: Sendable {
         toolIndexesByID[id]
     }
 
+    /// Re-derives every index dict, including `a2uiSurfaces`, purely from the
+    /// surviving `entries`. Because each `.a2uiSurface` entry already holds
+    /// the fully-folded state at that point, this is exact — with one
+    /// accepted limitation: `a2uiRetiredGenerations` for a surfaceId whose
+    /// only entry was truncated away resets to whatever surviving entries
+    /// show (0 if none survive), so a rare post-truncate recreate of that
+    /// exact id could reuse a generation number. Truncation already discards
+    /// that surface's history, so this is consistent with treating it as
+    /// a clean slate rather than a correctness bug.
     private mutating func rebuildIndexes() {
         userIndexesByID.removeAll(keepingCapacity: true)
         assistantIndexesByBlockID.removeAll(keepingCapacity: true)
         thinkingIndexesByID.removeAll(keepingCapacity: true)
         toolIndexesByID.removeAll(keepingCapacity: true)
         fileIndexesByPath.removeAll(keepingCapacity: true)
+        a2uiSurfaceIndexesByID.removeAll(keepingCapacity: true)
+        a2uiSurfaces.removeAll(keepingCapacity: true)
+        a2uiRetiredGenerations.removeAll(keepingCapacity: true)
         for (index, entry) in entries.enumerated() {
             self.index(entry.block, at: index)
         }
@@ -327,6 +405,11 @@ struct SessionTranscript: Sendable {
             toolIndexesByID[tool.id] = index
         case .file(let relativePath, _):
             fileIndexesByPath[relativePath] = index
+        case .a2uiSurface(let state):
+            a2uiSurfaceIndexesByID[state.surfaceID] = index
+            a2uiSurfaces[state.surfaceID] = state
+            a2uiRetiredGenerations[state.surfaceID] = max(a2uiRetiredGenerations[state.surfaceID] ?? 0,
+                                                          state.generation)
         case .phase, .clientAction:
             break
         }
@@ -374,6 +457,23 @@ struct SessionTranscript: Sendable {
             return [.sessionPhaseChanged(sessionID: sessionID, phase: phase)]
         case .clientAction(let action):
             return [.clientAction(action)]
+        case .a2uiSurface(let state):
+            // Synthesizes a full create/components/data sequence rather than
+            // replaying original deltas, so a late-joining client reconstructs
+            // this surface correctly even when its deltas fell outside
+            // `replayEntryLimit` (plan §4).
+            let items = state.synthesizedReplayMessages().enumerated().map {
+                A2UIServerBatch.Item(index: $0.offset, message: $0.element)
+            }
+            return [.a2uiBatch(A2UIServerBatch(
+                agentID: state.agentID,
+                transcriptKey: .init(projectRootPath: key.projectRoot.path,
+                                     namespace: key.namespace,
+                                     sessionID: key.sessionID),
+                resourceURI: "a2ui://replay/\(state.surfaceID)",
+                items: items,
+                recordedAt: state.updatedAt
+            ))]
         }
     }
 }

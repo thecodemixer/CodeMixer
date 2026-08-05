@@ -42,6 +42,33 @@ struct SessionNavigatorFilteringTests {
         #expect(chats.map(\.id) == ["file:Orders.cs"])
     }
 
+    @Test("chat list drops archived rows so a migration Restart clears the navigator")
+    func hidesArchivedSessions() {
+        let workspace = URL(fileURLWithPath: "/tmp/mig")
+        let sessions = [
+            SessionSummary(
+                id: "file:original/Orders.cs",
+                agentID: .other,
+                workspace: workspace,
+                title: "original/Orders.cs",
+                lastActivity: Date(timeIntervalSince1970: 3),
+                messageCount: 4,
+                archived: true
+            ),
+            SessionSummary(
+                id: "file:original/Invoices.cs",
+                agentID: .other,
+                workspace: workspace,
+                title: "original/Invoices.cs",
+                lastActivity: Date(timeIntervalSince1970: 4),
+                messageCount: 1,
+                archived: false
+            ),
+        ]
+        let chats = SessionNavigatorFiltering.chatSessions(from: sessions, dashboardTitle: nil)
+        #expect(chats.map(\.id) == ["file:original/Invoices.cs"])
+    }
+
     @Test("preferringSingleOverview keeps the overview that has a dashboard URL")
     func prefersOverviewWithURL() {
         let workspace = URL(fileURLWithPath: "/tmp/mig")

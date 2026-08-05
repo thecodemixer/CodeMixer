@@ -37,13 +37,13 @@ extension ACPEventDecoder {
         }
         switch kind {
         case "agent_message_chunk":
-            return agentMessageChunk(update)
+            return agentMessageChunk(update, params: params)
         case "agent_thought_chunk":
             return agentThoughtChunk(update)
         case "tool_call":
-            return toolCall(update)
+            return toolCall(update, params: params)
         case "tool_call_update":
-            return toolCallUpdate(update)
+            return toolCallUpdate(update, params: params)
         case "user_message_chunk":
             // Live user chunks for the foreground session are unusual; ignore.
             // Foreign user chunks are handled above via cacheForeignStreaming.
@@ -139,6 +139,12 @@ extension ACPEventDecoder {
                                kind: String?) async {
         guard let sessionID = params["sessionId"]?.stringValue,
               !sessionID.isEmpty else { return }
+
+        if let resource = a2uiResource(in: update["content"]),
+           let event = a2uiBatchEvent(uri: resource.uri, text: resource.text, sessionID: sessionID) {
+            await recordBackgroundSessionEvents(.init(sessionID: sessionID, events: [event]))
+            return
+        }
 
         func persist(_ role: ACPTurnRole, _ text: String) async {
             guard !text.isEmpty else { return }
@@ -254,8 +260,15 @@ extension ACPEventDecoder {
             ?? ""
     }
 
-    func agentMessageChunk(_ update: JSONValue) -> Batch {
+    func agentMessageChunk(_ update: JSONValue, params: JSONValue) -> Batch {
         let content = update["content"]
+        if let resource = a2uiResource(in: content) {
+            let sessionID = params["sessionId"]?.stringValue ?? state.sessionID() ?? ""
+            guard let event = a2uiBatchEvent(uri: resource.uri, text: resource.text, sessionID: sessionID) else {
+                return Batch()
+            }
+            return Batch(events: [event])
+        }
         let text = content?["text"]?.stringValue
             ?? content?["content"]?.stringValue
             ?? ""
@@ -284,7 +297,14 @@ extension ACPEventDecoder {
         return Batch(events: [.thinkingChunk(blockID: blockID, delta: text)])
     }
 
-    func toolCall(_ update: JSONValue) -> Batch {
+    func toolCall(_ update: JSONValue, params: JSONValue) -> Batch {
+        if let resource = a2uiResource(in: update["content"]) {
+            let sessionID = params["sessionId"]?.stringValue ?? state.sessionID() ?? ""
+            guard let event = a2uiBatchEvent(uri: resource.uri, text: resource.text, sessionID: sessionID) else {
+                return Batch()
+            }
+            return Batch(events: [event])
+        }
         let toolCallID = update["toolCallId"]?.stringValue
             ?? update["id"]?.stringValue
             ?? random.uuid().uuidString
@@ -293,7 +313,7 @@ extension ACPEventDecoder {
             ?? "Tool"
         let status = update["status"]?.stringValue
         if status == "completed" || status == "failed" {
-            return toolCallUpdate(update)
+            return toolCallUpdate(update, params: params)
         }
         let inputJSON = stringified(update)
         state.rememberToolStart(id: toolCallID, name: title, inputJSON: inputJSON)
@@ -310,7 +330,14 @@ extension ACPEventDecoder {
         ])
     }
 
-    func toolCallUpdate(_ update: JSONValue) -> Batch {
+    func toolCallUpdate(_ update: JSONValue, params: JSONValue) -> Batch {
+        if let resource = a2uiResource(in: update["content"]) {
+            let sessionID = params["sessionId"]?.stringValue ?? state.sessionID() ?? ""
+            guard let event = a2uiBatchEvent(uri: resource.uri, text: resource.text, sessionID: sessionID) else {
+                return Batch()
+            }
+            return Batch(events: [event])
+        }
         let toolCallID = update["toolCallId"]?.stringValue
             ?? update["id"]?.stringValue
             ?? "tool"

@@ -120,6 +120,10 @@ private struct Line: Identifiable {
             (kind, body, tint) = ("imported", "\(path.lastPathComponent): \(imported), \(failed) failed", Theme.signal.info)
         case .sessionPhaseChanged(let id, let phase):
             (kind, body, tint) = ("phase", "\(id): \(phase.label) (#\(phase.ordinal))", Theme.signal.info)
+        case .a2uiBatch(let batch):
+            let applied = batch.items.filter { $0.validationError == nil }.count
+            (kind, body, tint) = ("a2ui", "\(batch.resourceURI): \(applied)/\(batch.items.count) applied",
+                                  Theme.signal.info)
         }
     }
 }

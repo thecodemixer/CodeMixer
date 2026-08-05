@@ -1,3 +1,4 @@
+import A2UICore
 import SwiftUI
 
 /// The reading column: user prompts, prominent live thinking, and assistant
@@ -249,6 +250,17 @@ struct TranscriptLaneView: View {
             EmptyView()
         case .clientAction(let action):
             ClientActionRowView(action: action)
+        case .a2uiSurface(let surfaceID):
+            if let surface = model.a2uiSurfaces[surfaceID] {
+                A2UISurfaceView(state: surface,
+                                onInteract: { componentID, scopePaths, overlay in
+                                    model.submitA2UIInteraction(surfaceID: surfaceID,
+                                                                sourceComponentID: componentID,
+                                                                repeatedListScopePaths: scopePaths,
+                                                                localOverlay: overlay)
+                                },
+                                now: model.clock.now())
+            }
         }
     }
 
@@ -371,10 +383,22 @@ struct TranscriptLaneView: View {
         guard !query.isEmpty else { matchIndices = []; return }
         let visible = Set(transcriptMessageIndices)
         matchIndices = model.messages.enumerated().compactMap { idx, msg in
-            guard visible.contains(idx), let text = msg.textContent else { return nil }
+            guard visible.contains(idx) else { return nil }
+            let text = searchableText(for: msg)
+            guard let text else { return nil }
             return text.localizedCaseInsensitiveContains(query) ? idx : nil
         }
         currentMatchIndex = 0
+    }
+
+    /// `.a2uiSurface` markers carry no inline text (like `.toolCall`); their
+    /// redacted host-generated summary lives in `model.a2uiSurfaces`.
+    private func searchableText(for message: EngineViewModel.Message) -> String? {
+        if case .a2uiSurface(let surfaceID) = message {
+            guard let surface = model.a2uiSurfaces[surfaceID] else { return nil }
+            return A2UITextSummary.summary(for: surface)
+        }
+        return message.textContent
     }
 
     private func searchNext() {

@@ -1,5 +1,6 @@
 /// Serializes access to session transcript aggregates, batches journal writes,
 /// and exposes the only history/listing API used by the engine.
+import A2UICore
 import Foundation
 
 actor SessionTranscriptRepository {
@@ -94,6 +95,13 @@ actor SessionTranscriptRepository {
 
     func changedFiles(for key: SessionTranscriptKey) throws -> [ChangedFile] {
         try transcript(for: key).changedFiles
+    }
+
+    /// The canonical, durable surface an `A2UIInteractionIntent` or client
+    /// error report must be resolved against — never the renderer's own
+    /// possibly-stale copy (trust boundary, see `AgentEngine+A2UI`).
+    func a2uiSurface(surfaceID: String, for key: SessionTranscriptKey) throws -> A2UISurfaceState? {
+        try transcript(for: key).a2uiSurfaces[surfaceID]
     }
 
     func reconcileChangedFiles(_ gitPaths: [ChangedFile],

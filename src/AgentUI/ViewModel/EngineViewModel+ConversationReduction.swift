@@ -1,3 +1,4 @@
+import A2UICore
 import Foundation
 import AgentCore
 import AgentProtocol
@@ -272,6 +273,51 @@ extension EngineViewModel {
             loadSessions(for: projectPath.path)
         case .sessionPhaseChanged(let phaseSessionID, let phase):
             recordSessionPhase(sessionID: phaseSessionID, phase: phase)
+        case .a2uiBatch(let batch):
+            applyA2UIBatch(batch)
+        }
+    }
+
+    /// Live counterpart to `SessionTranscript.applyA2UIBatch`: folds a batch
+    /// into `a2uiSurfaces` through the one shared `A2UISurfaceReducer`, then
+    /// creates/updates/removes the corresponding `.a2uiSurface` ordering
+    /// marker in `messages` exactly like `.toolCall` does for tool calls.
+    func applyA2UIBatch(_ batch: A2UIServerBatch) {
+        noteAgentReplyObserved()
+        let result = A2UISurfaceReducer.apply(batch,
+                                              to: a2uiSurfaces,
+                                              retiredGenerations: a2uiRetiredGenerations,
+                                              at: clock.now())
+        a2uiRetiredGenerations = result.retiredGenerations
+        let appliedIndexes = Set(result.outcomes.filter(\.applied).map(\.index))
+        guard !appliedIndexes.isEmpty else { return }
+
+        var deletedIDs: Set<String> = []
+        var touchedIDs: [String] = []
+        for item in batch.items where appliedIndexes.contains(item.index) {
+            guard let message = item.message else { continue }
+            if case .deleteSurface(let surfaceID) = message {
+                deletedIDs.insert(surfaceID)
+            } else {
+                touchedIDs.append(message.surfaceID)
+            }
+        }
+
+        a2uiSurfaces = result.surfaces
+        if !deletedIDs.isEmpty {
+            messages.removeAll {
+                if case .a2uiSurface(let surfaceID) = $0 { return deletedIDs.contains(surfaceID) }
+                return false
+            }
+        }
+        for surfaceID in touchedIDs where !deletedIDs.contains(surfaceID) {
+            guard a2uiSurfaces[surfaceID] != nil else { continue }
+            if !messages.contains(where: {
+                if case .a2uiSurface(let existing) = $0 { return existing == surfaceID }
+                return false
+            }) {
+                messages.append(.a2uiSurface(surfaceID: surfaceID))
+            }
         }
     }
 
@@ -371,6 +417,8 @@ extension EngineViewModel {
         messages = []
         activeToolCalls = []
         changedFiles = []
+        a2uiSurfaces = [:]
+        a2uiRetiredGenerations = [:]
         lastUserBubbleID = nil
         selectedTurnID = nil
         selectedPhaseID = nil

@@ -197,39 +197,15 @@ private struct StreamingAssistantContentView: View {
         let language: String?
     }
 
+    /// Only an explicit fence is trusted here — structured custom-ACP payloads
+    /// (reviewer verdicts, plans, decisions) travel as A2UI surfaces
+    /// (`A2UISurfaceView`), not as guessed-at chat text. See
+    /// `docs/architecture.md` "A2UI" for the surface-based replacement of the
+    /// text-sniffing this view used to do.
     private var structuredSummary: Summary? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        if trimmed.contains("```") {
-            return Summary(label: "Code block streaming", language: nil)
-        }
-        if isReviewerOutput(trimmed) {
-            return Summary(label: "Reviewer comment streaming", language: "json")
-        }
-        if isStructuredOutput(trimmed) {
-            return Summary(label: "Structured output streaming", language: nil)
-        }
-        return nil
-    }
-
-    private func isReviewerOutput(_ text: String) -> Bool {
-        (text.hasPrefix("Reviewer ") && text.contains("{"))
-            || ((text.hasPrefix("{") || text.hasPrefix("["))
-                && (text.contains(#""verdict""#) || text.contains(#""findings""#)))
-    }
-
-    private func isStructuredOutput(_ text: String) -> Bool {
-        if text.hasPrefix("{") || text.hasPrefix("[") { return true }
-        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
-        guard lines.count >= 12 else { return false }
-        let markers = ["import ", "export ", "const ", "let ", "var ", "func ",
-                       "function ", "class ", "struct ", "enum ", "return "]
-        return lines.contains { line in
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            return markers.contains(where: trimmed.hasPrefix)
-                || trimmed.hasSuffix("{")
-                || trimmed.hasSuffix(";")
-        }
+        guard !trimmed.isEmpty, trimmed.contains("```") else { return nil }
+        return Summary(label: "Code block streaming", language: nil)
     }
 }
 

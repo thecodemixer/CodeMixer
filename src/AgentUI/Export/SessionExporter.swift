@@ -1,3 +1,4 @@
+import A2UICore
 import Foundation
 import AgentCore
 
@@ -62,16 +63,19 @@ public enum SessionExporter {
         return Data(html.utf8)
     }
 
-    public static func markdown(_ messages: [EngineViewModel.Message]) -> Data {
-        markdown(snapshotMessages(from: messages))
+    public static func markdown(_ messages: [EngineViewModel.Message],
+                                a2uiSurfaces: [String: A2UISurfaceState] = [:]) -> Data {
+        markdown(snapshotMessages(from: messages, a2uiSurfaces: a2uiSurfaces))
     }
 
-    public static func jsonl(_ messages: [EngineViewModel.Message]) -> Data {
-        jsonl(snapshotMessages(from: messages))
+    public static func jsonl(_ messages: [EngineViewModel.Message],
+                             a2uiSurfaces: [String: A2UISurfaceState] = [:]) -> Data {
+        jsonl(snapshotMessages(from: messages, a2uiSurfaces: a2uiSurfaces))
     }
 
-    public static func html(_ messages: [EngineViewModel.Message]) -> Data {
-        html(snapshotMessages(from: messages))
+    public static func html(_ messages: [EngineViewModel.Message],
+                            a2uiSurfaces: [String: A2UISurfaceState] = [:]) -> Data {
+        html(snapshotMessages(from: messages, a2uiSurfaces: a2uiSurfaces))
     }
 
     public static func htmlEscaped(_ string: String) -> String {
@@ -81,7 +85,12 @@ public enum SessionExporter {
             .replacingOccurrences(of: ">", with: "&gt;")
     }
 
-    public static func snapshotMessages(from messages: [EngineViewModel.Message])
+    /// `a2uiSurfaces` supplies the live canonical state for `.a2uiSurface`
+    /// ordering markers, which — like `.toolCall` — carry no text inline.
+    /// Exports the same redacted `A2UITextSummary` used for durable
+    /// transcript snapshots rather than raw JSON.
+    public static func snapshotMessages(from messages: [EngineViewModel.Message],
+                                        a2uiSurfaces: [String: A2UISurfaceState] = [:])
         -> [SnapshotService.SnapshotMessage] {
         let now = Date()
         return messages.compactMap { message in
@@ -93,6 +102,9 @@ public enum SessionExporter {
             case .clientAction(let action):
                 let text = action.detail.map { "\(action.title): \($0)" } ?? action.title
                 return .init(role: .action, text: text, timestamp: now)
+            case .a2uiSurface(let surfaceID):
+                guard let surface = a2uiSurfaces[surfaceID] else { return nil }
+                return .init(role: .assistant, text: A2UITextSummary.summary(for: surface), timestamp: now)
             case .thinkingChunk, .thinkingComplete, .toolCall:
                 return nil
             }

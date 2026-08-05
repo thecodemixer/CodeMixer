@@ -35,6 +35,11 @@ public final class ACPClientState: @unchecked Sendable {
         case sessionList
         case sessionSetMode
         case sessionSetModel
+        /// `session/prompt` carrying a validated A2UI action/error Resource
+        /// rather than user text. Never creates/finalizes a user or assistant
+        /// turn and never touches heartbeat/idle prompt-state bookkeeping
+        /// (plan §3) — `+Session` branches on this purpose to skip that path.
+        case a2uiFeedbackPrompt
         case other(String)
     }
 

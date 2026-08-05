@@ -93,8 +93,19 @@ public protocol Adapter: Sendable {
 
     // 11. Rendering hints
     func renderHint(toolName: String, input: ToolInput) -> RenderHint
+
+    // 12. Generalized custom-tool UI (optional; default `nil` in protocol extension)
+    func encodeA2UIAction(_ envelope: A2UIActionEnvelope) -> Data?
+    func encodeA2UIClientError(_ envelope: A2UIClientErrorEnvelope) -> Data?
 }
 ```
+
+Section 12 lets a vendor whose CLI speaks a structured UI protocol (Codemixer's
+case: [A2UI](https://github.com/a2ui-project/a2ui) over ACP `EmbeddedResource`)
+encode client-to-server actions without the core engine or UI ever importing
+that vendor's module — the default `nil` implementation means adapters that
+don't support it simply opt out. See `docs/architecture.md` §36 for the full
+event/command/transcript treatment on the ingestion side (section 5 above).
 
 Codemixer's live protocol uses `SlashCommand`, `AgentModelOption`, and
 transport-specific `AgentTransportDescriptor` names — see `AgentAdapter.swift`.

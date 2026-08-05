@@ -10,6 +10,11 @@ public enum WireVersion: Int, Sendable, Codable {
     case v1 = 1
     case v2 = 2
     case v3 = 3
+    /// Adds `AgentEvent.a2uiBatch` / `AgentCommand.submitA2UIInteraction` /
+    /// `AgentCommand.reportA2UIClientError`. Wire-breaking under this
+    /// repository's strict decoder policy — older clients must reconnect
+    /// against a matching daemon rather than silently drop the new cases.
+    case v4 = 4
 
-    public static let current: WireVersion = .v3
+    public static let current: WireVersion = .v4
 }

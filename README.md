@@ -208,6 +208,14 @@ added; later sidebar reads never rescan vendor state.
 [`docs/architecture.md` §4.1](docs/architecture.md) and
 [`src/Remote/AgentRemoteControl/README.md`](src/Remote/AgentRemoteControl/README.md).
 
+Custom ACP tools that need richer UI than markdown prose — a plan, a
+side-by-side reviewer verdict, a decision with buttons — emit an
+[A2UI](https://github.com/a2ui-project/a2ui) v0.9.1 Basic Catalog surface
+instead of relying on `AgentUI` to guess at their structured output.
+Codemixer decodes it into a typed, durable, generation-keyed surface and
+renders it with a generic native SwiftUI renderer, with zero per-tool
+knowledge in `AgentUI`. See [`docs/architecture.md` §36](docs/architecture.md).
+
 Full treatment in [`docs/architecture.md`](docs/architecture.md).
 
 ---
@@ -236,7 +244,8 @@ Package.swift
 src/
 ├── Core/            # agent-agnostic engine + portable wire protocol + POSIX shim
 │   ├── CPosixBridge/    # C shim: openpty, posix_spawn, FD_CLOEXEC
-│   ├── AgentProtocol/   # pure Foundation Codable DTOs — portable wire alphabet
+│   ├── AgentProtocol/   # pure Foundation Codable DTOs — portable wire alphabet, incl. A2UI/
+│   ├── A2UICore/        # A2UI limits, catalog descriptor, JSON Pointer, validator, reducer, evaluator
 │   └── AgentCore/       # AgentTransport, PTY/reaper, stdio transport, terminal engine, event bus,
 │                        # engine actor + commands, snapshot, git diff/revert,
 │                        # hooks, FSEvents, attachments, status, activity,
@@ -259,6 +268,7 @@ tests/
 │   └── AgentTestSupportTests/
 ├── Core/
 │   ├── AgentProtocolTests/
+│   ├── A2UICoreTests/
 │   └── AgentCoreTests/
 ├── Remote/
 │   ├── AgentRemoteControlTests/
@@ -281,13 +291,14 @@ tests/
 | Module | Sources | Knows about | Imports |
 | --- | --- | --- | --- |
 | `CPosixBridge` | `src/Core/CPosixBridge/` | `openpty`, `posix_spawn`, `winsize`, `killpg`, `fcntl`. Nothing Swift-side. | — |
-| `AgentProtocol` | `src/Core/AgentProtocol/` | Pure value types. Wire DTOs, `AgentCommand`, `AgentEventWire`, frames, prefs, decisions, attachment refs. | Foundation only. |
-| `AgentCore` | `src/Core/AgentCore/` | `AgentTransport` seam, interactive terminal transport, stdio JSON-RPC transport, PTY + reaper, terminal, hooks, FSEvents, git diff/revert, attachments, events, engine, snapshot, bus, status, activity, network transport, persistence, paths, seams. **The agent-agnostic engine.** | `CPosixBridge`, `AgentProtocol`, `SwiftTerm`. |
+| `AgentProtocol` | `src/Core/AgentProtocol/` | Pure value types. Wire DTOs, `AgentCommand`, `AgentEventWire`, frames, prefs, decisions, attachment refs, A2UI wire DTOs (`A2UI/`). | Foundation only. |
+| `A2UICore` | `src/Core/A2UICore/` | A2UI limits, Basic Catalog descriptor, JSON Pointer, canonical surface state, validator, reducer, evaluator, text summary, action resolver — see `docs/architecture.md` §36. | `AgentProtocol`. |
+| `AgentCore` | `src/Core/AgentCore/` | `AgentTransport` seam, interactive terminal transport, stdio JSON-RPC transport, PTY + reaper, terminal, hooks, FSEvents, git diff/revert, attachments, events, engine, snapshot, bus, status, activity, network transport, persistence, paths, seams, A2UI engine-side command handling. **The agent-agnostic engine.** | `CPosixBridge`, `AgentProtocol`, `A2UICore`, `SwiftTerm`. |
 | `ClaudeCode` | `src/AgenticCLIs/ClaudeCode/` (`Adapter/`, `Common/`, `digital-twin/`) | `claude` binary lookup, hooks, transcript JSONL, slash commands, TUI fallback, shared path/input helpers, and the `ClaudeCodeTwin` digital twin. | `AgentCore`, `AgentProtocol`. |
 | `Codex` | `src/AgenticCLIs/Codex/` (`Adapter/`, `Common/`, `digital-twin/`) | `codex app-server --stdio` lookup/bootstrap, JSON-RPC framing, event decoding, input encoding, thread index, model/command catalogs, and `CodexTwin`. | `AgentCore`, `AgentProtocol`. |
 | `AgentClientProtocol` | `src/AgenticCLIs/AgentClientProtocol/` (`Adapter/`, `Common/`, `External/`, `digital-twin/`) | ACP client for user-configured agent servers: initialize/session framing, reverse FS/terminal, session index, `ACPTwin`. | `AgentCore`, `AgentProtocol`. |
 | `AgentRemoteControl` | `src/Remote/AgentRemoteControl/` | WebSocket server, pairing PIN + bearer tokens, paired-device store, TLS/cert manager, HTTP sidecar, Bonjour, remote engine client. | `AgentCore`, `AgentProtocol`. |
-| `AgentUI` | `src/AgentUI/` | SwiftUI views, theme tokens, `EngineViewModel`, `IntentReveal`, conversation/composer/sidebar/palette/diff/settings/voice/export/search/notifications/debug surfaces. **Agent-agnostic.** | `AgentCore`. |
+| `AgentUI` | `src/AgentUI/` | SwiftUI views, theme tokens, `EngineViewModel`, `IntentReveal`, conversation/composer/sidebar/palette/diff/settings/voice/export/search/notifications/debug surfaces, native A2UI Basic Catalog renderer (`A2UISurfaceView`). **Agent-agnostic.** | `AgentCore`, `A2UICore`. |
 | `AgentTestSupport` | `tests/TestSupport/AgentTestSupport/` | Deterministic fakes for all four seams + `MockAdapter`. | `AgentCore`, `AgentProtocol`. |
 | `CodemixerApp` | `src/CodemixerApp/` | `@main`, root scene, bootstrap, adapter registration. Tiny. | `AgentCore`, `AgentUI`, `ClaudeCode`, `Codex`, `AgentClientProtocol`, `AgentRemoteControl`. |
 | `CodemixerDaemon` | `src/Remote/CodemixerDaemon/` | `@main`, signal handling, server wiring. Tinier. | `AgentCore`, `ClaudeCode`, `Codex`, `AgentClientProtocol`, `AgentRemoteControl`. |

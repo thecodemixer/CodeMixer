@@ -57,6 +57,7 @@ public enum AgentEventWire: Sendable, Codable, Hashable {
     case historyImportProgress(projectPath: String, completed: Int, total: Int)
     case historyImportFinished(projectPath: String, imported: Int, failed: Int)
     case sessionPhaseChanged(sessionID: String, phase: WireSessionPhase)
+    case a2uiBatch(A2UIServerBatch)
 }
 
 /// Portable mirror of the store-owned session-list projection.

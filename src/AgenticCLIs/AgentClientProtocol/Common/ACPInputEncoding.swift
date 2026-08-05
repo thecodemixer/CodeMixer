@@ -30,6 +30,18 @@ public enum ACPInputEncoding {
                     "terminal": .bool(true),
                     "_meta": .object([
                         "codemixer.dev/sessionNew": .bool(true),
+                        // Test-scoped catalog id only: the official Basic
+                        // Catalog id is not advertised in production until
+                        // the complete component/a11y/security matrix passes
+                        // (plan §1/§5 "no partial-component claim").
+                        A2UISchemaProfile.clientCapabilitiesMetaKey: .object([
+                            "supportedVersions": .array(
+                                A2UISchemaProfile.supportedVersions.sorted().map(JSONValue.string)
+                            ),
+                            "supportedCatalogIds": .array([
+                                .string(A2UISchemaProfile.testScopedCatalogID),
+                            ]),
+                        ]),
                     ]),
                 ]),
                 "clientInfo": .object([
@@ -172,6 +184,74 @@ public enum ACPInputEncoding {
                 "prompt": .array(blocks),
             ])
         )
+    }
+
+    /// Encodes a validated `A2UIActionEnvelope` (a resolved `event`
+    /// action) as a `session/prompt` carrying one MIME-typed A2UI
+    /// `EmbeddedResource` — the CodeMixer A2UI-over-ACP v1 `client_to_server`
+    /// binding. Uses `RequestPurpose.a2uiFeedbackPrompt` so the response
+    /// never creates/finalizes a chat turn. Disabled while any ordinary
+    /// prompt is in flight (plan §3 "no action id/ack in v0.9.1" — stale or
+    /// racing clicks must not queue behind an active turn).
+    public static func a2uiAction(_ envelope: A2UIActionEnvelope, state: ACPClientState) -> Data? {
+        guard let sessionID = state.sessionID(), !state.hasActivePrompt() else { return nil }
+        let id = state.nextRequestID(for: .a2uiFeedbackPrompt)
+        let resource = a2uiResourceBlock(
+            uri: "a2ui://client-action/\(envelope.surfaceID)/\(envelope.sourceComponentID)",
+            payload: .array([.object([
+                "type": .string("clientAction"),
+                "surfaceId": .string(envelope.surfaceID),
+                "sourceComponentId": .string(envelope.sourceComponentID),
+                "eventName": .string(envelope.eventName),
+                "context": .object(envelope.contextWireJSON),
+            ])])
+        )
+        return ACPRPCCodec.request(
+            id: id,
+            method: "session/prompt",
+            params: .object([
+                "sessionId": .string(sessionID),
+                "prompt": .array([resource]),
+            ])
+        )
+    }
+
+    /// Encodes a `A2UIClientErrorEnvelope` (e.g. `VALIDATION_FAILED` when a
+    /// stale/racing action is rejected) the same way as `a2uiAction`.
+    public static func a2uiClientError(_ envelope: A2UIClientErrorEnvelope, state: ACPClientState) -> Data? {
+        guard let sessionID = state.sessionID(), !state.hasActivePrompt() else { return nil }
+        let id = state.nextRequestID(for: .a2uiFeedbackPrompt)
+        var payload: [String: JSONValue] = [
+            "type": .string("clientError"),
+            "surfaceId": .string(envelope.surfaceID),
+            "code": .string(envelope.code),
+            "message": .string(envelope.message),
+        ]
+        if let path = envelope.path { payload["path"] = .string(path) }
+        let resource = a2uiResourceBlock(
+            uri: "a2ui://client-error/\(envelope.surfaceID)",
+            payload: .array([.object(payload)])
+        )
+        return ACPRPCCodec.request(
+            id: id,
+            method: "session/prompt",
+            params: .object([
+                "sessionId": .string(sessionID),
+                "prompt": .array([resource]),
+            ])
+        )
+    }
+
+    private static func a2uiResourceBlock(uri: String, payload: JSONValue) -> JSONValue {
+        let text = (try? String(decoding: JSONEncoder().encode(payload), as: UTF8.self)) ?? "[]"
+        return .object([
+            "type": .string("resource"),
+            "resource": .object([
+                "uri": .string(uri),
+                "mimeType": .string(A2UISchemaProfile.embeddedResourceMIMEType),
+                "text": .string(text),
+            ]),
+        ])
     }
 
     public static func cancel(state: ACPClientState) -> Data {

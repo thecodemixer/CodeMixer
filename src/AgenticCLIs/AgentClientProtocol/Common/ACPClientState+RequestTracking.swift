@@ -19,4 +19,13 @@ extension ACPClientState {
     func takePurpose(for id: JSONValue) -> RequestPurpose? {
         withLock { requests.removeValue(forKey: id) }
     }
+
+    /// True while an ordinary `session/prompt` (user text) is outstanding.
+    /// v0.9.1 has no A2UI action id/acknowledgement, so a validated action
+    /// sent mid-turn could race the agent's own response; disable server
+    /// `event` actions for that window instead (plan §3) rather than queue
+    /// them behind the active prompt.
+    func hasActivePrompt() -> Bool {
+        withLock { requests.values.contains(.sessionPrompt) }
+    }
 }

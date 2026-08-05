@@ -18,6 +18,11 @@ enum TranscriptMutation: Sendable, Codable, Equatable {
     case changePhase(sessionID: String, phase: SessionPhase, recordedAt: Date)
     case appendClientAction(ClientAction, recordedAt: Date)
     case truncateAfterUser(id: String, recordedAt: Date)
+    /// Folds a whole A2UI batch through `A2UISurfaceReducer` (see
+    /// `SessionTranscript.applyA2UIBatch`). Kept as a single mutation instead
+    /// of one mutation per surface message so the durable journal stays an
+    /// exact record of what the agent actually sent.
+    case applyA2UIBatch(A2UIServerBatch, recordedAt: Date)
 
     var recordedAt: Date {
         switch self {
@@ -33,7 +38,8 @@ enum TranscriptMutation: Sendable, Codable, Equatable {
              .reconcileChangedFiles(_, let date),
              .changePhase(_, _, let date),
              .appendClientAction(_, let date),
-             .truncateAfterUser(_, let date):
+             .truncateAfterUser(_, let date),
+             .applyA2UIBatch(_, let date):
             return date
         case .startTool(_, _, _, let date):
             return date
@@ -51,7 +57,8 @@ enum TranscriptMutation: Sendable, Codable, Equatable {
              .appendClientAction,
              .truncateAfterUser,
              .removeChangedFile,
-             .reconcileChangedFiles:
+             .reconcileChangedFiles,
+             .applyA2UIBatch:
             return true
         case .appendThinking, .startTool, .updateTool, .touchFile:
             return false

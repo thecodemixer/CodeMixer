@@ -130,7 +130,8 @@ struct WireFrameRoundTripTests {
         #expect(WireVersion.v1.rawValue == 1)
         #expect(WireVersion.v2.rawValue == 2)
         #expect(WireVersion.v3.rawValue == 3)
-        #expect(WireVersion.current == .v3)
+        #expect(WireVersion.v4.rawValue == 4)
+        #expect(WireVersion.current == .v4)
     }
 
     /// Round-trip via re-encoding: encode → decode → encode, compare bytes.
