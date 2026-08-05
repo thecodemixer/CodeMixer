@@ -81,7 +81,6 @@ struct ProjectInfoPresentationTests {
         )
         #expect(info.categoryLabel == "Custom")
         #expect(info.detailRows == [
-            .init(label: "Display name", value: "Mixer"),
             .init(label: "Executable path", value: "/opt/migration-acp"),
             .init(label: "Arguments", value: "acp --cwd \"/My Projects/api\""),
             .init(label: "Transport", value: "Agent Client Protocol"),

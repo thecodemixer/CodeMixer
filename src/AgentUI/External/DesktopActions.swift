@@ -63,6 +63,21 @@ public enum DesktopActions {
         return panel.runModal() == .OK ? panel.url : nil
     }
 
+    /// Single-file open panel for Custom agent executables.
+    ///
+    /// No `allowedContentTypes` filter — ACP / CLI binaries often lack a
+    /// recognizable UTType (no extension, ad-hoc build products).
+    @MainActor
+    public static func chooseExecutablePanel(prompt: String = "Choose Executable") -> URL? {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.treatsFilePackagesAsDirectories = true
+        panel.prompt = prompt
+        return panel.runModal() == .OK ? panel.url : nil
+    }
+
     /// Shows the native pointing-hand cursor while the pointer is over an
     /// actionable control (close buttons, links). Call with `false` on leave.
     @MainActor

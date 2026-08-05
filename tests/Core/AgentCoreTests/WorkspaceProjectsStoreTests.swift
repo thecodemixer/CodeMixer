@@ -126,6 +126,39 @@ struct WorkspaceProjectsStoreTests {
         #expect(workspaceLocal?.projects.map(\.path) == [renamedPath])
     }
 
+    @Test("renameProject keeps a custom agent's display name in sync with the project name")
+    func renameUpdatesCustomAgentDisplayName() async throws {
+        let fs = InMemoryFileSystem()
+        let store = makeStore(fs: fs)
+        let custom = CustomAgentRef(
+            id: "migration",
+            displayName: "api",
+            transport: .agentClientProtocol,
+            executablePath: "/opt/migration-acp",
+            arguments: ["acp"]
+        )
+        let ref = try await store.createProject(name: "api", projectType: .custom(custom), in: workspace)
+        let renamed = try await store.renameProject(path: ref.path, to: "MongoMixer", in: workspace)
+        guard case .custom(let updated) = renamed.projectType else {
+            Issue.record("expected custom project type after rename")
+            return
+        }
+        #expect(renamed.displayName == "MongoMixer")
+        #expect(updated.displayName == "MongoMixer")
+        #expect(updated.executablePath == "/opt/migration-acp")
+        #expect(updated.id == "migration")
+
+        let local = ProjectLocalStateStore.load(
+            from: URL(fileURLWithPath: renamed.path),
+            fileSystem: fs
+        )
+        guard case .custom(let persisted) = local?.projectType else {
+            Issue.record("expected custom project type in project.json")
+            return
+        }
+        #expect(persisted.displayName == "MongoMixer")
+    }
+
     @Test("renameProject rejects an empty name")
     func renameRejectsEmpty() async throws {
         let store = makeStore()

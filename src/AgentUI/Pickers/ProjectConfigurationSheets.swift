@@ -12,7 +12,6 @@ struct ProjectTypeForm: View {
     @Binding var category: ProjectTypeCategory
     @Binding var builtInAgent: AgentID
     @Binding var mixedDefault: AgentID
-    @Binding var customDisplayName: String
     @Binding var customExecutable: String
     @Binding var customArguments: String
     @Binding var customTransport: AgentTransportKind
@@ -60,8 +59,7 @@ struct ProjectTypeForm: View {
 
     private var customFields: some View {
         VStack(alignment: .leading, spacing: Theme.spacing.s8) {
-            labeledField("Display name", text: $customDisplayName, placeholder: "My Agent")
-            labeledField("Executable path", text: $customExecutable, placeholder: "\(SystemPaths.usrLocalBin.path)/agent")
+            executablePathField
             labeledField("Arguments", text: $customArguments, placeholder: "--flag value")
             Picker("Transport", selection: $customTransport) {
                 Text("Interactive terminal").tag(AgentTransportKind.interactiveTerminal)
@@ -69,6 +67,28 @@ struct ProjectTypeForm: View {
                 Text("Agent Client Protocol").tag(AgentTransportKind.agentClientProtocol)
             }
             .accessibilityLabel("Custom agent transport")
+        }
+    }
+
+    /// Text field plus Choose… so users do not have to paste shell-quoted paths.
+    private var executablePathField: some View {
+        VStack(alignment: .leading, spacing: Theme.spacing.s4) {
+            Text("Executable path")
+                .font(Theme.typography.caption)
+                .foregroundStyle(Theme.text.secondary)
+            HStack(spacing: Theme.spacing.s8) {
+                TextField("\(SystemPaths.usrLocalBin.path)/agent", text: $customExecutable)
+                    .textFieldStyle(.roundedBorder)
+                    .font(Theme.typography.body)
+                    .accessibilityLabel("Executable path")
+                Button("Choose…") {
+                    guard let url = DesktopActions.chooseExecutablePanel(
+                        prompt: "Choose Executable"
+                    ) else { return }
+                    customExecutable = CustomAgentInput.executablePath(from: url.path)
+                }
+                .accessibilityLabel("Choose executable")
+            }
         }
     }
 
@@ -168,7 +188,7 @@ enum ProjectTypeKind: Hashable, Identifiable {
     }
 
     func resolvedProjectType(mixedDefault: AgentID,
-                      customDisplayName: String,
+                      projectDisplayName: String,
                       customExecutable: String,
                       customArguments: String,
                       customTransport: AgentTransportKind,
@@ -181,7 +201,9 @@ enum ProjectTypeKind: Hashable, Identifiable {
         case .folder(let kind):
             return .folder(kind)
         case .custom:
-            let name = customDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            // Same label as Claude/Codex/Cursor: the project name, not a
+            // separate custom-agent nickname.
+            let name = projectDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
             let exe = CustomAgentInput.executablePath(from: customExecutable)
             guard !name.isEmpty, !exe.isEmpty else { return nil }
             let args = CustomAgentInput.arguments(from: customArguments)
@@ -330,7 +352,6 @@ public struct NewProjectSheet: View {
     @State private var folderKind: FolderProjectKind = .files
     @State private var folderLocationMode: FolderLocationMode = .createInWorkspace
     @State private var folderLocation: URL?
-    @State private var customDisplayName: String = ""
     @State private var customExecutable: String = ""
     @State private var customArguments: String = ""
     @State private var customTransport: AgentTransportKind = .agentClientProtocol
@@ -349,7 +370,7 @@ public struct NewProjectSheet: View {
         ProjectTypeKind.from(category: category, builtInAgent: builtInAgent, folderKind: folderKind)
             .resolvedProjectType(
             mixedDefault: mixedDefault,
-            customDisplayName: customDisplayName,
+            projectDisplayName: trimmedName,
             customExecutable: customExecutable,
             customArguments: customArguments,
             customTransport: customTransport,
@@ -389,7 +410,6 @@ public struct NewProjectSheet: View {
                 category: $category,
                 builtInAgent: $builtInAgent,
                 mixedDefault: $mixedDefault,
-                customDisplayName: $customDisplayName,
                 customExecutable: $customExecutable,
                 customArguments: $customArguments,
                 customTransport: $customTransport,
@@ -516,7 +536,6 @@ public struct ConfigureProjectSheet: View {
     @State private var builtInAgent: AgentID = .claudeCode
     @State private var mixedDefault: AgentID = .claudeCode
     @State private var folderKind: FolderProjectKind = .files
-    @State private var customDisplayName: String = ""
     @State private var customExecutable: String = ""
     @State private var customArguments: String = ""
     @State private var customTransport: AgentTransportKind = .agentClientProtocol
@@ -536,7 +555,7 @@ public struct ConfigureProjectSheet: View {
         ProjectTypeKind.from(category: category, builtInAgent: builtInAgent, folderKind: folderKind)
             .resolvedProjectType(
             mixedDefault: mixedDefault,
-            customDisplayName: customDisplayName,
+            projectDisplayName: projectURL.lastPathComponent,
             customExecutable: customExecutable,
             customArguments: customArguments,
             customTransport: customTransport,
@@ -555,7 +574,6 @@ public struct ConfigureProjectSheet: View {
                 category: $category,
                 builtInAgent: $builtInAgent,
                 mixedDefault: $mixedDefault,
-                customDisplayName: $customDisplayName,
                 customExecutable: $customExecutable,
                 customArguments: $customArguments,
                 customTransport: $customTransport,

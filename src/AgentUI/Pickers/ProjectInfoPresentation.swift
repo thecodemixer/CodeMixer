@@ -58,7 +58,6 @@ struct ProjectInfoPresentation: Equatable, Sendable {
             return [Row(label: "Folder view", value: kind.displayLabel)]
         case .custom(let ref):
             return [
-                Row(label: "Display name", value: ref.displayName),
                 Row(label: "Executable path", value: ref.executablePath),
                 Row(label: "Arguments", value: displayArguments(ref.arguments)),
                 Row(label: "Transport", value: transportLabel(ref.transport.kind)),

@@ -161,15 +161,38 @@ extension WorkspaceProjectsStore {
             try fileSystem.move(from: folder, to: renamedFolder)
         }
 
-        let renamed = ProjectRef(path: renamedFolder.path,
-                                 displayName: trimmed,
-                                 projectType: list[idx].projectType)
+        let previous = list[idx]
+        let projectType = Self.projectTypeUpdatingCustomDisplayName(
+            previous.projectType,
+            displayName: trimmed
+        )
+        let renamed = ProjectRef(
+            path: renamedFolder.path,
+            displayName: trimmed,
+            projectType: projectType,
+            preferFreshAgentProcess: previous.preferFreshAgentProcess,
+            agentInstanceIdentity: previous.agentInstanceIdentity
+        )
         list[idx] = renamed
         workspaces[key] = list
         try await persist()
         try ProjectLocalStateStore.save(ref: renamed, fileSystem: fileSystem)
         try await persistWorkspaceLocal(projects: list, for: workspace)
         return renamed
+    }
+
+    /// Custom agent nickname tracks the project display name (there is no
+    /// separate Custom "Display name" field in New Project).
+    private static func projectTypeUpdatingCustomDisplayName(_ type: ProjectType,
+                                                             displayName: String) -> ProjectType {
+        guard case .custom(let ref) = type else { return type }
+        return .custom(CustomAgentRef(
+            id: ref.id,
+            displayName: displayName,
+            transport: ref.transport,
+            executablePath: ref.executablePath,
+            arguments: ref.arguments
+        ))
     }
 
     @discardableResult
