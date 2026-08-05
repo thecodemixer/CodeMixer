@@ -23,6 +23,7 @@ public struct SessionSidebarView: View {
     @State private var renameTargetPath: String?
     @State private var renameText: String = ""
     @State private var showRenamePrompt = false
+    @State private var infoTarget: WorkspaceProjectsStore.ProjectRef?
     @State private var hoveredProjectPath: String?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -68,6 +69,11 @@ public struct SessionSidebarView: View {
                 onCancel: cancelRename,
                 onRename: commitRename
             )
+        }
+        .sheet(item: $infoTarget) { project in
+            ProjectInfoSheet(project: project) {
+                infoTarget = nil
+            }
         }
         .animation(Theme.motion.resolve(Theme.motion.changing, reduceMotion: reduceMotion),
                    value: focusMode)
@@ -163,6 +169,8 @@ public struct SessionSidebarView: View {
             }
             .accessibilityLabel("Retry model load for \(project.displayName)")
             Button("Reveal in Finder") { revealInFinder(project.path) }
+            Button("Project Info…") { infoTarget = project }
+                .accessibilityLabel("View project info for \(project.displayName)")
             Divider()
             if canRenameProject(project) {
                 Button("Rename…") { beginRename(project) }
@@ -255,6 +263,8 @@ public struct SessionSidebarView: View {
                 Button("New Chat") { model.newChat(in: project.path) }
             }
             Button("Reveal in Finder") { revealInFinder(project.path) }
+            Button("Project Info…") { infoTarget = project }
+                .accessibilityLabel("View project info for \(project.displayName)")
             if model.isCustomACPProject(project) {
                 Button("Restart ACP CLI") {
                     model.restartCustomACPCLI(projectPath: project.path)
