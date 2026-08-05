@@ -182,12 +182,9 @@ enum ProjectTypeKind: Hashable, Identifiable {
             return .folder(kind)
         case .custom:
             let name = customDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
-            let exe = customExecutable.trimmingCharacters(in: .whitespacesAndNewlines)
+            let exe = CustomAgentInput.executablePath(from: customExecutable)
             guard !name.isEmpty, !exe.isEmpty else { return nil }
-            let args = customArguments
-                .split(whereSeparator: \.isWhitespace)
-                .map(String.init)
-                .filter { !$0.isEmpty }
+            let args = CustomAgentInput.arguments(from: customArguments)
             let transport: AgentTransportDescriptor = switch customTransport {
             case .interactiveTerminal: .interactiveTerminal
             case .stdioJSONRPC: .stdioJSONRPC
