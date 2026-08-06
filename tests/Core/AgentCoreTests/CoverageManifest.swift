@@ -2038,6 +2038,7 @@ private func _a2uiPropsMembers() {
 // workingDirectory
 // workingPhrase
 // workspace
+// workspaceURL
 // workspaceAdapterStateFileName
 // workspaceAdapterStateURL
 // workspaceFileName
