@@ -161,51 +161,13 @@ private struct StreamingAssistantContentView: View {
     var onCollapsedCodeSelected: ((String, String?) -> Void)?
 
     var body: some View {
-        if codePresentation == .collapsed, let summary = structuredSummary {
-            Button {
-                onCollapsedCodeSelected?(text, summary.language)
-            } label: {
-                HStack(spacing: Theme.spacing.s8) {
-                    Image(systemName: "text.append")
-                        .foregroundStyle(Theme.text.tertiary)
-                        .accessibilityHidden(true)
-                    Text(summary.label)
-                        .font(Theme.typography.caption)
-                        .foregroundStyle(Theme.text.secondary)
-                    Spacer(minLength: 0)
-                    Text("Show in work lane")
-                        .font(Theme.typography.caption)
-                        .foregroundStyle(Theme.signal.info)
-                }
-            }
-            .buttonStyle(.plain)
-            .padding(.horizontal, Theme.spacing.s12)
-            .padding(.vertical, Theme.spacing.s8)
-            .background(Theme.surface.sunken,
-                        in: RoundedRectangle(cornerRadius: Theme.corner.medium, style: .continuous))
-            .accessibilityLabel(summary.label)
-        } else {
-            Text(text)
-                .font(Theme.typography.prose)
-                .foregroundStyle(Theme.text.primary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    private struct Summary {
-        let label: String
-        let language: String?
-    }
-
-    /// Only an explicit fence is trusted here — structured custom-ACP payloads
-    /// (reviewer verdicts, plans, decisions) travel as A2UI surfaces
-    /// (`A2UISurfaceView`), not as guessed-at chat text. See
-    /// `docs/architecture.md` "A2UI" for the surface-based replacement of the
-    /// text-sniffing this view used to do.
-    private var structuredSummary: Summary? {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, trimmed.contains("```") else { return nil }
-        return Summary(label: "Code block streaming", language: nil)
+        // Same markdown path as finalized bubbles. Streaming used to force
+        // plain `Text`, which made implementer/fixer prose look unformatted
+        // next to A2UI cards. `codePresentation` still collapses fenced blocks
+        // into the work-lane chip when the transcript asks for it.
+        MarkdownProseView(text: text,
+                          codePresentation: codePresentation,
+                          onCollapsedCodeSelected: onCollapsedCodeSelected)
     }
 }
 
@@ -264,12 +226,10 @@ struct ThinkingBlockView: View {
             }
 
             if expanded, !text.isEmpty {
-                Text(text)
-                    .font(Theme.typography.monoSmall)
-                    .fontDesign(.monospaced)
-                    .foregroundStyle(Theme.text.secondary)
+                // Reasoning traces are markdown too — headings and lists read as
+                // literal `##` / `-` when typeset as one mono string.
+                MarkdownProseView(text: text, emphasis: .secondary)
                     .padding(.top, Theme.spacing.s8)
-                    .textSelection(.enabled)
             }
         }
         .padding(.horizontal, Theme.spacing.s12)

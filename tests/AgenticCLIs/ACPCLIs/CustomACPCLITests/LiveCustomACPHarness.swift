@@ -91,10 +91,24 @@ struct LiveCustomACPHarness {
         let everyFileHadFixer: Bool
     }
 
+    struct HandshakeProbeResult: Sendable {
+        let sessionID: String?
+        let errors: [String]
+    }
+
     static let pipelineRoles = ["planner", "implementer", "reviewerA", "reviewerB", "fixer"]
 
     static func isEnabled() -> Bool {
         ProcessInfo.processInfo.environment["CODEMIXER_LIVE_CUSTOM_ACP"] == "1"
+    }
+
+    /// Cross-language `initialize` check against the real `migration-acp`, which
+    /// refuses clients that cannot render A2UI. Cheap enough (seconds) to run
+    /// without the full pipeline gate.
+    static func isMigrationHandshakeEnabled() -> Bool {
+        isEnabled()
+            && (ProcessInfo.processInfo.environment["CODEMIXER_LIVE_MIGRATION_HANDSHAKE"] == "1"
+                || isMigrationPipelineEnabled())
     }
 
     /// Full Codemixer-reflected live migration. Off unless explicitly opted in
@@ -166,6 +180,60 @@ struct LiveCustomACPHarness {
             sessionID: await sink.sessionID(),
             finalAssistantText: await sink.finalAssistantText(),
             modeIDs: modeIDs
+        )
+    }
+
+    /// Spawns the real agent binary and does nothing but complete `initialize`.
+    ///
+    /// This is the only test that puts both sides of the A2UI capability contract
+    /// in one process: Codemixer's real `sessionBootstrapBytes` against the real
+    /// server that hard-refuses a client which cannot render surfaces. Each side
+    /// has its own unit coverage, but only this catches the two drifting apart.
+    func runHandshakeProbe(_ config: MigrationReflectionConfiguration) async throws
+        -> HandshakeProbeResult {
+        try Self.seedMigrationWorkspace(at: config.workspace, executablePath: config.executablePath)
+
+        let ref = CustomAgentRef(
+            id: "live-migration-handshake",
+            displayName: "Migration Tool",
+            transport: .agentClientProtocol,
+            executablePath: config.executablePath,
+            arguments: config.arguments
+        )
+        let env = SystemEnvironment()
+        let fs = SystemFileSystem()
+        let adapter = CustomACPAdapter(ref: ref, environment: env, fileSystem: fs)
+        let engine = AgentEngine(seams: Seams(
+            clock: SystemClock(),
+            random: SystemRandomSource(),
+            environment: env,
+            fileSystem: fs
+        ))
+        await engine.bootstrap()
+
+        let sink = LiveCustomEventSink()
+        let sub = await engine.bus.subscribe()
+        let collector = Task { await sink.ingest(sub.stream) }
+        defer {
+            collector.cancel()
+            Task {
+                await engine.bus.unsubscribe(sub.id)
+                await engine.shutdown(reason: .naturalExit)
+            }
+        }
+
+        try await engine.start(adapter: adapter, workspace: config.workspace)
+        // A refusal arrives as an error event, so stop on either outcome rather
+        // than burning the whole timeout on a handshake the server already
+        // rejected.
+        _ = await pollUntil(timeout: config.dashboardTimeout) {
+            if await sink.sessionID() != nil { return true }
+            return await !sink.errorDescriptions().isEmpty
+        }
+
+        return HandshakeProbeResult(
+            sessionID: await sink.sessionID(),
+            errors: await sink.errorDescriptions()
         )
     }
 
@@ -643,6 +711,13 @@ private actor LiveCustomEventSink {
             }
         }
         return nil
+    }
+
+    func errorDescriptions() -> [String] {
+        events.compactMap { event in
+            if case .error(let error) = event { return String(describing: error) }
+            return nil
+        }
     }
 
     func fileSessionIDs() -> [String] {

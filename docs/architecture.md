@@ -2231,14 +2231,25 @@ CodeMixer's `ACPInputEncoding.bootstrap` advertises A2UI support on
 
 `A2UISchemaProfile.clientCapabilitiesMetaKeyAlias` (`"a2ui"`, unnamespaced)
 is accepted as an inbound compatibility alias when reading a *server's*
-capabilities, but CodeMixer never emits the bare alias itself. A Custom ACP
-server that wants to emit A2UI (the migration tool does) should gate
-emission on this capability being present, and fall back to plain text for
-non-A2UI clients — see `AcpServer.negotiatesA2UI` / `emitA2UI` in
-`migration-tool/src/acp/server.ts`. Because CodeMixer already advertises
-this capability in production, the migration tool's A2UI path — not its
-legacy plain-text fallback — is what a real CodeMixer session exercises
-today; the fallback exists for other, non-CodeMixer ACP clients.
+capabilities, but CodeMixer never emits the bare alias itself.
+
+A Custom ACP server that emits A2UI (the migration tool does) must **require**
+this capability rather than degrade without it. The migration tool throws
+`UnsupportedClientError` from `initialize` when either
+`A2UISchemaProfile.clientCapabilitiesMetaKey` (advertising the catalog id) or
+`codemixer.dev/sessionNew` is absent — see `AcpServer.negotiatesA2UI` /
+`emitA2UI` in `migration-tool/src/acp/server.ts`. There is deliberately no
+plain-text fallback: the tool previously degraded silently, and the only
+visible symptom was raw `Reviewer A: {"verdict":…}` JSON in chat hours into a
+run, with the actual cause (a CodeMixer build predating the capability) invisible.
+Failing the handshake names the missing capability at the one moment it is
+cheap to fix.
+
+Both ends of this contract are pinned by tests, so drift on either side fails
+rather than degrades: `ACPAdapterTests` ("bootstrap advertises the A2UI catalog
+and per-file session capabilities") covers the advertisement, and
+`migration-tool/tests/acp-integration.test.ts` ("ACP client capability
+contract") covers acceptance and each refusal.
 
 ### 36.7 The migration tool as the reference custom-tool integration
 
@@ -2284,12 +2295,13 @@ Before A2UI, `AgentUI` guessed at custom-tool structure in two places:
   `{"verdict":...}` objects out of assistant prose (even mid-sentence) and
   rendered them as `ReviewerCommentView` cards.
 
-Both were removed once (a) the migration tool emits the equivalent content
-as an A2UI human-review / review-duel surface (§36.7) and (b) the legacy,
-non-A2UI-capable fallback (plain `Reviewer A: {"verdict":...}` chat text) was
-verified to still work end to end without needing UI-side reconstruction —
-see `migration-tool/tests/acp-integration.test.ts` (`emits an A2UI
-human-review surface...`) and `migration-tool/tests/a2ui.test.ts`. Any
+Both were removed once the migration tool emits the equivalent content as an
+A2UI human-review / review-duel surface (§36.7) — see
+`migration-tool/tests/acp-integration.test.ts` (`emits an A2UI human-review
+surface...`) and `migration-tool/tests/a2ui.test.ts`. The plain
+`Reviewer A: {"verdict":...}` chat text those heuristics used to reconstruct no
+longer exists on any path: a client that cannot render the surface is refused
+at `initialize` (§36.6), so there is no text form left to sniff. Any
 *other* custom ACP tool that still emits ad hoc structured text (rather than
 an A2UI surface) now renders as plain prose — exactly the generalization
 the user-facing complaint asked for: no tool gets bespoke text-sniffing in
@@ -2323,7 +2335,9 @@ data, not a name or diagnostic string.
 | Durable persistence/replay | `tests/Core/AgentCoreTests/SessionTranscriptTests.swift` |
 | `EngineViewModel` reduction | `tests/AgentUITests/EngineViewModelTests.swift` |
 | Migration-tool surface builders + client-message parsing (pure, no process spawn) | `migration-tool/tests/a2ui.test.ts` |
-| End-to-end capability negotiation + human-review surface + action round-trip | `migration-tool/tests/acp-integration.test.ts` (`emits an A2UI human-review surface...`), driven by `migration-tool/tests/live/LiveMigrationHarness.ts`'s `a2uiCapable` flow |
+| Client-capability contract (acceptance, `a2ui` alias, split `_meta`, and each refusal) | `migration-tool/tests/acp-integration.test.ts` (`ACP client capability contract`) ↔ `tests/AgenticCLIs/AgentClientProtocol/ACPAdapterTests/ACPAdapterTests.swift` (`bootstrap advertises the A2UI catalog...`) |
+| End-to-end human-review surface + action round-trip + every surface kind reaching the client | `migration-tool/tests/acp-integration.test.ts`, driven by `migration-tool/tests/live/LiveMigrationHarness.ts` |
+| Live cross-language handshake against the real `migration-acp` binary (opt-in) | `tests/AgenticCLIs/ACPCLIs/CustomACPCLITests/LiveCustomACPIntegrationTests.swift` (`CODEMIXER_LIVE_ACP_BIN`) |
 
 ---
 

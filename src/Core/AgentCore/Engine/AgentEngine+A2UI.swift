@@ -37,7 +37,25 @@ extension AgentEngine {
                                                   owner: "AgentEngine",
                                                   summary: "Rejected A2UI interaction on surface \(intent.surfaceID)",
                                                   details: String(describing: failure))
+            // A rejected press is indistinguishable from a broken build unless
+            // it is said out loud: the card stays on screen and the agent never
+            // hears about the decision.
+            await bus.publish(.error(.unsupportedOperation(
+                detail: Self.a2uiRejectionDetail(failure, surfaceID: intent.surfaceID)
+            )))
         }
+    }
+
+    static func a2uiRejectionDetail(_ failure: A2UIActionResolver.Failure, surfaceID: String) -> String {
+        let reason: String = switch failure {
+        case .surfaceNotFound, .generationMismatch:
+            "the card was replaced by a newer one — act on the latest card instead"
+        case .componentNotFound, .notAnEventAction:
+            "that control no longer exists on the card"
+        case .evaluationFailed:
+            "its action could not be resolved against the card's data"
+        }
+        return "Interaction on A2UI surface \(surfaceID) was not sent: \(reason)."
     }
 
     func handleReportA2UIClientError(_ envelope: A2UIClientErrorEnvelope, adapter: any AgentAdapter) async throws {

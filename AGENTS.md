@@ -48,7 +48,7 @@ Codemixer/
 ├── scripts/                                 local automation + validation helpers — [`scripts/README.md`](scripts/README.md)
 ├── docs/                                    architecture + style + reference patterns
 ├── Package.swift, src/, tests/               the SPM package (repo root)
-├── migration-tool/                          Bun/TS Custom ACP migrator (API+DB → MongoDB); not SPM
+
 ```
 
 ### Inside `src/`
@@ -324,20 +324,20 @@ reopen/resume without mutating vendor history.
 Use A2UI instead of hand-rolled text-sniffing in `AgentUI` — see
 `docs/architecture.md` §36 for the full wire/trust-boundary walkthrough.
 
-1. In the custom ACP server, gate emission on the client having advertised
-   `A2UISchemaProfile.clientCapabilitiesMetaKey` at `initialize` (see
-   `AcpServer.negotiatesA2UI` in `migration-tool/src/acp/server.ts` for the
-   reference check) and keep a plain-text fallback for non-A2UI clients.
+1. In the custom ACP server, require the client to have advertised
+   `A2UISchemaProfile.clientCapabilitiesMetaKey` at `initialize` and **fail the
+   handshake** when it has not. Do **not** add a plain-text fallback: a silent
+   degrade surfaces later as raw JSON in chat and hides the real cause (a stale
+   client) for hours. Fail at the handshake, where the message can name the
+   missing capability.
 2. Emit `createSurface` + `updateComponents` (+ `updateDataModel` if needed)
    as one `session/update`/`tool_call` content block: `{ type: "resource",
-   resource: { uri, mimeType: "application/a2ui+json", text } }` — see
-   `migration-tool/src/acp/a2ui.ts` for a from-scratch builder using the
+   resource: { uri, mimeType: "application/a2ui+json", text } }` using the
    Basic Catalog subset (`Card`/`Column`/`Row`/`Text`/`Divider`/`Button`).
 3. For a server-bound decision, give the relevant `Button` component an
    `action: { event: { name, context } }` and correlate the returned
-   `clientAction` (parsed the same way `parseA2UIClientMessage` does) back
-   to your pending state — add a nonce to `context` if the action must not
-   be replayable.
+   `clientAction` back to your pending state — add a nonce to `context` if the
+   action must not be replayable.
 4. Delete-then-recreate a surface id when its content structurally changes;
    CodeMixer bumps the surface's generation on `deleteSurface`, so a stale
    client-side interaction against the old generation is rejected rather

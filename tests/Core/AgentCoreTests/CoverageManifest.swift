@@ -807,6 +807,7 @@ private func _a2uiPropsMembers() {
 // LocateError
 // LoggingNetworkTransport
 // MarkdownBlock
+// MarkdownListItem
 // Message
 // ModelCatalogLoadError
 // ModelCatalogRefreshKind
@@ -847,6 +848,7 @@ private func _a2uiPropsMembers() {
 // ProcessRunner
 // ProjectAgentRouter
 // ProjectDraft
+// ProjectInfoSheet
 // ProjectLocalState
 // ProjectLocalStateStore
 // ProjectMemoryFile
@@ -1101,6 +1103,7 @@ private func _a2uiPropsMembers() {
 // children
 // chip
 // chooseDirectoryPanel
+// chooseExecutablePanel
 // classify
 // claudeDirectory
 // clear
@@ -1170,6 +1173,7 @@ private func _a2uiPropsMembers() {
 // deletion
 // deletions
 // densityMode
+// depth
 // description
 // design
 // detail
@@ -1415,6 +1419,7 @@ private func _a2uiPropsMembers() {
 // listen
 // live
 // liveProjectPaths
+// liveThinkingMaxHeight
 // load
 // loadAll
 // loadError
@@ -2051,5 +2056,5 @@ private func _a2uiPropsMembers() {
 // zsh
 // MANIFEST_SYMBOLS_END
 
-// Total: 1321 unique public symbols
+// Total: 1533 unique public symbols
 

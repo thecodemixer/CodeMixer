@@ -58,12 +58,12 @@ struct ThinkingFocusView: View {
             }
 
             if expanded, !text.isEmpty {
-                Text(text)
-                    .font(Theme.typography.monoSmall)
-                    .fontDesign(.monospaced)
-                    .foregroundStyle(Theme.text.secondary)
-                    .textSelection(.enabled)
-                    .lineLimit(isThinking ? 6 : nil)
+                MarkdownProseView(text: text, emphasis: .secondary)
+                    // While thinking, only the tail matters; a full trace would
+                    // push the answer off screen on every token.
+                    .frame(maxHeight: isThinking ? Theme.layout.liveThinkingMaxHeight : nil,
+                           alignment: .top)
+                    .clipped()
             }
         }
         .padding(.horizontal, Theme.spacing.s16)

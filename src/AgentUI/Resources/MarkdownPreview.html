@@ -60,6 +60,14 @@
       color: var(--quote);
     }
     img { max-width: 100%; height: auto; }
+    hr { border: 0; border-top: 1px solid var(--border); margin: 1.4em 0; }
+    table { border-collapse: collapse; margin: 0 0 0.9em; display: block; overflow-x: auto; }
+    th, td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+    th { font-weight: 600; }
+    /* The block parser reports list depth per item, not as nested <ul>. */
+    li[data-depth="1"] { margin-left: 1.2em; }
+    li[data-depth="2"] { margin-left: 2.4em; }
+    li[data-depth="3"] { margin-left: 3.6em; }
     .empty { color: var(--muted); }
     .code-block { position: relative; }
     .code-block .copy {

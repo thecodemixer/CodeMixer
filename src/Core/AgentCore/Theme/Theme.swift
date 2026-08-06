@@ -144,6 +144,9 @@ public enum Theme {
         /// Caps the work lane's tools section when diffs are also present, so
         /// the two content-driven sections both get room to breathe.
         public static let workLaneToolsSectionMaxHeight: CGFloat = 320
+        /// Caps the still-streaming thinking trace in `ThinkingFocusView` so a
+        /// long reasoning run cannot push the answer off screen.
+        public static let liveThinkingMaxHeight: CGFloat = 120
         public static let diffPanelMinWidth: CGFloat = 360
         public static let diffSidebarMinWidth: CGFloat = 200
         public static let diffSidebarIdealWidth: CGFloat = 240

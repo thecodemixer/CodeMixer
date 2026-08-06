@@ -336,6 +336,13 @@ CODEMIXER_LIVE_CUSTOM_ACP=1 \
   CODEMIXER_LIVE_ACP_BIN=$PWD/migration-tool/dist/migration-acp \
   CODEMIXER_LIVE_MIGRATION_PIPELINE=1 \
   swift test --no-parallel --filter liveMigrationReflection
+
+# Cross-language `initialize` only: does the real migration-acp accept the A2UI
+# capabilities Codemixer really advertises? Seconds, no agent auth needed.
+CODEMIXER_LIVE_CUSTOM_ACP=1 \
+  CODEMIXER_LIVE_ACP_BIN=$PWD/migration-tool/dist/migration-acp \
+  CODEMIXER_LIVE_MIGRATION_HANDSHAKE=1 \
+  swift test --no-parallel --filter liveMigrationHandshake
 ```
 
 `fake-custom-acp` is a project-tool flavored twin (`migrate` / `document` / `agent`
@@ -346,3 +353,4 @@ modes; reply `Hello from fake-custom-acp.`). It is distinct from `fake-acp`
 | `CODEMIXER_LIVE_CUSTOM_ACP=1` | Yes (live) | Opt in |
 | `CODEMIXER_LIVE_ACP_BIN` / `CODEMIXER_CUSTOM_ACP_BIN` | Yes (live) | ACP executable path |
 | `CODEMIXER_LIVE_MIGRATION_PIPELINE=1` | For migration reflection | Opt in to the multi-file Codemixer reflection suite |
+| `CODEMIXER_LIVE_MIGRATION_HANDSHAKE=1` | For the handshake probe | Opt in to the `initialize`-only A2UI capability check (implied by `…_PIPELINE=1`) |

@@ -1483,6 +1483,11 @@ private func makeModel() -> (EngineViewModel, MulticastEventBus, FakeClock) {
     return (vm, bus, clock)
 }
 
+/// Lets the view model's own reduction task consume everything published so far.
+///
+/// Deliberately one fixed wait, not a yield/short-sleep loop: several tests here
+/// drive multi-hop chains (bus → stream → reduce → command → event) and a
+/// shorter drain leaves them wedged waiting for a step that never lands.
 @MainActor
 private func drain() async {
     try? await Task.sleep(for: .milliseconds(40))

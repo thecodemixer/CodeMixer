@@ -99,10 +99,11 @@ struct A2UISurfaceView: View {
 
     private func textView(_ props: A2UITextProps, scopePaths: [String]) -> some View {
         let text = resolvedString(props.text, scopePaths: scopePaths)
-        let isCaption = props.variant == .caption
+        let style = A2UISurfaceStyle.textStyle(for: props.variant)
         return Text(text)
-            .font(isCaption ? Theme.typography.caption : Theme.typography.body)
-            .foregroundStyle(isCaption ? Theme.text.secondary : Theme.text.primary)
+            .font(style.font)
+            .foregroundStyle(style.color)
+            .lineSpacing(style.lineSpacing)
             .textSelection(.enabled)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -112,7 +113,9 @@ struct A2UISurfaceView: View {
         let isVertical = props.axis == .vertical
         return Group {
             if isVertical {
-                Divider().frame(height: Theme.spacing.s24)
+                // Grows to the tallest sibling so a rule between two columns
+                // separates them for their whole length, not just a stub.
+                Divider().frame(minHeight: Theme.spacing.s24, maxHeight: .infinity)
             } else {
                 Divider()
             }
@@ -123,7 +126,8 @@ struct A2UISurfaceView: View {
     private func iconView(_ props: A2UIIconProps) -> some View {
         let name = props.name.catalogSymbol ?? "questionmark"
         return Image(systemName: A2UISurfaceStyle.sfSymbol(forCatalogIcon: name))
-            .foregroundStyle(Theme.text.secondary)
+            .font(Theme.typography.body)
+            .foregroundStyle(A2UISurfaceStyle.iconTint(forCatalogIcon: name))
             .accessibilityLabel(name)
     }
 
@@ -262,8 +266,15 @@ struct A2UISurfaceView: View {
             onInteract(id, scopePaths, overlay)
         } label: {
             componentView(props.child, scopePaths: scopePaths)
+                // A Button's label is ordinary content here, so its `Text` keeps
+                // `textSelection(.enabled)` — on macOS that consumes the click
+                // and the button never fires. The label is decoration; the
+                // content shape below is what the press lands on.
+                .allowsHitTesting(false)
+                .multilineTextAlignment(.center)
                 .padding(.horizontal, Theme.spacing.s16)
                 .padding(.vertical, Theme.spacing.s8)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .background(fillColor, in: RoundedRectangle(cornerRadius: Theme.corner.medium, style: .continuous))
@@ -365,6 +376,9 @@ struct A2UISurfaceView: View {
                         Text(option.label).font(Theme.typography.body).foregroundStyle(Theme.text.primary)
                         Spacer(minLength: 0)
                     }
+                    // Plain buttons on macOS do not hit-test the Spacer, so the
+                    // row would only respond on the glyph and the label itself.
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }

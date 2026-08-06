@@ -133,6 +133,25 @@ public enum A2UICrossAxisAlign: String, Sendable, Hashable, Codable {
 
 public enum A2UITextVariant: String, Sendable, Hashable, Codable {
     case h1, h2, h3, h4, h5, caption, body
+
+    /// Accepts Material-style aliases (`titleMedium`, `labelMedium`, …) that
+    /// some A2UI emitters still send, mapping them onto the Basic Catalog set
+    /// rather than silently dropping the variant (which made review cards
+    /// look like undifferentiated plain text).
+    package init?(wire: String) {
+        if let exact = A2UITextVariant(rawValue: wire) {
+            self = exact
+            return
+        }
+        switch wire {
+        case "titleLarge", "headlineLarge": self = .h1
+        case "titleMedium", "headlineMedium": self = .h3
+        case "titleSmall", "headlineSmall": self = .h5
+        case "labelLarge", "labelMedium", "labelSmall": self = .caption
+        case "bodyLarge", "bodyMedium", "bodySmall": self = .body
+        default: return nil
+        }
+    }
 }
 
 public enum A2UIImageFit: String, Sendable, Hashable, Codable {
@@ -153,6 +172,20 @@ public enum A2UIDividerAxis: String, Sendable, Hashable, Codable {
 
 public enum A2UIButtonVariant: String, Sendable, Hashable, Codable {
     case `default`, primary, borderless
+
+    /// Accepts Material-style aliases (`filled`/`outlined`) used by some
+    /// emitters so recommended review buttons still read as primary.
+    package init?(wire: String) {
+        if let exact = A2UIButtonVariant(rawValue: wire) {
+            self = exact
+            return
+        }
+        switch wire {
+        case "filled", "tonal": self = .primary
+        case "outlined", "text": self = .default
+        default: return nil
+        }
+    }
 }
 
 public enum A2UITextFieldVariant: String, Sendable, Hashable, Codable {

@@ -156,13 +156,20 @@ enum MarkdownHTMLRenderer {
             // Already-rewritten <img>/<a> tags must pass through; escape the rest.
             return "<p>\(passthroughTrustedTags(text))</p>"
         case .unorderedList(let items):
-            let body = items.map { "<li>\(passthroughTrustedTags($0))</li>" }.joined()
-            return "<ul>\(body)</ul>"
+            return "<ul>\(listItems(items))</ul>"
         case .orderedList(let items):
-            let body = items.map { "<li>\(passthroughTrustedTags($0))</li>" }.joined()
-            return "<ol>\(body)</ol>"
+            let start = items.first?.ordinal.map { " start=\"\($0)\"" } ?? ""
+            return "<ol\(start)>\(listItems(items))</ol>"
         case .blockQuote(let text):
             return "<blockquote><p>\(passthroughTrustedTags(text))</p></blockquote>"
+        case .table(let headers, let rows):
+            let head = headers.map { "<th>\(inline($0))</th>" }.joined()
+            let body = rows.map { row in
+                "<tr>\(row.map { "<td>\(inline($0))</td>" }.joined())</tr>"
+            }.joined()
+            return "<table><thead><tr>\(head)</tr></thead><tbody>\(body)</tbody></table>"
+        case .thematicBreak:
+            return "<hr />"
         case .code(let language, let code):
             let lang = language.map { " data-language=\"\(escapeAttribute($0))\"" } ?? ""
             let copyLabel = language.map { escapeAttribute($0) } ?? "code"
@@ -170,6 +177,15 @@ enum MarkdownHTMLRenderer {
             <div class="code-block"><button class="copy" data-copy="\(escapeAttribute(code))" aria-label="Copy \(copyLabel)">Copy</button><pre\(lang)><code>\(escapeText(code))</code></pre></div>
             """
         }
+    }
+
+    /// Nesting is carried as a `data-depth` attribute rather than as nested
+    /// `<ul>` elements: the block parser reports depth per item, not a tree.
+    private static func listItems(_ items: [MarkdownListItem]) -> String {
+        items.map { item in
+            let depth = item.depth > 0 ? " data-depth=\"\(item.depth)\"" : ""
+            return "<li\(depth)>\(passthroughTrustedTags(item.text))</li>"
+        }.joined()
     }
 
     private static func passthroughTrustedTags(_ text: String) -> String {

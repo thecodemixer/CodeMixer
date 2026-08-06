@@ -30,6 +30,35 @@ struct LiveCustomACPIntegrationTests {
         #expect(result.finalAssistantText?.contains("codemixer-custom-acp-pong") == true)
     }
 
+    @Test("live migration-acp accepts Codemixer's advertised A2UI capabilities at initialize")
+    func liveMigrationHandshake() async throws {
+        guard LiveCustomACPHarness.isMigrationHandshakeEnabled() else {
+            return
+        }
+        guard let exe = LiveCustomACPHarness.executablePath() else {
+            Issue.record("Set CODEMIXER_LIVE_ACP_BIN to migration-tool/dist/migration-acp")
+            return
+        }
+        guard FileManager.default.isExecutableFile(atPath: exe) else {
+            Issue.record("CODEMIXER_LIVE_ACP_BIN is not executable: \(exe)")
+            return
+        }
+
+        let ws = TestPaths.temporaryRoot
+            .appendingPathComponent("codemixer-live-handshake-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: ws) }
+
+        let result = try await LiveCustomACPHarness().runHandshakeProbe(.init(
+            workspace: ws,
+            executablePath: exe
+        ))
+
+        // The server refuses a client missing the A2UI catalog or per-file
+        // sessions, so a started session is proof both sides still agree.
+        #expect(result.errors.isEmpty, "handshake refused: \(result.errors.joined(separator: "; "))")
+        #expect(result.sessionID != nil)
+    }
+
     @Test("live migration reflection surfaces dashboard file sessions attention and full pipeline")
     func liveMigrationReflection() async throws {
         guard LiveCustomACPHarness.isMigrationPipelineEnabled() else {

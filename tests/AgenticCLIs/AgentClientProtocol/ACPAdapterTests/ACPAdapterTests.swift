@@ -34,6 +34,30 @@ struct ACPAdapterTests {
         #expect(!text.contains("session/new"))
     }
 
+    /// Pins the client half of the Custom ACP capability contract. The
+    /// migration tool refuses to handshake unless `initialize` advertises both
+    /// of these under `clientCapabilities._meta`, so dropping or renaming
+    /// either one here breaks every Custom ACP project rather than degrading.
+    /// Mirror of `tests/acp-integration.test.ts` "ACP client capability
+    /// contract" in `migration-tool`.
+    @Test("bootstrap advertises the A2UI catalog and per-file session capabilities")
+    func bootstrapAdvertisesClientCapabilities() throws {
+        let adapter = makeAdapter()
+        let context = LaunchContext(
+            workspace: TestPaths.underTemporary("acp-ws"),
+            permissionMode: .default
+        )
+        let data = adapter.sessionBootstrapBytes(context: context)
+        let root = try JSONDecoder().decode(JSONValue.self, from: data)
+        let meta = root["params"]?["clientCapabilities"]?["_meta"]
+        #expect(meta?["codemixer.dev/sessionNew"]?.boolValue == true)
+        let a2ui = meta?[A2UISchemaProfile.clientCapabilitiesMetaKey]
+        let catalogs = a2ui?["supportedCatalogIds"]?.arrayValue?.compactMap(\.stringValue)
+        #expect(catalogs?.contains(A2UISchemaProfile.testScopedCatalogID) == true)
+        let versions = a2ui?["supportedVersions"]?.arrayValue?.compactMap(\.stringValue)
+        #expect(versions?.contains(A2UISchemaProfile.version) == true)
+    }
+
     @Test("framing splits newline delimited frames")
     func framing() throws {
         var framing = ACPFraming()

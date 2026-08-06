@@ -591,7 +591,7 @@ public struct A2UIComponent: Sendable, Hashable, Codable {
             known = commonKeys.union(["text", "variant"])
             guard let text = object["text"] else { throw missing("text") }
             body = .text(.init(text: try A2UIDynamicString(json: text),
-                               variant: object["variant"]?.stringValue.flatMap(A2UITextVariant.init(rawValue:))))
+                               variant: object["variant"]?.stringValue.flatMap(A2UITextVariant.init(wire:))))
         case .image:
             known = commonKeys.union(["url", "description", "fit", "variant"])
             guard let url = object["url"] else { throw missing("url") }
@@ -656,7 +656,7 @@ public struct A2UIComponent: Sendable, Hashable, Codable {
             guard let action = object["action"] else { throw missing("action") }
             body = .button(.init(child: child,
                                  action: try A2UIAction(json: action),
-                                 variant: object["variant"]?.stringValue.flatMap(A2UIButtonVariant.init(rawValue:)),
+                                 variant: object["variant"]?.stringValue.flatMap(A2UIButtonVariant.init(wire:)),
                                  checks: try decodeChecks(object["checks"])))
         case .checkBox:
             known = commonKeys.union(["label", "value", "checks"])

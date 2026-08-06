@@ -40,7 +40,7 @@ struct AgentEngineA2UICommandTests {
         await h.shutdown()
     }
 
-    @Test("submitA2UIInteraction with a stale generation records SilentDiagnostics and writes nothing")
+    @Test("submitA2UIInteraction with a stale generation reports the rejection and writes nothing")
     func submitRejectsStaleGeneration() async throws {
         let transport = ScriptedTransport()
         let h = try await EngineHarness.make(transport: transport)
@@ -66,6 +66,14 @@ struct AgentEngineA2UICommandTests {
         let diag = await SilentDiagnostics.shared.snapshot()
         #expect(diag.contains {
             $0.kind == .a2uiActionRejected && $0.details?.contains("generationMismatch") == true
+        })
+        // A dropped press must also reach the user: a silent diagnostic alone
+        // makes a dead button indistinguishable from a broken agent.
+        #expect(await h.collectedSoFar().contains {
+            if case .error(.unsupportedOperation(let detail)) = $0 {
+                return detail.contains("review") && detail.contains("newer one")
+            }
+            return false
         })
         await SilentDiagnostics.shared.clear()
         await h.shutdown()

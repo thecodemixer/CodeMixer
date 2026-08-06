@@ -16,14 +16,23 @@ struct MarkdownProseView: View {
         case collapsed
     }
 
+    /// How loudly the blocks are typeset. Thinking traces carry the same
+    /// markdown structure as an answer but must not outweigh it
+    /// (visual-style §13.3), so they keep the structure and drop the volume.
+    enum Emphasis: Equatable {
+        case primary
+        case secondary
+    }
+
     let text: String
+    var emphasis: Emphasis = .primary
     var codePresentation: CodePresentation = .expanded
     var onCollapsedCodeSelected: ((String, String?) -> Void)? = nil
 
     private var blocks: [MarkdownBlock] { MarkdownBlock.parse(text) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.spacing.s12) {
+        VStack(alignment: .leading, spacing: blockSpacing) {
             ForEach(blocks) { block in
                 view(for: block)
             }
@@ -38,8 +47,11 @@ struct MarkdownProseView: View {
             case .heading(_, let t):     return t
             case .paragraph(let t):      return t
             case .blockQuote(let t):     return t
-            case .unorderedList(let items): return items.joined(separator: ". ")
-            case .orderedList(let items):   return items.joined(separator: ". ")
+            case .unorderedList(let items): return items.map(\.text).joined(separator: ". ")
+            case .orderedList(let items):   return items.map(\.text).joined(separator: ". ")
+            case .table(let headers, let rows):
+                return ([headers] + rows).map { $0.joined(separator: ", ") }.joined(separator: ". ")
+            case .thematicBreak:         return nil
             case .code:                  return nil  // skip code in spoken output
             }
         }.joined(separator: "\n")
@@ -76,22 +88,15 @@ struct MarkdownProseView: View {
                                        })
             } else {
                 Text(inline(text))
-                    .font(Theme.typography.prose)
-                    .foregroundStyle(Theme.text.primary)
+                    .font(proseFont)
+                    .foregroundStyle(proseColor)
                     .textSelection(.enabled)
             }
 
-        case .unorderedList(let items):
+        case .unorderedList(let items), .orderedList(let items):
             VStack(alignment: .leading, spacing: Theme.spacing.s4) {
                 ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                    listRow(marker: "•", content: inline(item))
-                }
-            }
-
-        case .orderedList(let items):
-            VStack(alignment: .leading, spacing: Theme.spacing.s4) {
-                ForEach(Array(items.enumerated()), id: \.offset) { idx, item in
-                    listRow(marker: "\(idx + 1).", content: inline(item))
+                    listRow(item)
                 }
             }
 
@@ -101,11 +106,17 @@ struct MarkdownProseView: View {
                     .fill(Theme.surface.divider)
                     .frame(width: Theme.stroke.focus)
                 Text(inline(text))
-                    .font(Theme.typography.prose)
+                    .font(proseFont)
                     .foregroundStyle(Theme.text.secondary)
                     .textSelection(.enabled)
             }
             .fixedSize(horizontal: false, vertical: true)
+
+        case .table(let headers, let rows):
+            MarkdownTableView(headers: headers, rows: rows, font: proseFont, color: proseColor)
+
+        case .thematicBreak:
+            Divider()
 
         case .code(let language, let code):
             switch codePresentation {
@@ -122,21 +133,44 @@ struct MarkdownProseView: View {
     }
 
     @ViewBuilder
-    private func listRow(marker: String, content: AttributedString) -> some View {
+    private func listRow(_ item: MarkdownListItem) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: Theme.spacing.s8) {
-            Text(marker)
-                .font(Theme.typography.prose)
+            Text(marker(for: item))
+                .font(proseFont)
                 .foregroundStyle(Theme.text.tertiary)
                 .monospacedDigit()
-            Text(content)
-                .font(Theme.typography.prose)
-                .foregroundStyle(Theme.text.primary)
+            Text(inline(item.text))
+                .font(proseFont)
+                .foregroundStyle(proseColor)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .padding(.leading, CGFloat(item.depth) * Theme.spacing.s16)
+    }
+
+    private func marker(for item: MarkdownListItem) -> String {
+        if let ordinal = item.ordinal { return "\(ordinal)." }
+        return Self.bullets[item.depth % Self.bullets.count]
+    }
+
+    /// Bullet glyphs cycle by depth so nested items are distinguishable even
+    /// when the indent is subtle.
+    private static let bullets = ["•", "◦", "▪"]
+
+    private var blockSpacing: CGFloat {
+        emphasis == .primary ? Theme.spacing.s12 : Theme.spacing.s8
+    }
+
+    private var proseFont: Font {
+        emphasis == .primary ? Theme.typography.prose : Theme.typography.caption
+    }
+
+    private var proseColor: Color {
+        emphasis == .primary ? Theme.text.primary : Theme.text.secondary
     }
 
     private func headingFont(level: Int) -> Font {
+        guard emphasis == .primary else { return Theme.typography.label }
         switch level {
         case 1, 2: return Theme.typography.title
         default:   return Theme.typography.label
@@ -170,6 +204,57 @@ struct MarkdownProseView: View {
             line.hasSuffix("{") || line.hasSuffix("}") || line.hasSuffix(";") || line.contains("=>")
         }
         return lines.count >= 2 && structuralLines.count >= 2
+    }
+}
+
+/// Pipe table as a real grid. Agents lean on tables for comparisons and
+/// checklists, which collapse into unreadable pipe soup as plain paragraphs.
+private struct MarkdownTableView: View {
+    let headers: [String]
+    let rows: [[String]]
+    let font: Font
+    let color: Color
+
+    private var columnCount: Int {
+        max(headers.count, rows.map(\.count).max() ?? 0)
+    }
+
+    var body: some View {
+        Grid(alignment: .topLeading,
+             horizontalSpacing: Theme.spacing.s12,
+             verticalSpacing: Theme.spacing.s8) {
+            GridRow {
+                ForEach(0..<columnCount, id: \.self) { column in
+                    cell(headers, column)
+                        .font(Theme.typography.label)
+                        .foregroundStyle(Theme.text.primary)
+                }
+            }
+            Divider().gridCellColumns(columnCount)
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                GridRow {
+                    ForEach(0..<columnCount, id: \.self) { column in
+                        cell(row, column)
+                            .font(font)
+                            .foregroundStyle(color)
+                    }
+                }
+            }
+        }
+        .textSelection(.enabled)
+        .padding(Theme.spacing.s12)
+        .background(Theme.surface.card,
+                    in: RoundedRectangle(cornerRadius: Theme.corner.medium, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Theme.corner.medium, style: .continuous)
+            .strokeBorder(Theme.surface.divider, lineWidth: Theme.stroke.hairline))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Table with \(columnCount) columns and \(rows.count) rows")
+    }
+
+    /// Ragged rows are common in hand-written tables; a missing cell renders
+    /// empty rather than dropping the whole row.
+    private func cell(_ cells: [String], _ column: Int) -> Text {
+        Text(column < cells.count ? cells[column] : "")
     }
 }
 

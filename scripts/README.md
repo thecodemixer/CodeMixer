@@ -151,6 +151,10 @@ below remain useful for raw hook/billing characterization outside the test runne
 
 - `test-runtime-overrides.json`
   - Per-suite runtime budget overrides for `check-test-runtime.swift`.
+  - The `EngineViewModel` suites pay a fixed ~40 ms `drain()` per test to let the
+    view model's reduction task run, so their budgets grow with test count.
+    Shortening `drain()` wedges the multi-hop navigator tests — raise the budget
+    there instead of trimming the wait.
 
 - `com.codecave.Codemixer.daemon.plist`
   - Canonical LaunchAgent template at `src/CodemixerApp/Resources/com.codecave.Codemixer.daemon.plist`.
