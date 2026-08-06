@@ -44,20 +44,24 @@ extension EngineViewModel {
     }
 
     /// Create or adopt a project from sheet-collected `ProjectDraft`.
-    public func createOrAddProject(_ info: ProjectDraft) async {
-        guard let projectType = info.projectType else { return }
+    /// Returns `nil` on success; otherwise a user-facing error (dialog should stay open).
+    @discardableResult
+    public func createOrAddProject(_ info: ProjectDraft) async -> String? {
+        guard let projectType = info.projectType else { return "Project type is required." }
         if let folderURL = info.existingFolderURL {
-            await addExistingProject(info, url: folderURL, projectType: projectType)
-        } else {
-            await createProject(info, projectType: projectType)
+            return await addExistingProject(info, url: folderURL, projectType: projectType)
         }
+        return await createProject(info, projectType: projectType)
     }
 
     /// Create a new project (subfolder of the workspace) and switch to it.
     /// Returns once the project is listed; when its model catalog cannot be
     /// populated it stays under Not loaded and is not opened.
-    public func createProject(_ info: ProjectDraft, projectType: ProjectType) async {
-        guard let workspaceRoot, let store = workspaceProjects else { return }
+    @discardableResult
+    public func createProject(_ info: ProjectDraft, projectType: ProjectType) async -> String? {
+        guard let workspaceRoot, let store = workspaceProjects else {
+            return "No workspace is open."
+        }
         do {
             let ref = try await store.createProject(
                 name: info.name,
@@ -66,8 +70,10 @@ extension EngineViewModel {
                 in: workspaceRoot
             )
             await finishProjectRegistration(ref, projectType: projectType)
+            return nil
         } catch {
             recordProjectError(error)
+            return projectMutationMessage(error)
         }
     }
 
@@ -75,10 +81,13 @@ extension EngineViewModel {
     /// Returns once the project is listed. Vendor history import continues in
     /// the background. When its model catalog cannot be populated the project
     /// stays under Not loaded and is not opened.
+    @discardableResult
     public func addExistingProject(_ info: ProjectDraft,
                                    url: URL,
-                                   projectType: ProjectType) async {
-        guard let workspaceRoot, let store = workspaceProjects else { return }
+                                   projectType: ProjectType) async -> String? {
+        guard let workspaceRoot, let store = workspaceProjects else {
+            return "No workspace is open."
+        }
         do {
             let ref = try await store.addExistingProject(
                 url: url,
@@ -97,8 +106,10 @@ extension EngineViewModel {
                     await MainActor.run { self.recordProjectError(error) }
                 }
             }
+            return nil
         } catch {
             recordProjectError(error)
+            return projectMutationMessage(error)
         }
     }
 
@@ -247,8 +258,13 @@ extension EngineViewModel {
     }
 
     func recordProjectError(_ error: any Error) {
-        let message = (error as? AgentError)?.userMessage ?? error.localizedDescription
-        diagnostics.append(diagnostic(level: .error, message: message))
+        diagnostics.append(diagnostic(level: .error, message: projectMutationMessage(error)))
+    }
+
+    private func projectMutationMessage(_ error: any Error) -> String {
+        (error as? LocalizedError)?.errorDescription
+            ?? (error as? AgentError)?.userMessage
+            ?? error.localizedDescription
     }
 
     /// Opens a freshly created workspace folder without starting an agent.

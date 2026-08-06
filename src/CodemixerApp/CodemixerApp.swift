@@ -140,12 +140,17 @@ struct CodemixerApp: App {
 
         Window("New Project", id: UtilityWindowID.newProject) {
             Group {
-                if let model = bootstrap.viewModel {
+                if let model = bootstrap.viewModel,
+                   let workspaceURL = model.workspaceRoot {
                     NewProjectSheet(
+                        workspaceURL: workspaceURL,
                         onCancel: { bootstrap.showNewProjectSheet = false },
                         onCreate: { info in
-                            await model.createOrAddProject(info)
-                            bootstrap.showNewProjectSheet = false
+                            let error = await model.createOrAddProject(info)
+                            if error == nil {
+                                bootstrap.showNewProjectSheet = false
+                            }
+                            return error
                         }
                     )
                 } else {

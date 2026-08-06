@@ -89,8 +89,8 @@ public actor WorkspaceProjectsStore {
             switch self {
             case .invalidProjectName:
                 "Project name is invalid."
-            case .projectFolderExists(let path):
-                "A folder already exists at \(path)."
+            case .projectFolderExists:
+                "A folder with that name already exists in this workspace. Choose a different project name."
             case .cannotRenameWorkspaceRoot:
                 "The workspace root folder cannot be renamed from the project navigator."
             case .undecodableProject(let path, let detail):

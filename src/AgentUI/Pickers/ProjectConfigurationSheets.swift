@@ -341,9 +341,12 @@ public struct NewProjectSheet: View {
         }
     }
 
+    public let workspaceURL: URL
     public let onCancel: () -> Void
-    public let onCreate: (_ info: ProjectDraft) async -> Void
+    /// Returns `nil` on success (sheet may close); otherwise an error to show under the name field.
+    public let onCreate: (_ info: ProjectDraft) async -> String?
     private let random: any RandomSource
+    private let fileSystem: any FileSystem
 
     @State private var name: String = ""
     @State private var category: ProjectTypeCategory = .singleAgent
@@ -357,12 +360,17 @@ public struct NewProjectSheet: View {
     @State private var customTransport: AgentTransportKind = .agentClientProtocol
     @State private var preferFreshAgentProcess = false
     @State private var isCreating = false
+    @State private var createError: String?
 
-    public init(onCancel: @escaping () -> Void,
+    public init(workspaceURL: URL,
                 random: any RandomSource = SystemRandomSource(),
-                onCreate: @escaping (_ info: ProjectDraft) async -> Void) {
-        self.onCancel = onCancel
+                fileSystem: any FileSystem = SystemFileSystem(),
+                onCancel: @escaping () -> Void,
+                onCreate: @escaping (_ info: ProjectDraft) async -> String?) {
+        self.workspaceURL = workspaceURL
         self.random = random
+        self.fileSystem = fileSystem
+        self.onCancel = onCancel
         self.onCreate = onCreate
     }
 
@@ -382,12 +390,30 @@ public struct NewProjectSheet: View {
         name.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// True when Create would write `<workspace>/<name>/` (not adopt an existing folder).
+    private var createsWorkspaceSubfolder: Bool {
+        !(category == .folder && folderLocationMode == .chooseExisting)
+    }
+
+    private var nameCollisionMessage: String? {
+        guard createsWorkspaceSubfolder else { return nil }
+        return ProjectFolderName.collisionMessage(
+            name: trimmedName,
+            in: workspaceURL,
+            fileSystem: fileSystem
+        )
+    }
+
+    private var nameFieldError: String? {
+        nameCollisionMessage ?? createError
+    }
+
     private var canCreate: Bool {
         guard !isCreating, resolvedProjectType != nil, !trimmedName.isEmpty else { return false }
         if category == .folder, folderLocationMode == .chooseExisting {
             return folderLocation != nil
         }
-        return true
+        return nameCollisionMessage == nil
     }
 
     private var sheetSubtitle: String {
@@ -421,6 +447,7 @@ public struct NewProjectSheet: View {
                     folderLocation = nil
                     folderLocationMode = .createInWorkspace
                 }
+                createError = nil
             }
 
             if category == .folder {
@@ -436,11 +463,19 @@ public struct NewProjectSheet: View {
                     .font(Theme.typography.body)
                     .disabled(isCreating)
                     .accessibilityLabel(category == .folder ? "Display name" : "Project name")
+                    .onChange(of: name) { _, _ in createError = nil }
                 if category == .folder, folderLocationMode == .createInWorkspace {
                     Text("Creates an empty folder with this name inside the current workspace.")
                         .font(Theme.typography.caption)
                         .foregroundStyle(Theme.text.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
+                }
+                if let nameFieldError {
+                    Text(nameFieldError)
+                        .font(Theme.typography.caption)
+                        .foregroundStyle(Theme.signal.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityLabel(nameFieldError)
                 }
             }
 
@@ -456,17 +491,24 @@ public struct NewProjectSheet: View {
                 cancelEnabled: !isCreating
             ) {
                 guard let projectType = resolvedProjectType else { return }
+                if let collision = nameCollisionMessage {
+                    createError = collision
+                    return
+                }
                 isCreating = true
                 defer { isCreating = false }
                 let folderURL: URL? = (category == .folder && folderLocationMode == .chooseExisting)
                     ? folderLocation
                     : nil
-                await onCreate(ProjectDraft(
+                let createdError = await onCreate(ProjectDraft(
                     name: trimmedName,
                     projectType: projectType,
                     preferFreshAgentProcess: preferFreshAgentProcess,
                     existingFolderURL: folderURL
                 ))
+                if let createdError {
+                    createError = createdError
+                }
             }
         }
         .padding(Theme.spacing.s24)
