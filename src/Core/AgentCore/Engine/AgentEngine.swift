@@ -76,7 +76,7 @@ public actor AgentEngine: AgentEngineCommandPort {
             turnState = newValue.map { .active(id: $0) } ?? .idle
         }
     }
-    var pendingPermissions: [UUID: PermissionPrompt] = [:]
+    var pendingPermissions: [UUID: PendingPermission] = [:]
     var lastUserBubbleID: UUID?
     var heartbeat: HeartbeatActivityMonitor?
     private var phraseResolver: StatusPhraseResolver
@@ -486,9 +486,13 @@ public actor AgentEngine: AgentEngineCommandPort {
             // Adapter-owned gates (e.g. Claude folder trust) that are already
             // decided by opening the project — apply silently via the same
             // encode/delivery path as a user Allow.
-            if let decision = adapter?.autoAllowDecision(for: prompt) {
+            let pending = PendingPermission(prompt: prompt, owner: key)
+            if let decision = runtimes[key]?.adapter.autoAllowDecision(for: prompt) {
                 do {
-                    try await deliverPermissionResponse(decision, for: prompt, id: prompt.id)
+                    try await deliverPermissionResponse(decision,
+                                                        for: prompt,
+                                                        id: prompt.id,
+                                                        owner: key)
                     await bus.publish(.permissionAlreadyResolved(id: prompt.id,
                                                                  byDevice: "adapter-auto"))
                 } catch {
@@ -498,7 +502,7 @@ public actor AgentEngine: AgentEngineCommandPort {
                         summary: "Adapter auto-allow delivery failed",
                         details: String(describing: error)
                     )
-                    pendingPermissions[prompt.id] = prompt
+                    pendingPermissions[prompt.id] = pending
                     startPermissionTimeout(for: prompt.id)
                     await record(event)
                     await bus.publish(event)
@@ -508,7 +512,10 @@ public actor AgentEngine: AgentEngineCommandPort {
             if let rule = await prefs.matchingRule(toolName: prompt.toolName,
                                                    summary: prompt.summary) {
                 do {
-                    try await deliverPermissionResponse(rule.decision, for: prompt, id: prompt.id)
+                    try await deliverPermissionResponse(rule.decision,
+                                                        for: prompt,
+                                                        id: prompt.id,
+                                                        owner: key)
                     await bus.publish(.permissionAlreadyResolved(id: prompt.id, byDevice: "auto-approval"))
                 } catch {
                     await SilentDiagnostics.shared.record(kind: .permissionDeliveryFailed,
@@ -516,14 +523,14 @@ public actor AgentEngine: AgentEngineCommandPort {
                                                           summary: "Auto-approval delivery failed",
                                                           details: String(describing: error))
                     await bus.publish(.error(.internalInvariant(detail: "permission delivery failed: \(error)")))
-                    pendingPermissions[prompt.id] = prompt
+                    pendingPermissions[prompt.id] = pending
                     startPermissionTimeout(for: prompt.id)
                     await record(event)
                     await bus.publish(event)
                 }
                 return
             }
-            pendingPermissions[prompt.id] = prompt
+            pendingPermissions[prompt.id] = pending
             startPermissionTimeout(for: prompt.id)
         case .permissionAlreadyResolved(let id, _):
             // Adapter-side resolve (e.g. migration Restart archived the session).
@@ -606,6 +613,25 @@ public actor AgentEngine: AgentEngineCommandPort {
 
     // MARK: - Permission timeout
 
+    /// An unresolved prompt together with the runtime that raised it.
+    ///
+    /// The pair is what makes the answer deliverable. A prompt outlives the
+    /// project switch that parks its agent — the process is still blocked on an
+    /// answer — and the auto-deny timer can fire minutes after the user moved
+    /// on. Keeping only the prompt would send the answer to whichever agent
+    /// happens to be active when it is resolved.
+    struct PendingPermission {
+        let prompt: PermissionPrompt
+        let owner: AgentRuntimeKey
+    }
+
+    /// The agent that raised a prompt is gone, so its answer has nowhere to go.
+    /// Reported rather than swallowed: a dropped answer leaves the caller
+    /// believing the tool call was allowed or denied when neither happened.
+    enum PermissionDeliveryError: Error, Equatable {
+        case agentGone(projectPath: String)
+    }
+
     private func startPermissionTimeout(for id: UUID) {
         let clock = seams.clock
         let duration = permissionTimeout
@@ -617,12 +643,15 @@ public actor AgentEngine: AgentEngineCommandPort {
     }
 
     private func handlePermissionTimeout(_ id: UUID) async {
-        guard let prompt = pendingPermissions.removeValue(forKey: id) else { return }
+        guard let pending = pendingPermissions.removeValue(forKey: id) else { return }
         permissionTimeouts.removeValue(forKey: id)?.cancel()
         log.notice("permission timeout for \(id, privacy: .public) — auto-denying")
 
         do {
-            try await deliverPermissionResponse(.deny, for: prompt, id: id)
+            try await deliverPermissionResponse(.deny,
+                                                for: pending.prompt,
+                                                id: id,
+                                                owner: pending.owner)
             await bus.publish(.permissionAlreadyResolved(id: id, byDevice: "timeout"))
             await bus.publish(.error(.permissionTimeout(promptID: id, action: .deny)))
         } catch {
@@ -634,18 +663,26 @@ public actor AgentEngine: AgentEngineCommandPort {
         }
     }
 
+    /// Answer `prompt` on the agent that raised it.
+    ///
+    /// Resolution goes through the pool rather than the active mirror: the
+    /// owning runtime may have been parked by a project switch, or torn down
+    /// entirely, between the prompt and the answer.
     func deliverPermissionResponse(_ decision: PermissionDecision,
                                    for prompt: PermissionPrompt,
-                                   id: UUID) async throws {
-        guard let adapter else { return }
-        switch adapter.encodePermissionResponse(decision, for: prompt) {
+                                   id: UUID,
+                                   owner: AgentRuntimeKey) async throws {
+        guard let runtime = runtimes[owner] else {
+            throw PermissionDeliveryError.agentGone(projectPath: owner.projectPath)
+        }
+        switch runtime.adapter.encodePermissionResponse(decision, for: prompt) {
         case .writePTY(let data):
-            try await transport?.write(data)
+            try await runtime.transport.write(data)
         case .respondToHookProcess(let json):
-            await hookServer?.respond(to: id, with: json)
+            await runtime.hookServer?.respond(to: id, with: json)
         case .both(let ptyBytes, let hookOut):
-            try await transport?.write(ptyBytes)
-            await hookServer?.respond(to: id, with: hookOut)
+            try await runtime.transport.write(ptyBytes)
+            await runtime.hookServer?.respond(to: id, with: hookOut)
         }
     }
 

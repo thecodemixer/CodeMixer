@@ -144,8 +144,11 @@ extension AgentEngine {
 
         case .respondToPermission(let id, let decision):
             permissionTimeouts.removeValue(forKey: id)?.cancel()
-            guard let prompt = pendingPermissions.removeValue(forKey: id) else { return }
-            try await deliverPermissionResponse(decision, for: prompt, id: id)
+            guard let pending = pendingPermissions.removeValue(forKey: id) else { return }
+            try await deliverPermissionResponse(decision,
+                                                for: pending.prompt,
+                                                id: id,
+                                                owner: pending.owner)
 
         case .newSession,
              .compact,

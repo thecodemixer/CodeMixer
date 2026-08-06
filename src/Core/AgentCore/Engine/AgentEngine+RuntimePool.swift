@@ -220,6 +220,12 @@ extension AgentEngine {
         runtime.sessionIDContinuation?.finish()
         await runtime.transport.close()
         await runtime.hookServer?.stop()
+        // Prompts raised by this agent can no longer be answered; other pooled
+        // agents are still waiting on theirs.
+        for (id, pending) in pendingPermissions where pending.owner == key {
+            pendingPermissions.removeValue(forKey: id)
+            permissionTimeouts.removeValue(forKey: id)?.cancel()
+        }
 
         if activeKey == key {
             activeKey = nil
