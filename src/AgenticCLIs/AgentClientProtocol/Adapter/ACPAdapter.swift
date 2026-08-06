@@ -130,6 +130,11 @@ public final class ACPAdapter: AgentAdapter {
     public func encodeCommand(_ command: AgentCommand) -> Data? {
         switch command {
         case .newSession:
+            // Same stdio process, new ACP session id. The engine keeps the pool
+            // slot; we do not respawn. Frames for the previous id stay on this
+            // wire until the agent finishes them — `ACPEventDecoder` scopes by
+            // `sessionId` (foreign stream cache / permission park) so they never
+            // paint as the new chat.
             state.prepareNewSession()
             return ACPInputEncoding.sessionNew(state: state)
         case .runSlashCommand(let target, let args):

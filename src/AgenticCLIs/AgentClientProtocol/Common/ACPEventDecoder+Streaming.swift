@@ -118,6 +118,12 @@ extension ACPEventDecoder {
         return Batch(events: events)
     }
 
+    /// Whether this `session/update` belongs to a session other than the one
+    /// currently bound as foreground.
+    ///
+    /// New Chat / warm resume keep the ACP process; only `state.sessionID()`
+    /// changes. Without this gate, a late chunk for the previous id would
+    /// stream into the new chat's transcript lane.
     func isForeignStreamingSession(params: JSONValue, kind: String?) -> Bool {
         let streamingKinds: Set<String> = [
             "agent_message_chunk",
