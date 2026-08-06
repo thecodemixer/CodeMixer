@@ -668,7 +668,7 @@ public actor AgentEngine: AgentEngineCommandPort {
                 await self?.scheduleDiffRefresh()
             }
         }
-        await refreshChangedFilesFromGit()
+        await refreshChangedFilesFromGit(for: activeKey)
     }
 
     func stopFSWatcher() async {
@@ -682,20 +682,32 @@ public actor AgentEngine: AgentEngineCommandPort {
 
     private func scheduleDiffRefresh() {
         diffRefreshTask?.cancel()
+        let origin = activeKey
         diffRefreshTask = Task { [weak self, clock = seams.clock] in
             do {
                 try await clock.sleep(for: Self.diffRefreshCoalesce)
             } catch {
                 return
             }
-            await self?.refreshChangedFilesFromGit()
+            await self?.refreshChangedFilesFromGit(for: origin)
         }
     }
 
-    private func refreshChangedFilesFromGit() async {
-        guard let workspace else { return }
+    /// Reconcile the changed-file mirror against `git status` for the runtime
+    /// that asked for the refresh.
+    ///
+    /// `origin` is what makes the result attributable. `git status` is a
+    /// subprocess, so the engine services a project switch while it runs, and
+    /// activation resets `changedFiles` and rebinds `workspace`. Without the
+    /// pre- and post-await checks, a refresh started for the outgoing project
+    /// lands on the incoming one: its files become the new project's changed
+    /// set and each one is published as `.fileTouched` against the wrong
+    /// workspace.
+    func refreshChangedFilesFromGit(for origin: AgentRuntimeKey?) async {
+        guard let workspace, activeKey == origin else { return }
         let diffEngine = GitDiffEngine(workspace: workspace)
         guard let gitFiles = try? await diffEngine.changedFiles() else { return }
+        guard activeKey == origin, self.workspace == workspace else { return }
         let delta = ChangedFilesReconciler.reconcile(current: changedFiles, gitPaths: gitFiles)
         changedFiles = delta.next
         for file in delta.added {
