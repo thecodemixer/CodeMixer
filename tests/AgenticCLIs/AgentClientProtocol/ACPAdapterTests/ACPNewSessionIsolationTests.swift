@@ -68,6 +68,37 @@ struct ACPNewSessionIsolationTests {
         })
     }
 
+    @Test("A background session's mode and model updates do not retarget the foreground chat")
+    func foreignModeAndModelUpdatesAreIgnored() async throws {
+        let harness = Harness()
+        harness.state.setSessionID("s2")
+        _ = await harness.decoder.decode(harness.modeUpdate(session: "s2", modeID: "plan"))
+        _ = await harness.decoder.decode(harness.modelUpdate(session: "s2", modelID: "fast"))
+
+        let foreignMode = await harness.decoder.decode(harness.modeUpdate(session: "s1", modeID: "ask"))
+        _ = await harness.decoder.decode(harness.modelUpdate(session: "s1", modelID: "slow"))
+
+        #expect(foreignMode.events.isEmpty)
+        #expect(harness.state.currentModeID() == "plan")
+        #expect(harness.state.currentModelID() == "fast")
+    }
+
+    @Test("Mode and model updates for the foreground session still apply")
+    func foregroundModeAndModelUpdatesApply() async throws {
+        let harness = Harness()
+        harness.state.setSessionID("s2")
+
+        let mode = await harness.decoder.decode(harness.modeUpdate(session: "s2", modeID: "plan"))
+        _ = await harness.decoder.decode(harness.modelUpdate(session: "s2", modelID: "fast"))
+
+        #expect(mode.events.contains { event in
+            if case .statusPhraseChanged(_, let phrase) = event { return phrase == "Mode: plan" }
+            return false
+        })
+        #expect(harness.state.currentModeID() == "plan")
+        #expect(harness.state.currentModelID() == "fast")
+    }
+
     private actor BackgroundRecorder {
         private(set) var batches: [BackgroundSessionEventBatch] = []
 
@@ -93,6 +124,20 @@ struct ACPNewSessionIsolationTests {
                                       clock: FakeClock(),
                                       random: random,
                                       recordBackgroundSessionEvents: recordBackground)
+        }
+
+        func modeUpdate(session: String, modeID: String) -> ACPIncoming {
+            .notification(method: "session/update",
+                          params: .object(["sessionId": .string(session),
+                                           "update": .object(["sessionUpdate": .string("current_mode_update"),
+                                                              "currentModeId": .string(modeID)])]))
+        }
+
+        func modelUpdate(session: String, modelID: String) -> ACPIncoming {
+            .notification(method: "session/update",
+                          params: .object(["sessionId": .string(session),
+                                           "update": .object(["sessionUpdate": .string("current_model_update"),
+                                                              "currentModelId": .string(modelID)])]))
         }
 
         func chunk(session: String, text: String, kind: String = "agent_message_chunk") -> ACPIncoming {

@@ -51,20 +51,9 @@ extension ACPEventDecoder {
         case "session_info_update":
             return await sessionInfoUpdate(params: params, update: update)
         case "current_mode_update":
-            if let modeID = update["currentModeId"]?.stringValue
-                ?? update["modeId"]?.stringValue {
-                state.setCurrentModeID(modeID)
-                return Batch(events: [
-                    .statusPhraseChanged(source: .adapterPinned, phrase: "Mode: \(modeID)"),
-                ])
-            }
-            return Batch()
+            return currentModeUpdate(params: params, update: update)
         case "current_model_update":
-            if let modelID = update["currentModelId"]?.stringValue
-                ?? update["modelId"]?.stringValue {
-                state.setCurrentModelID(modelID)
-            }
-            return Batch()
+            return currentModelUpdate(params: params, update: update)
         case "available_commands_update":
             return Batch()
         case "codemixer.dev/phase_update":
@@ -133,10 +122,39 @@ extension ACPEventDecoder {
             "user_message_chunk",
         ]
         guard let kind, streamingKinds.contains(kind) else { return false }
+        return isForeignSession(params: params)
+    }
+
+    /// Whether `params` names a session other than the bound foreground one.
+    ///
+    /// An update that names no session, or that arrives before a session is
+    /// bound, is not foreign: the agent is describing the session being opened.
+    func isForeignSession(params: JSONValue) -> Bool {
         guard let incoming = params["sessionId"]?.stringValue,
               let foreground = state.sessionID(),
               !incoming.isEmpty else { return false }
         return incoming != foreground
+    }
+
+    /// Mode and model updates name the session they describe, and a background
+    /// session keeps sending them. Applying one from another session would show
+    /// its mode/model as the foreground chat's.
+    func currentModeUpdate(params: JSONValue, update: JSONValue) -> Batch {
+        guard !isForeignSession(params: params),
+              let modeID = update["currentModeId"]?.stringValue
+              ?? update["modeId"]?.stringValue else { return Batch() }
+        state.setCurrentModeID(modeID)
+        return Batch(events: [
+            .statusPhraseChanged(source: .adapterPinned, phrase: "Mode: \(modeID)"),
+        ])
+    }
+
+    func currentModelUpdate(params: JSONValue, update: JSONValue) -> Batch {
+        guard !isForeignSession(params: params),
+              let modelID = update["currentModelId"]?.stringValue
+              ?? update["modelId"]?.stringValue else { return Batch() }
+        state.setCurrentModelID(modelID)
+        return Batch()
     }
 
     /// Persist background-session stream chunks without foreground UI events.
