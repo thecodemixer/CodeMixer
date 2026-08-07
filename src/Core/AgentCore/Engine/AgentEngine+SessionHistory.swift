@@ -147,10 +147,15 @@ extension AgentEngine {
         sessionActivationState = .restoring(key)
         transcript = []
         changedFiles = []
+        lastUserAdapterTurnID = nil
         do {
             let restored = try await transcriptRepository.transcript(for: key)
             transcript = restored.snapshotMessages()
             changedFiles = restored.changedFiles
+            // A restored session never minted its turn ids in this engine run,
+            // so the stale-edit guard has to adopt the journal's last user turn —
+            // that is the id every replaying client now derives its entry id from.
+            lastUserAdapterTurnID = restored.lastUserAdapterTurnID
             for event in restored.replayEvents() {
                 await bus.publish(event)
             }
@@ -160,6 +165,21 @@ extension AgentEngine {
             await bus.publish(.sessionHistoryRestored(sessionID: key.sessionID))
             sessionActivationState = .awaitingAdapter(key, historyPublished: true)
             await publishHistoryError(error, key: key, operation: "load")
+        }
+    }
+
+    /// Suspends until the active session accepts prompts, or the budget runs
+    /// out. Returns whether readiness was actually observed.
+    ///
+    /// Polling (rather than a continuation) keeps this on the injected clock
+    /// and lets `ingest` advance `sessionActivationState` between checks.
+    func awaitPromptReadiness(timeout: Duration) async -> Bool {
+        var waited: Duration = .zero
+        while true {
+            if case .ready = sessionActivationState { return true }
+            if waited >= timeout { return false }
+            try? await seams.clock.sleep(for: ActivityTiming.promptReadinessPollInterval)
+            waited += ActivityTiming.promptReadinessPollInterval
         }
     }
 

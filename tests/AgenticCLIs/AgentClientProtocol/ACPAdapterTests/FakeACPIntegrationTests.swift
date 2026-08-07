@@ -165,7 +165,138 @@ struct FakeACPIntegrationTests {
         #expect(text.contains("\"outcome\":\"selected\""))
     }
 
+    @Test("edit-and-resubmit on a restored session delivers the revised prompt to the respawned agent")
+    func editAndResubmitAfterRestoreReachesAgent() async throws {
+        guard Self.locateFakeACP() != nil else {
+            Issue.record("fake-acp not built — run swift build --product fake-acp")
+            return
+        }
+
+        let ws = try makeWorkspace()
+        defer { try? FileManager.default.removeItem(at: ws) }
+
+        let originalPrompt = "original prompt"
+        let editedPrompt = "edited prompt"
+        let originalEcho = ACPTwinScenario.echoReplyPrefix + originalPrompt
+        let editedEcho = ACPTwinScenario.echoReplyPrefix + editedPrompt
+
+        // Phase 1 — seed one turn so the journal owns an adapter turn id.
+        let seed = try await runEchoTurn(workspace: ws, resumeSessionID: nil) { engine, sink, _ in
+            try await engine.send(.sendPrompt(text: originalPrompt, attachments: []))
+            let replied = await fakeACPPollUntil(timeout: .seconds(12)) {
+                await sink.matches { $0.containsFinalAssistantText(containing: originalEcho) }
+            }
+            #expect(replied, "seed turn never echoed")
+        }
+        let sessionID = try #require(seed.sessionID, "seed produced no session id")
+
+        // Phase 2 — a second engine reopens that session from local history. It
+        // never minted the turn id, so edit-and-resubmit can only work if the
+        // stale-edit guard adopts the journal's adapter turn id.
+        let edited = try await runEchoTurn(workspace: ws,
+                                           resumeSessionID: sessionID) { engine, sink, adapter in
+            await engine.restoreHistory(for: SessionTranscriptKey(
+                projectRoot: ws,
+                namespace: adapter.historyNamespace,
+                sessionID: sessionID
+            ))
+            let restored = await fakeACPPollUntil(timeout: .seconds(8)) {
+                await sink.latestUserTurnID() != nil
+            }
+            #expect(restored, "history replay produced no user turn to edit")
+            let turnID = try #require(await sink.latestUserTurnID())
+
+            try await engine.send(.editAndResubmitLast(
+                targetEntryID: InternalEntryID.derive(fromAdapterTurnID: turnID),
+                text: editedPrompt,
+                attachments: []
+            ))
+            let replied = await fakeACPPollUntil(timeout: .seconds(20)) {
+                await sink.matches { $0.containsFinalAssistantText(containing: editedEcho) }
+            }
+            #expect(replied, "respawned agent never received the edited prompt")
+        }
+
+        // The agent echoed the revised text, so the bytes actually landed in the
+        // fresh process rather than being written into a dead or unready one.
+        #expect(edited.events.containsFinalAssistantText(containing: editedEcho))
+        #expect(edited.events.contains {
+            if case .userTurn(_, let text) = $0 { return text == editedPrompt }
+            return false
+        })
+    }
+
     // MARK: - Driver
+
+    private struct EchoTurnResult {
+        let events: [AgentEvent]
+        let sessionID: String?
+    }
+
+    /// Boots engine + `ACPAdapter` against `fake-acp` in the `echo` scenario,
+    /// runs `body`, and tears the process down. `echo` replies with the prompt
+    /// it received, which is what lets a caller prove *which* prompt arrived.
+    private func runEchoTurn(
+        workspace: URL,
+        resumeSessionID: String?,
+        _ body: (AgentEngine, FakeACPEventSink, ACPAdapter) async throws -> Void
+    ) async throws -> EchoTurnResult {
+        let fakeBin = try #require(Self.locateFakeACP())
+        let env = FakeEnvironment(processEnv: [
+            "CODEMIXER_TWIN_SCENARIO": ACPTwinScenario.echo.rawValue,
+            "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+            "SHELL": "/codemixer-test/missing-shell",
+        ])
+        let fs = SystemFileSystem()
+        // A fake agent is ready in milliseconds; the production 120s budget would
+        // only turn a genuine readiness bug into a very slow green test.
+        let engine = AgentEngine(
+            seams: Seams(clock: SystemClock(),
+                         random: SystemRandomSource(),
+                         environment: env,
+                         fileSystem: fs),
+            promptReadinessTimeout: .seconds(10),
+            transportFactory: LiveAgentTransportFactory.make
+        )
+        await engine.bootstrap()
+
+        let adapter = ACPAdapter(
+            ref: CustomAgentRef(
+                id: "fake-acp",
+                displayName: "Fake ACP",
+                transport: .agentClientProtocol,
+                executablePath: fakeBin.path,
+                arguments: []
+            ),
+            environment: env,
+            fileSystem: fs,
+            clock: SystemClock(),
+            random: SystemRandomSource()
+        )
+
+        let sink = FakeACPEventSink()
+        let sub = await engine.bus.subscribe()
+        let collector = Task { await sink.ingest(sub.stream) }
+        defer {
+            collector.cancel()
+            Task { await engine.bus.unsubscribe(sub.id) }
+        }
+
+        try await engine.start(adapter: adapter,
+                               workspace: workspace,
+                               resumeSessionID: resumeSessionID)
+        let sawSession = await fakeACPPollUntil(timeout: .seconds(12)) {
+            await sink.hasSessionStarted()
+        }
+        #expect(sawSession, "fake-acp session never started")
+
+        try await body(engine, sink, adapter)
+
+        let events = await sink.snapshot()
+        let sessionID = await sink.latestSessionID()
+        await engine.shutdown(reason: .naturalExit)
+        return EchoTurnResult(events: events, sessionID: sessionID)
+    }
 
     private func runScenario(scenario: String,
                              workspace: URL? = nil,
@@ -214,7 +345,7 @@ struct FakeACPIntegrationTests {
         let sink = FakeACPEventSink()
         let sub = await engine.bus.subscribe()
         let collector = Task { await sink.ingest(sub.stream) }
-        var responded: Set<UUID> = []
+        var responded: Set<PermissionPromptID> = []
         let approver = Task {
             while !Task.isCancelled {
                 if autoApprovePermissions,
@@ -306,6 +437,20 @@ private actor FakeACPEventSink {
         }
     }
 
+    func latestSessionID() -> String? {
+        for event in events.reversed() {
+            if case .sessionStarted(let id, _, _) = event, !id.isEmpty { return id }
+        }
+        return nil
+    }
+
+    func latestUserTurnID() -> AdapterTurnID? {
+        for event in events.reversed() {
+            if case .userTurn(let id, _) = event { return id }
+        }
+        return nil
+    }
+
     func containsAuthenticationRequired() -> Bool {
         events.contains { if case .error(.authenticationRequired) = $0 { return true }; return false }
     }
@@ -314,7 +459,7 @@ private actor FakeACPEventSink {
         predicate(events)
     }
 
-    func pendingPermissionID(excluding responded: Set<UUID>) -> UUID? {
+    func pendingPermissionID(excluding responded: Set<PermissionPromptID>) -> PermissionPromptID? {
         for event in events {
             if case .permissionRequest(let prompt) = event, !responded.contains(prompt.id) {
                 return prompt.id

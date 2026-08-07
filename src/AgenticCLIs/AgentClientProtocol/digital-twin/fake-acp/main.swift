@@ -152,6 +152,9 @@ private struct FakeACPServer: ACPTwinServer {
                         ])
                     ),
                 ] + completePrompt(reply: scenario.defaultReply)
+            case .echo:
+                let echoed = ACPTwinScenario.echoReplyPrefix + Self.promptText(from: params)
+                return completePrompt(reply: echoed)
             case .text, .auth, .authFail, .resume, .dashboard, .backgroundPermission,
                  .degradedNoDashboard:
                 return completePrompt(reply: scenario.defaultReply)
@@ -173,6 +176,13 @@ private struct FakeACPServer: ACPTwinServer {
             return completePrompt(reply: "fs:\(content)")
         }
         return []
+    }
+
+    /// Joins the text content blocks of a `session/prompt` back into one string.
+    private static func promptText(from params: JSONValue) -> String {
+        (params["prompt"]?.arrayValue ?? [])
+            .compactMap { $0["text"]?.stringValue }
+            .joined(separator: " ")
     }
 
     private func modesPayload() -> JSONValue {

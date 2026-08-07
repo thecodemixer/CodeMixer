@@ -32,6 +32,12 @@ public enum ActivityTiming {
     /// Composer gate when switching to a project whose agent is already pooled,
     /// or starting a new chat on that live process.
     public static let sessionHandshakeWarmTimeout: Duration = .seconds(45)
+    /// Granularity of the engine's wait for a respawned agent to accept
+    /// prompts (`editAndResubmitLast`). The budget itself is
+    /// `sessionHandshakeColdStartTimeout`: the pre-edit process is gone, so the
+    /// respawn really is a cold start, and a revised turn written before the
+    /// agent's input is live is lost with no error anywhere.
+    public static let promptReadinessPollInterval: Duration = .milliseconds(100)
     /// Default status phrase when no higher-priority source is active.
     public static let idlePhrase = "Idle"
     /// Fallback heuristic phrase when sources are cleared but the turn is active.
