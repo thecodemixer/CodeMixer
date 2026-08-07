@@ -16,11 +16,11 @@ struct SessionTranscriptTests {
         )
         let recordedAt = Date(timeIntervalSince1970: 1_700_000_000)
         let thinkingID = UUID(uuidString: "00000000-0000-0000-0000-000000000010")!
-        let toolID = "00000000-0000-0000-0000-000000000020"
+        let toolID = ToolCallID(rawValue: "00000000-0000-0000-0000-000000000020")
         var transcript = SessionTranscript(key: key)
 
-        transcript.apply(.appendUser(id: "user-1", text: "Prompt", recordedAt: recordedAt))
-        transcript.apply(.appendUser(id: "user-1", text: "Prompt", recordedAt: recordedAt))
+        transcript.apply(.appendUser(id: AdapterTurnID(rawValue: "user-1"), text: "Prompt", recordedAt: recordedAt))
+        transcript.apply(.appendUser(id: AdapterTurnID(rawValue: "user-1"), text: "Prompt", recordedAt: recordedAt))
         transcript.apply(.appendThinking(blockID: thinkingID,
                                          delta: "Plan ",
                                          recordedAt: recordedAt))
@@ -62,6 +62,51 @@ struct SessionTranscriptTests {
         })
     }
 
+    @Test("a start arriving after the call finished keeps the recorded result")
+    func lateStartDoesNotUnfinishTool() {
+        let key = SessionTranscriptKey(
+            projectRoot: TestPaths.underTemporary("transcript-late-start"),
+            namespace: AgentID.claudeCode.rawValue,
+            sessionID: "session-1"
+        )
+        let recordedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let toolID = ToolCallID(rawValue: "toolu_0001")
+        var transcript = SessionTranscript(key: key)
+
+        // Hook order: PreToolUse then PostToolUse.
+        transcript.apply(.startTool(id: toolID,
+                                    name: "Bash",
+                                    input: ToolInput(summary: "pwd"),
+                                    startedAt: recordedAt))
+        transcript.apply(.finishTool(id: toolID,
+                                     success: true,
+                                     output: ToolOutput(summary: "/tmp/ws"),
+                                     durationMS: 8,
+                                     recordedAt: recordedAt))
+        // The transcript tailer catches up and re-reports the same call.
+        transcript.apply(.startTool(id: toolID,
+                                    name: "Bash",
+                                    input: ToolInput(summary: "pwd"),
+                                    startedAt: recordedAt))
+
+        let ends = transcript.replayEvents().filter {
+            if case .toolEnd = $0 { return true }
+            return false
+        }
+        #expect(ends.count == 1)
+        #expect(transcript.replayEvents().contains {
+            if case .toolEnd(let id, true, let output, 8) = $0 {
+                return id == toolID && output.summary == "/tmp/ws"
+            }
+            return false
+        })
+        let starts = transcript.replayEvents().filter {
+            if case .toolStart = $0 { return true }
+            return false
+        }
+        #expect(starts.count == 1)
+    }
+
     @Test("truncate removes every block after the selected user turn")
     func truncationRemovesLaterBlocks() {
         let key = SessionTranscriptKey(
@@ -71,14 +116,14 @@ struct SessionTranscriptTests {
         )
         let recordedAt = Date(timeIntervalSince1970: 1_700_000_000)
         var transcript = SessionTranscript(key: key)
-        transcript.apply(.appendUser(id: "user-1", text: "First", recordedAt: recordedAt))
+        transcript.apply(.appendUser(id: AdapterTurnID(rawValue: "user-1"), text: "First", recordedAt: recordedAt))
         transcript.apply(.finalizeAssistant(id: "assistant-1",
                                             blockID: "block-1",
                                             text: "Reply",
                                             recordedAt: recordedAt))
-        transcript.apply(.appendUser(id: "user-2", text: "Second", recordedAt: recordedAt))
+        transcript.apply(.appendUser(id: AdapterTurnID(rawValue: "user-2"), text: "Second", recordedAt: recordedAt))
 
-        transcript.truncate(afterUserTurnID: "user-1")
+        transcript.truncate(afterUserTurnID: AdapterTurnID(rawValue: "user-1"))
 
         #expect(transcript.entries.count == 1)
         #expect(transcript.snapshotMessages().map(\.text) == ["First"])
@@ -141,7 +186,7 @@ struct SessionTranscriptTests {
         var transcript = SessionTranscript(key: key)
         for index in 0 ... SessionTranscript.replayEntryLimit {
             transcript.apply(.appendUser(
-                id: "user-\(index)",
+                id: AdapterTurnID(rawValue: "user-\(index)"),
                 text: "Prompt \(index)",
                 recordedAt: recordedAt
             ))

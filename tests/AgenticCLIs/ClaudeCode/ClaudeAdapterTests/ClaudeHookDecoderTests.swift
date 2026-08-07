@@ -14,7 +14,7 @@ struct ClaudeHookDecoderTests {
     @Test("SessionStart yields sessionStarted with id, model and cwd")
     func sessionStart() {
         let json = #"{"session_id":"sid-42","cwd":"/var/project","model":"claude-sonnet-4-5"}"#
-        let request = HookRequest(id: UUID(), eventName: "SessionStart", jsonPayload: data(json))
+        let request = HookRequest(id: HookRequestID(rawValue: UUID()), eventName: "SessionStart", jsonPayload: data(json))
         let events = decoder.events(from: request)
         guard case .sessionStarted(let id, let model, let cwd)? = events.first else {
             Issue.record("no sessionStarted"); return
@@ -27,7 +27,7 @@ struct ClaudeHookDecoderTests {
     @Test("SessionStart without session_id yields no events")
     func sessionStartMissingID() {
         let json = #"{"cwd":"/tmp"}"#
-        let events = decoder.events(from: HookRequest(id: UUID(),
+        let events = decoder.events(from: HookRequest(id: HookRequestID(rawValue: UUID()),
                                                        eventName: "SessionStart",
                                                        jsonPayload: data(json)))
         #expect(events.isEmpty)
@@ -38,7 +38,7 @@ struct ClaudeHookDecoderTests {
     @Test("UserPromptSubmit yields userTurn with prompt text")
     func userPromptSubmit() {
         let json = #"{"prompt":"Hello world","session_id":"s1"}"#
-        let events = decoder.events(from: HookRequest(id: UUID(),
+        let events = decoder.events(from: HookRequest(id: HookRequestID(rawValue: UUID()),
                                                        eventName: "UserPromptSubmit",
                                                        jsonPayload: data(json)))
         guard case .userTurn(_, let text)? = events.first else {
@@ -51,7 +51,7 @@ struct ClaudeHookDecoderTests {
 
     @Test("PreToolUse without needs_permission yields only toolStart")
     func preToolUseNoPermission() {
-        let id = UUID()
+        let id = HookRequestID(rawValue: UUID())
         let json = #"{"tool_name":"Bash","tool_input":{"command":"ls -la"}}"#
         let events = decoder.events(from: HookRequest(id: id,
                                                        eventName: "PreToolUse",
@@ -69,7 +69,7 @@ struct ClaudeHookDecoderTests {
 
     @Test("PreToolUse with needs_permission=true yields permissionRequest and toolStart")
     func preToolUseWithPermission() {
-        let id = UUID()
+        let id = HookRequestID(rawValue: UUID())
         let json = #"{"tool_name":"Bash","tool_input":{"command":"rm -rf"},"needs_permission":true}"#
         let events = decoder.events(from: HookRequest(id: id,
                                                        eventName: "PreToolUse",
@@ -87,7 +87,7 @@ struct ClaudeHookDecoderTests {
     @Test("PreToolUse for Bash surfaces human summary containing the command")
     func preToolUseBashSummary() {
         let json = #"{"tool_name":"Bash","tool_input":{"command":"git status"}}"#
-        let events = decoder.events(from: HookRequest(id: UUID(),
+        let events = decoder.events(from: HookRequest(id: HookRequestID(rawValue: UUID()),
                                                        eventName: "PreToolUse",
                                                        jsonPayload: data(json)))
         let start = events.compactMap { e -> ToolInput? in
@@ -99,7 +99,7 @@ struct ClaudeHookDecoderTests {
     @Test("PreToolUse for Edit surfaces file_path in summary")
     func preToolUseEditSummary() {
         let json = #"{"tool_name":"Edit","tool_input":{"file_path":"/src/main.swift"}}"#
-        let events = decoder.events(from: HookRequest(id: UUID(),
+        let events = decoder.events(from: HookRequest(id: HookRequestID(rawValue: UUID()),
                                                        eventName: "PreToolUse",
                                                        jsonPayload: data(json)))
         let start = events.compactMap { e -> ToolInput? in
@@ -111,7 +111,7 @@ struct ClaudeHookDecoderTests {
     @Test("PreToolUse for Read surfaces file_path in summary")
     func preToolUseReadSummary() {
         let json = #"{"tool_name":"Read","tool_input":{"file_path":"/README.md"}}"#
-        let events = decoder.events(from: HookRequest(id: UUID(),
+        let events = decoder.events(from: HookRequest(id: HookRequestID(rawValue: UUID()),
                                                        eventName: "PreToolUse",
                                                        jsonPayload: data(json)))
         let start = events.compactMap { e -> ToolInput? in
@@ -123,7 +123,7 @@ struct ClaudeHookDecoderTests {
     @Test("PreToolUse for Grep surfaces pattern in summary")
     func preToolUseGrepSummary() {
         let json = #"{"tool_name":"Grep","tool_input":{"pattern":"TODO"}}"#
-        let events = decoder.events(from: HookRequest(id: UUID(),
+        let events = decoder.events(from: HookRequest(id: HookRequestID(rawValue: UUID()),
                                                        eventName: "PreToolUse",
                                                        jsonPayload: data(json)))
         let start = events.compactMap { e -> ToolInput? in
@@ -135,7 +135,7 @@ struct ClaudeHookDecoderTests {
     @Test("PreToolUse for unknown tool falls back to 'Use <ToolName>'")
     func preToolUseUnknownTool() {
         let json = #"{"tool_name":"SuperTool","tool_input":{}}"#
-        let events = decoder.events(from: HookRequest(id: UUID(),
+        let events = decoder.events(from: HookRequest(id: HookRequestID(rawValue: UUID()),
                                                        eventName: "PreToolUse",
                                                        jsonPayload: data(json)))
         let start = events.compactMap { e -> ToolInput? in
@@ -144,12 +144,68 @@ struct ClaudeHookDecoderTests {
         #expect(start?.summary == "Use SuperTool")
     }
 
+    // MARK: - Pre/PostToolUse pairing
+
+    @Test("PreToolUse and PostToolUse pair on tool_use_id across separate hook connections")
+    func toolLifecyclePairsOnToolUseID() {
+        // Two connections, two request ids — only tool_use_id can pair them.
+        let pre = decoder.events(from: HookRequest(
+            id: HookRequestID(rawValue: UUID()),
+            eventName: "PreToolUse",
+            jsonPayload: data(#"{"tool_use_id":"toolu_0007","tool_name":"Bash","tool_input":{"command":"pwd"}}"#)
+        ))
+        let post = decoder.events(from: HookRequest(
+            id: HookRequestID(rawValue: UUID()),
+            eventName: "PostToolUse",
+            jsonPayload: data(#"{"tool_use_id":"toolu_0007","tool_name":"Bash","tool_response":{},"duration_ms":8}"#)
+        ))
+
+        guard case .toolStart(let startID, _, _, _)? = pre.first(where: {
+            if case .toolStart = $0 { return true }; return false
+        }) else { Issue.record("no toolStart"); return }
+        guard case .toolEnd(let endID, _, _, _)? = post.first(where: {
+            if case .toolEnd = $0 { return true }; return false
+        }) else { Issue.record("no toolEnd"); return }
+
+        #expect(startID == ToolCallID(rawValue: "toolu_0007"))
+        #expect(endID == startID)
+    }
+
+    @Test("Hook tool ids match the transcript tool_use id so both views fold as one call")
+    func hookToolIDMatchesTranscriptToolUseID() {
+        // `ClaudeTranscriptTailer` keys `toolStart` on the transcript's
+        // `tool_use` id, which is the same value the hook reports.
+        let events = decoder.events(from: HookRequest(
+            id: HookRequestID(rawValue: UUID()),
+            eventName: "PreToolUse",
+            jsonPayload: data(#"{"tool_use_id":"toolu_01ABC","tool_name":"Read","tool_input":{"file_path":"README.md"}}"#)
+        ))
+        guard case .toolStart(let id, _, _, _)? = events.first(where: {
+            if case .toolStart = $0 { return true }; return false
+        }) else { Issue.record("no toolStart"); return }
+        #expect(id == ToolCallID(rawValue: "toolu_01ABC"))
+    }
+
+    @Test("Without tool_use_id the tool id falls back to the hook request id")
+    func toolIDFallsBackToRequestID() {
+        let requestID = HookRequestID(rawValue: UUID())
+        let events = decoder.events(from: HookRequest(
+            id: requestID,
+            eventName: "PreToolUse",
+            jsonPayload: data(#"{"tool_name":"Bash","tool_input":{"command":"ls"}}"#)
+        ))
+        guard case .toolStart(let id, _, _, _)? = events.first(where: {
+            if case .toolStart = $0 { return true }; return false
+        }) else { Issue.record("no toolStart"); return }
+        #expect(id == ToolCallID(rawValue: requestID.rawValue.uuidString))
+    }
+
     // MARK: - PostToolUse
 
     @Test("PostToolUse yields toolEnd with success=true when is_error is absent")
     func postToolUseSuccess() {
         let json = #"{"tool_name":"Bash","tool_input":{},"tool_response":{},"duration_ms":123}"#
-        let events = decoder.events(from: HookRequest(id: UUID(),
+        let events = decoder.events(from: HookRequest(id: HookRequestID(rawValue: UUID()),
                                                        eventName: "PostToolUse",
                                                        jsonPayload: data(json)))
         guard case .toolEnd(_, let success, _, let ms)? = events.first(where: {
@@ -162,7 +218,7 @@ struct ClaudeHookDecoderTests {
     @Test("PostToolUse yields toolEnd with success=false when is_error=true")
     func postToolUseFailure() {
         let json = #"{"tool_name":"Bash","tool_input":{},"tool_response":{"error":"segfault"},"is_error":true,"duration_ms":5}"#
-        let events = decoder.events(from: HookRequest(id: UUID(),
+        let events = decoder.events(from: HookRequest(id: HookRequestID(rawValue: UUID()),
                                                        eventName: "PostToolUse",
                                                        jsonPayload: data(json)))
         guard case .toolEnd(_, let success, let output, _)? = events.first(where: {
@@ -175,7 +231,7 @@ struct ClaudeHookDecoderTests {
     @Test("PostToolUse for Edit/Write also yields fileTouched")
     func postToolUseFileTouched() {
         let json = #"{"tool_name":"Edit","tool_input":{"file_path":"/src/foo.swift"},"tool_response":{},"duration_ms":10}"#
-        let events = decoder.events(from: HookRequest(id: UUID(),
+        let events = decoder.events(from: HookRequest(id: HookRequestID(rawValue: UUID()),
                                                        eventName: "PostToolUse",
                                                        jsonPayload: data(json)))
         let hasTouched = events.contains {
@@ -190,7 +246,7 @@ struct ClaudeHookDecoderTests {
     @Test("PostToolUse for Write also yields fileTouched")
     func postToolUseWriteFileTouched() {
         let json = #"{"tool_name":"Write","tool_input":{"file_path":"/tmp/out.txt"},"tool_response":{},"duration_ms":2}"#
-        let events = decoder.events(from: HookRequest(id: UUID(),
+        let events = decoder.events(from: HookRequest(id: HookRequestID(rawValue: UUID()),
                                                        eventName: "PostToolUse",
                                                        jsonPayload: data(json)))
         #expect(events.contains { if case .fileTouched(_, .hookReported) = $0 { return true }; return false })
@@ -201,7 +257,7 @@ struct ClaudeHookDecoderTests {
     @Test("Notification yields statusPhraseChanged with hookHint source")
     func notification() {
         let json = #"{"message":"Reading files…"}"#
-        let events = decoder.events(from: HookRequest(id: UUID(),
+        let events = decoder.events(from: HookRequest(id: HookRequestID(rawValue: UUID()),
                                                        eventName: "Notification",
                                                        jsonPayload: data(json)))
         guard case .statusPhraseChanged(let src, let phrase)? = events.first else {
@@ -215,7 +271,7 @@ struct ClaudeHookDecoderTests {
 
     @Test("Stop yields idle activity, not process stop")
     func stop() {
-        let events = decoder.events(from: HookRequest(id: UUID(),
+        let events = decoder.events(from: HookRequest(id: HookRequestID(rawValue: UUID()),
                                                        eventName: "Stop",
                                                        jsonPayload: data("{}")))
         guard case .activityStateChanged(.idle)? = events.first else {
@@ -225,7 +281,7 @@ struct ClaudeHookDecoderTests {
 
     @Test("SubagentStop also yields idle activity")
     func subagentStop() {
-        let events = decoder.events(from: HookRequest(id: UUID(),
+        let events = decoder.events(from: HookRequest(id: HookRequestID(rawValue: UUID()),
                                                        eventName: "SubagentStop",
                                                        jsonPayload: data("{}")))
         #expect(events.contains { if case .activityStateChanged(.idle) = $0 { return true }; return false })
@@ -233,7 +289,7 @@ struct ClaudeHookDecoderTests {
 
     @Test("Unknown event name yields no events")
     func unknownEvent() {
-        let events = decoder.events(from: HookRequest(id: UUID(),
+        let events = decoder.events(from: HookRequest(id: HookRequestID(rawValue: UUID()),
                                                        eventName: "FutureThing",
                                                        jsonPayload: data("{}")))
         #expect(events.isEmpty)
@@ -241,7 +297,7 @@ struct ClaudeHookDecoderTests {
 
     @Test("Malformed JSON yields no events")
     func malformedJSON() {
-        let events = decoder.events(from: HookRequest(id: UUID(),
+        let events = decoder.events(from: HookRequest(id: HookRequestID(rawValue: UUID()),
                                                        eventName: "SessionStart",
                                                        jsonPayload: Data("not json".utf8)))
         #expect(events.isEmpty)

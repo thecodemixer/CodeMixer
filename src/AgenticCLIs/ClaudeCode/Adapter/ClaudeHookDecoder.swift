@@ -44,16 +44,35 @@ struct ClaudeHookDecoder: Sendable {
         return []
     }
 
-    private func decodePreToolStart(_ data: Data, requestID: UUID) -> AgentEvent? {
+    /// Tool identity for hook-derived tool events.
+    ///
+    /// `tool_use_id` is Claude's own id for the call and the only field shared
+    /// by PreToolUse and PostToolUse. Those arrive on two different socket
+    /// connections, so the hook request id names the connection and cannot
+    /// pair a start with its end. It is also the id `ClaudeTranscriptTailer`
+    /// reads from the transcript, so the hook and transcript views of one call
+    /// fold onto a single entry instead of racing as two.
+    ///
+    /// The request-id fallback covers Claude builds predating the field: ids
+    /// stay unique, but a start and end from such a build will not pair.
+    private func toolCallID(toolUseID: String?, requestID: HookRequestID) -> ToolCallID {
+        guard let toolUseID, !toolUseID.isEmpty else {
+            return ToolCallID(rawValue: requestID.rawValue.uuidString)
+        }
+        return ToolCallID(rawValue: toolUseID)
+    }
+
+    private func decodePreToolStart(_ data: Data, requestID: HookRequestID) -> AgentEvent? {
         struct Body: Decodable {
             let tool_name: String?
             let tool_input: [String: AnyCodableValue]?
+            let tool_use_id: String?
         }
         guard let b = try? JSONDecoder().decode(Body.self, from: data),
               let toolName = b.tool_name else { return nil }
         let summary = humanSummary(tool: toolName, args: b.tool_input)
         let json = b.tool_input.flatMap(prettyJSON)
-        return .toolStart(id: requestID.uuidString,
+        return .toolStart(id: toolCallID(toolUseID: b.tool_use_id, requestID: requestID),
                           name: toolName,
                           input: ToolInput(summary: summary, jsonPayload: json),
                           startedAt: clock.now())
@@ -80,10 +99,13 @@ struct ClaudeHookDecoder: Sendable {
         }
         guard let b = try? JSONDecoder().decode(Body.self, from: data),
               let text = b.prompt else { return nil }
-        return .userTurn(id: b.session_id ?? random.uuid().uuidString, text: text)
+        return .userTurn(
+            id: AdapterTurnID(rawValue: b.session_id ?? random.uuid().uuidString),
+            text: text
+        )
     }
 
-    private func decodePermissionPrompt(_ data: Data, requestID: UUID) -> PermissionPrompt? {
+    private func decodePermissionPrompt(_ data: Data, requestID: HookRequestID) -> PermissionPrompt? {
         struct Body: Decodable {
             let tool_name: String?
             let tool_input: [String: AnyCodableValue]?
@@ -93,18 +115,23 @@ struct ClaudeHookDecoder: Sendable {
               let toolName = b.tool_name,
               b.needs_permission == true else { return nil }
         let argsSummary = b.tool_input.flatMap(prettyJSON) ?? ""
-        return PermissionPrompt(id: requestID,
+        // The prompt id is minted from the hook request id on purpose: Claude
+        // blocks on this connection until we answer, and the engine replies by
+        // looking the id back up in the hook server's pending table when the
+        // client's decision arrives. Break this equality and permissions hang.
+        return PermissionPrompt(id: PermissionPromptID(rawValue: requestID.rawValue),
                                 toolName: toolName,
                                 summary: humanSummary(tool: toolName, args: b.tool_input),
                                 argumentsSummary: argsSummary,
                                 requestedAt: clock.now())
     }
 
-    private func decodePostToolUse(_ data: Data, requestID: UUID) -> [AgentEvent] {
+    private func decodePostToolUse(_ data: Data, requestID: HookRequestID) -> [AgentEvent] {
         struct Body: Decodable {
             let tool_name: String?
             let tool_input: [String: AnyCodableValue]?
             let tool_response: [String: AnyCodableValue]?
+            let tool_use_id: String?
             let duration_ms: Int?
             let is_error: Bool?
         }
@@ -128,7 +155,7 @@ struct ClaudeHookDecoder: Sendable {
         let output = ToolOutput(summary: summary,
                                 jsonPayload: b.tool_response.flatMap(prettyJSON),
                                 errorMessage: errMessage)
-        events.append(.toolEnd(id: requestID.uuidString,
+        events.append(.toolEnd(id: toolCallID(toolUseID: b.tool_use_id, requestID: requestID),
                                success: success,
                                output: output,
                                durationMS: b.duration_ms ?? 0))

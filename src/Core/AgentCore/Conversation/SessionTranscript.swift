@@ -18,10 +18,10 @@ struct SessionTranscript: Sendable {
     /// delete so recreate keeps bumping forward. Derived purely from
     /// surviving entries on rebuild — see note on `rebuildIndexes()`.
     private(set) var a2uiRetiredGenerations: [String: Int]
-    private var userIndexesByID: [String: Int]
+    private var userIndexesByID: [AdapterTurnID: Int]
     private var assistantIndexesByBlockID: [String: Int]
     private var thinkingIndexesByID: [UUID: Int]
-    private var toolIndexesByID: [String: Int]
+    private var toolIndexesByID: [ToolCallID: Int]
     private var fileIndexesByPath: [String: Int]
     private var a2uiSurfaceIndexesByID: [String: Int]
 
@@ -44,6 +44,16 @@ struct SessionTranscript: Sendable {
 
     var truncatedEntryCount: Int {
         max(0, entries.count - Self.replayEntryLimit)
+    }
+
+    /// Adapter turn id of the newest user turn, matching what `replayEvents()`
+    /// hands to clients. Restoring engines adopt this so the entry id they
+    /// derive for the edit-and-resubmit target agrees with every client's.
+    var lastUserAdapterTurnID: AdapterTurnID? {
+        for entry in entries.reversed() {
+            if case .user(let id, _) = entry.block { return id }
+        }
+        return nil
     }
 
     @discardableResult
@@ -161,7 +171,7 @@ struct SessionTranscript: Sendable {
     }
 
     @discardableResult
-    mutating func truncate(afterUserTurnID id: String) -> Bool {
+    mutating func truncate(afterUserTurnID id: AdapterTurnID) -> Bool {
         guard let index = entries.lastIndex(where: {
             if case .user(let entryID, _) = $0.block { return entryID == id }
             return false
@@ -211,7 +221,7 @@ struct SessionTranscript: Sendable {
         }
     }
 
-    private mutating func appendUser(id: String, text: String, recordedAt: Date) -> Bool {
+    private mutating func appendUser(id: AdapterTurnID, text: String, recordedAt: Date) -> Bool {
         let hasID = userIndexesByID[id] != nil
         let repeatsLastUser = entries.last.map {
             if case .user(_, let existingText) = $0.block { return existingText == text }
@@ -223,7 +233,7 @@ struct SessionTranscript: Sendable {
                       recordedAt: recordedAt)
     }
 
-    private mutating func replaceUser(id: String, text: String) -> Bool {
+    private mutating func replaceUser(id: AdapterTurnID, text: String) -> Bool {
         guard let index = userIndexesByID[id],
               entries[index].block != .user(id: id, text: text) else { return false }
         entries[index].block = .user(id: id, text: text)
@@ -279,11 +289,11 @@ struct SessionTranscript: Sendable {
         return true
     }
 
-    private mutating func startTool(id: String,
+    private mutating func startTool(id: ToolCallID,
                                     name: String,
                                     input: ToolInput,
                                     startedAt: Date) -> Bool {
-        let tool = ToolTranscript(id: id,
+        var tool = ToolTranscript(id: id,
                                   name: name,
                                   input: input,
                                   startedAt: startedAt,
@@ -292,6 +302,17 @@ struct SessionTranscript: Sendable {
                                   output: nil,
                                   durationMS: nil)
         if let index = toolIndex(id) {
+            // Two sources report one call under the same tool id, and they
+            // race: hooks arrive over a socket while the transcript tailer
+            // polls a file, so the tailer can report the start after the
+            // PostToolUse hook already reported the end. A late start
+            // re-describes the call; it must not un-finish it.
+            if case .tool(let existing) = entries[index].block {
+                tool.progress = existing.progress
+                tool.success = existing.success
+                tool.output = existing.output
+                tool.durationMS = existing.durationMS
+            }
             guard entries[index].block != .tool(tool) else { return false }
             entries[index].block = .tool(tool)
             return true
@@ -300,7 +321,7 @@ struct SessionTranscript: Sendable {
         }
     }
 
-    private mutating func updateTool(id: String, progress: ToolProgress) -> Bool {
+    private mutating func updateTool(id: ToolCallID, progress: ToolProgress) -> Bool {
         guard let index = toolIndex(id),
               case .tool(var tool) = entries[index].block,
               tool.progress != progress else { return false }
@@ -309,7 +330,7 @@ struct SessionTranscript: Sendable {
         return true
     }
 
-    private mutating func finishTool(id: String,
+    private mutating func finishTool(id: ToolCallID,
                                      success: Bool,
                                      output: ToolOutput,
                                      durationMS: Int) -> Bool {
@@ -366,7 +387,7 @@ struct SessionTranscript: Sendable {
         thinkingIndexesByID[id]
     }
 
-    private func toolIndex(_ id: String) -> Int? {
+    private func toolIndex(_ id: ToolCallID) -> Int? {
         toolIndexesByID[id]
     }
 
@@ -436,8 +457,7 @@ struct SessionTranscript: Sendable {
                            startedAt: tool.startedAt)
             ]
             if let progress = tool.progress {
-                let id = UUID(uuidString: tool.id) ?? StableID.uuid(from: tool.id)
-                events.append(.toolProgress(callID: id, progress: progress))
+                events.append(.toolProgress(callID: tool.id, progress: progress))
             }
             if let success = tool.success,
                let output = tool.output,

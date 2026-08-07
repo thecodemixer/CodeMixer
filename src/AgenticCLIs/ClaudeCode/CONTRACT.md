@@ -37,6 +37,12 @@ This document is the **executable specification** for what Codemixer expects fro
 
 Use `hook_event_name`, `tool_input`, `tool_response`, `tool_use_id`, `tool_name`, `is_error`, `duration_ms`. Do **not** use legacy `type`/`input`/`output`/`exit_code` in new payloads.
 
+### Tool call identity
+
+`tool_use_id` is the `ToolCallID` for hook-derived `toolStart`/`toolEnd`. PreToolUse and PostToolUse arrive on two different socket connections, so the hook request id names the connection and cannot pair them — `tool_use_id` is the only shared field. It is the same id space as the transcript's `tool_use.id` / `tool_result.tool_use_id`, so the hook and tailer views of one call fold onto one entry. Hooks and the tailer race (socket vs. file poll), so a start may follow an end; `SessionTranscript.startTool` preserves an already-recorded result.
+
+Claude builds predating `tool_use_id` fall back to the hook request id: unique, but a start and end will not pair.
+
 ### Stop hook extras
 
 `stop_hook_active`, `last_assistant_message`, `background_tasks`, `session_crons`.
