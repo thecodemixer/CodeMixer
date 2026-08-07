@@ -170,7 +170,7 @@ extension EngineViewModel {
             // startup publishes a synthetic >90s gap with its own watchdog id —
             // matching here prevents that from looking like a stalled turn the
             // moment the user sends into a still-gating resume.
-            let gapBelongsToCurrentTurn = turnID == lastUserBubbleID
+            let gapBelongsToCurrentTurn = turnID == lastUserEntryID?.rawValue
                 || turnID == pendingOptimisticBubbleID
             if activity != .idle, gapBelongsToCurrentTurn {
                 if elapsed > ActivityTiming.stillWorkingThreshold,
@@ -208,7 +208,7 @@ extension EngineViewModel {
             sessionCostUSD = cost
         case .toolProgress(let callID, let progress):
             noteAgentReplyObserved()
-            if let idx = activeToolCalls.firstIndex(where: { $0.id == callID.uuidString }) {
+            if let idx = activeToolCalls.firstIndex(where: { $0.id == callID }) {
                 activeToolCalls[idx].progress = progress
                 // Subagent text surfaces as .generic — accumulate it as nested lines.
                 if case .generic(let msg) = progress {
@@ -419,7 +419,7 @@ extension EngineViewModel {
         changedFiles = []
         a2uiSurfaces = [:]
         a2uiRetiredGenerations = [:]
-        lastUserBubbleID = nil
+        lastUserEntryID = nil
         selectedTurnID = nil
         selectedPhaseID = nil
         phaseMarkers = []
@@ -463,7 +463,7 @@ extension EngineViewModel {
         refreshPermissionActivity()
     }
 
-    func clearPendingPermission(id: UUID) {
+    func clearPendingPermission(id: PermissionPromptID) {
         pendingPermissionsBySession = pendingPermissionsBySession.filter { $0.value.id != id }
         refreshPermissionActivity()
     }

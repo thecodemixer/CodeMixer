@@ -597,7 +597,7 @@ struct ACPAdapterTests {
         )
         _ = adapter.sessionBootstrapBytes(context: context)
         let prompt = PermissionPrompt(
-            id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
+            id: PermissionPromptID(rawValue: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!),
             toolName: "Shell",
             summary: "Run command",
             argumentsSummary: "{}",

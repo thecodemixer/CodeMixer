@@ -110,7 +110,7 @@ extension EngineViewModel {
     }
 
     /// Respond to a pending permission prompt and record the decision.
-    public func respondToPermission(id: UUID, decision: PermissionDecision) {
+    public func respondToPermission(id: PermissionPromptID, decision: PermissionDecision) {
         let label: String
         switch decision {
         case .allow: label = "Allow"
@@ -217,7 +217,7 @@ extension EngineViewModel {
 
         let bubbleID = random.uuid()
         messages.append(.user(bubbleID: bubbleID, text: trimmed))
-        lastUserBubbleID = bubbleID
+        lastUserEntryID = InternalEntryID(rawValue: bubbleID)
         pendingOptimisticBubbleID = bubbleID
         armEchoDedup(for: trimmed)
         enterWorkingState()
@@ -234,17 +234,52 @@ extension EngineViewModel {
     /// Edit-and-resubmit clears the visible pane first, then the engine
     /// truncates the domain transcript, republishes the truncated history,
     /// and respawns. The revised `.userTurn` arrives after that restore.
-    public func editAndResubmit(targetBubbleID: UUID,
+    ///
+    /// A rejected edit (stale target, dead transport) must not leave the user
+    /// staring at an empty pane with their text gone, so the pre-clear
+    /// conversation and the edited draft are both held for rollback.
+    public func editAndResubmit(targetEntryID: InternalEntryID,
                                 text: String,
                                 attachments: [AttachmentRef] = []) {
         guard !isComposerLockedForSessionResume else { return }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        let restorePoint = messages
         clearConversationState()
         enterWorkingState()
-        send(.editAndResubmitLast(targetBubbleID: targetBubbleID,
-                                  text: text,
-                                  attachments: attachments))
+        Task { [engine, weak self] in
+            do {
+                try await engine.send(.editAndResubmitLast(targetEntryID: targetEntryID,
+                                                           text: text,
+                                                           attachments: attachments))
+            } catch {
+                await MainActor.run {
+                    self?.rollBackEditAndResubmit(to: restorePoint,
+                                                  targetEntryID: targetEntryID,
+                                                  draft: text,
+                                                  error: error)
+                }
+            }
+        }
+    }
+
+    func rollBackEditAndResubmit(to restorePoint: [Message],
+                                 targetEntryID: InternalEntryID,
+                                 draft: String,
+                                 error: any Error) {
+        // The engine republishes truncated history part-way through the
+        // command, so only a failure that left the pane empty can be undone
+        // without fighting that replay.
+        if messages.isEmpty {
+            messages = restorePoint
+            lastUserEntryID = targetEntryID
+        }
+        status = .idle
+        activity = .idle
+        isAwaitingFirstReplyForPrompt = false
+        editDraft = draft
+        let message = (error as? AgentError)?.userMessage ?? error.localizedDescription
+        diagnostics.append(diagnostic(level: .error, message: message))
     }
 
     /// Cancel the active turn and clear local waiting affordances immediately.
@@ -282,7 +317,7 @@ extension EngineViewModel {
             dedupUserText = nil
             dedupArmedAt = nil
             dedupDropsRemaining = 0
-            lastUserBubbleID = lastUserBubbleIDInMessages()
+            lastUserEntryID = lastUserEntryIDInMessages()
             status = .idle
             activity = .idle
             isAwaitingFirstReplyForPrompt = false
@@ -291,16 +326,18 @@ extension EngineViewModel {
         diagnostics.append(diagnostic(level: .error, message: message))
     }
 
-    func lastUserBubbleIDInMessages() -> UUID? {
+    func lastUserEntryIDInMessages() -> InternalEntryID? {
         for message in messages.reversed() {
-            if case .user(let id, _) = message { return id }
+            if case .user(let id, _) = message {
+                return InternalEntryID(rawValue: id)
+            }
         }
         return nil
     }
 
     /// Reconcile a `.userTurn` echo against any optimistic bubble + duplicate
     /// hook echo. See `pendingOptimisticBubbleID` for the full rationale.
-    func applyUserTurn(id: String, text: String) {
+    func applyUserTurn(id: AdapterTurnID, text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let now = clock.now()
         let withinWindow = (dedupArmedAt.map { now.timeIntervalSince($0) <= echoWindowSeconds }) ?? false
@@ -309,14 +346,14 @@ extension EngineViewModel {
             if let optimisticID = pendingOptimisticBubbleID {
                 // First real echo for an optimistic bubble: adopt the engine id
                 // so edit-and-resubmit targets the right turn.
-                let adoptedID = UUID(uuidString: id) ?? optimisticID
+                let adoptedID = InternalEntryID.derive(fromAdapterTurnID: id)
                 if let idx = messages.lastIndex(where: {
                     if case .user(let b, _) = $0 { return b == optimisticID }
                     return false
                 }) {
-                    messages[idx] = .user(bubbleID: adoptedID, text: text)
+                    messages[idx] = .user(bubbleID: adoptedID.rawValue, text: text)
                 }
-                lastUserBubbleID = adoptedID
+                lastUserEntryID = adoptedID
                 pendingOptimisticBubbleID = nil
                 // Re-arm the window so the later hook echo still drops.
                 dedupArmedAt = now
@@ -328,10 +365,12 @@ extension EngineViewModel {
             }
         }
 
-        // Genuine new user turn.
-        let uid = UUID(uuidString: id) ?? random.uuid()
-        messages.append(.user(bubbleID: uid, text: text))
-        lastUserBubbleID = uid
+        // Genuine new user turn. The id has to be derived, not invented: the
+        // engine addresses the same turn by the same derivation, and a replay
+        // of an adapter-sourced turn must land on the existing bubble.
+        let uid = InternalEntryID.derive(fromAdapterTurnID: id)
+        messages.append(.user(bubbleID: uid.rawValue, text: text))
+        lastUserEntryID = uid
         pendingOptimisticBubbleID = nil
         armEchoDedup(for: trimmed)
     }

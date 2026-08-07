@@ -19,9 +19,9 @@ struct EngineViewModelTurnsTests {
         defer { vm.unsubscribe() }
 
         await bus.publish(.sessionStarted(sessionID: "s1", model: nil, cwd: TestPaths.underTemporary("proj")))
-        await bus.publish(.userTurn(id: UUID().uuidString, text: "first"))
+        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: UUID().uuidString), text: "first"))
         await bus.publish(.assistantText(id: UUID().uuidString, blockID: UUID().uuidString, text: "reply one", isFinal: true))
-        await bus.publish(.userTurn(id: UUID().uuidString, text: "second"))
+        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: UUID().uuidString), text: "second"))
         await drain()
 
         let turns = vm.conversationTurns
@@ -41,10 +41,10 @@ struct EngineViewModelTurnsTests {
         defer { vm.unsubscribe() }
 
         await bus.publish(.sessionStarted(sessionID: "s1", model: nil, cwd: TestPaths.underTemporary("proj")))
-        await bus.publish(.userTurn(id: UUID().uuidString, text: "first"))
+        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: UUID().uuidString), text: "first"))
         await bus.publish(.assistantText(id: UUID().uuidString, blockID: UUID().uuidString, text: "done", isFinal: true))
         await bus.publish(.activityStateChanged(.idle))
-        await bus.publish(.userTurn(id: UUID().uuidString, text: "second"))
+        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: UUID().uuidString), text: "second"))
         await bus.publish(.activityStateChanged(.streamingText))
         await drain()
 
@@ -63,8 +63,8 @@ struct EngineViewModelTurnsTests {
         defer { vm.unsubscribe() }
 
         await bus.publish(.sessionStarted(sessionID: "s1", model: nil, cwd: TestPaths.underTemporary("proj")))
-        await bus.publish(.userTurn(id: UUID().uuidString, text: "first"))
-        await bus.publish(.userTurn(id: UUID().uuidString, text: "second"))
+        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: UUID().uuidString), text: "first"))
+        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: UUID().uuidString), text: "second"))
         await drain()
 
         #expect(vm.isFollowingLiveTurn)
@@ -90,7 +90,7 @@ struct EngineViewModelTurnsTests {
         #expect(!vm.hasPhaseData)
 
         await bus.publish(.sessionPhaseChanged(sessionID: "file-1", phase: .fixture("migrating", "Migrate", 2, .migrate)))
-        await bus.publish(.userTurn(id: UUID().uuidString, text: "migrate orders.ts"))
+        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: UUID().uuidString), text: "migrate orders.ts"))
         await drain()
 
         #expect(vm.hasPhaseData)
@@ -151,13 +151,13 @@ struct EngineViewModelTurnsTests {
         await bus.publish(.sessionStarted(sessionID: "file-1", model: nil, cwd: TestPaths.underTemporary("proj")))
         await bus.publish(.sessionPhaseChanged(sessionID: "file-1",
                                                phase: .fixture("planned", "Plan", 0, .plan)))
-        await bus.publish(.userTurn(id: UUID().uuidString, text: "plan the migration"))
+        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: UUID().uuidString), text: "plan the migration"))
         await bus.publish(.sessionPhaseChanged(sessionID: "file-1",
                                                phase: .fixture("migrating", "Migrate", 1, .migrate)))
-        await bus.publish(.userTurn(id: UUID().uuidString, text: "migrate orders.ts"))
+        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: UUID().uuidString), text: "migrate orders.ts"))
         await bus.publish(.sessionPhaseChanged(sessionID: "file-1",
                                                phase: .fixture("reviewing", "Review", 2, .review)))
-        await bus.publish(.userTurn(id: UUID().uuidString, text: "review the diff"))
+        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: UUID().uuidString), text: "review the diff"))
         await drain()
 
         #expect(vm.railPhases.map(\.id) == ["planned", "migrating", "reviewing"])
@@ -189,7 +189,7 @@ struct EngineViewModelTurnsTests {
         await bus.publish(.sessionPhaseChanged(sessionID: "file-1",
                                                phase: .fixture("planned", "Plan", 0, .plan)))
         let turnID = UUID()
-        await bus.publish(.userTurn(id: turnID.uuidString, text: "run the pipeline"))
+        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: turnID.uuidString), text: "run the pipeline"))
         await bus.publish(.activityStateChanged(.streamingText))
         await bus.publish(.assistantText(id: UUID().uuidString, blockID: "a",
                                          text: "planning…", isFinal: false))
@@ -291,7 +291,7 @@ struct EngineViewModelTurnsTests {
         #expect(vm.pendingPhaseMarkersBySession[pendingKey]?.last?.phase.id == "migrating")
 
         vm.beginSessionSwitch(projectPath: cwd.path, sessionID: "file-other")
-        await bus.publish(.userTurn(id: UUID().uuidString, text: "migrate orders.ts"))
+        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: UUID().uuidString), text: "migrate orders.ts"))
         await drain()
 
         #expect(vm.hasPhaseData)
@@ -422,13 +422,13 @@ struct EngineViewModelTurnsTests {
         defer { vm.unsubscribe() }
 
         await bus.publish(.sessionStarted(sessionID: "s1", model: nil, cwd: TestPaths.underTemporary("proj")))
-        await bus.publish(.userTurn(id: UUID().uuidString, text: "first"))
+        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: UUID().uuidString), text: "first"))
         await drain()
 
         vm.markSessionSeenNow()
         #expect(vm.recapSinceLastSeen == nil)
 
-        await bus.publish(.userTurn(id: UUID().uuidString, text: "second"))
+        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: UUID().uuidString), text: "second"))
         await bus.publish(.assistantText(id: UUID().uuidString, blockID: UUID().uuidString, text: "done", isFinal: true))
         await drain()
 
@@ -450,17 +450,17 @@ struct EngineViewModelTurnsTests {
         await bus.publish(.sessionStarted(sessionID: "file-1", model: nil, cwd: TestPaths.underTemporary("proj")))
         await bus.publish(.sessionPhaseChanged(sessionID: "file-1",
                                                phase: .fixture("planned", "Plan", 0, .plan)))
-        await bus.publish(.userTurn(id: UUID().uuidString, text: "plan the migration"))
+        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: UUID().uuidString), text: "plan the migration"))
         await bus.publish(.toolStart(id: "plan-tool", name: "read_file",
                                      input: ToolInput(summary: "orders.ts"), startedAt: Date()))
         await bus.publish(.sessionPhaseChanged(sessionID: "file-1",
                                                phase: .fixture("migrating", "Migrate", 1, .migrate)))
-        await bus.publish(.userTurn(id: UUID().uuidString, text: "migrate orders.ts"))
+        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: UUID().uuidString), text: "migrate orders.ts"))
         await bus.publish(.toolStart(id: "migrate-tool", name: "edit_file",
                                      input: ToolInput(summary: "orders.ts"), startedAt: Date()))
         await bus.publish(.sessionPhaseChanged(sessionID: "file-1",
                                                phase: .fixture("reviewing", "Review", 2, .review)))
-        await bus.publish(.userTurn(id: UUID().uuidString, text: "review the diff"))
+        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: UUID().uuidString), text: "review the diff"))
         await drain()
 
         // Live phase has no tools yet.

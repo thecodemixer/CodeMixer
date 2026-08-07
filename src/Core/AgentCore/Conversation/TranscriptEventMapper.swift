@@ -60,9 +60,7 @@ enum TranscriptEventMapper {
         case .toolStart(let id, let name, let input, let startedAt):
             return .startTool(id: id, name: name, input: input, startedAt: startedAt)
         case .toolProgress(let callID, let progress):
-            return .updateTool(id: callID.uuidString,
-                               progress: progress,
-                               recordedAt: recordedAt)
+            return .updateTool(id: callID, progress: progress, recordedAt: recordedAt)
         case .toolEnd(let id, let success, let output, let durationMS):
             return .finishTool(id: id,
                                success: success,

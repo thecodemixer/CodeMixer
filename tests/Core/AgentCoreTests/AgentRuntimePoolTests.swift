@@ -75,7 +75,7 @@ struct AgentRuntimePoolTests {
                                  group: .review)
         await engine.ingest(.sessionPhaseChanged(sessionID: "s-a", phase: phase),
                             from: keyA)
-        await engine.ingest(.userTurn(id: "u-a", text: "restore me"), from: keyA)
+        await engine.ingest(.userTurn(id: AdapterTurnID(rawValue: "u-a"), text: "restore me"), from: keyA)
         let thinkingID = UUID()
         await engine.ingest(.thinkingChunk(blockID: thinkingID, delta: "I need to inspect files."),
                             from: keyA)
@@ -87,7 +87,7 @@ struct AgentRuntimePoolTests {
                                        input: ToolInput(summary: "Run: pwd"),
                                        startedAt: clock.now()),
                             from: keyA)
-        await engine.ingest(.toolProgress(callID: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
+        await engine.ingest(.toolProgress(callID: "tool-a",
                                           progress: .generic(message: "checking files")),
                             from: keyA)
         await engine.ingest(.toolEnd(id: "tool-a",
@@ -139,7 +139,16 @@ struct AgentRuntimePoolTests {
             }
             return false
         })
-        #expect(!replayed.contains { if case .toolProgress = $0 { return true }; return false })
+        // Progress folds onto the call it names, so it survives replay. Before
+        // `ToolCallID`, `callID` was a `UUID` while `toolStart(id:)` was a
+        // `String`, so a vendor id like "tool-a" could never be matched and
+        // progress was silently dropped.
+        #expect(replayed.contains {
+            if case .toolProgress("tool-a", .generic(let message)) = $0 {
+                return message == "checking files"
+            }
+            return false
+        })
         #expect(replayed.contains {
             if case .toolEnd("tool-a", true, let output, 12) = $0 {
                 return output.summary == "/tmp/ws"

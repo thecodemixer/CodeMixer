@@ -76,8 +76,17 @@ public actor AgentEngine: AgentEngineCommandPort {
             turnState = newValue.map { .active(id: $0) } ?? .idle
         }
     }
-    var pendingPermissions: [UUID: PendingPermission] = [:]
-    var lastUserBubbleID: UUID?
+    var pendingPermissions: [PermissionPromptID: PendingPermission] = [:]
+    /// Adapter-minted id of the newest user turn — the vendor string the
+    /// journal stores and transcript truncation matches on. Only sometimes a
+    /// UUID.
+    var lastUserAdapterTurnID: AdapterTurnID?
+    /// The same turn as clients address it: the internal entry id derived from
+    /// the adapter turn id (see `InternalEntryID`), which the stale-edit guard
+    /// compares against.
+    var lastUserEntryID: InternalEntryID? {
+        lastUserAdapterTurnID.map(InternalEntryID.derive(fromAdapterTurnID:))
+    }
     var heartbeat: HeartbeatActivityMonitor?
     private var phraseResolver: StatusPhraseResolver
     var eventForwardingTask: Task<Void, Never>?
@@ -89,7 +98,7 @@ public actor AgentEngine: AgentEngineCommandPort {
     var attentionSessionIDsByProject: [String: Set<String>] = [:]
     var transcript: [SnapshotService.SnapshotMessage] = []
     var changedFiles: [ChangedFile] = []
-    var permissionTimeouts: [UUID: Task<Void, Never>] = [:]
+    var permissionTimeouts: [PermissionPromptID: Task<Void, Never>] = [:]
     private var fsWatcher: FSEventsWatcher?
     private var fsWatcherTask: Task<Void, Never>?
     private var diffRefreshTask: Task<Void, Never>?
@@ -103,6 +112,11 @@ public actor AgentEngine: AgentEngineCommandPort {
 
     /// Default auto-deny window for unresolved permission prompts.
     public static let defaultPermissionTimeout: Duration = .seconds(300)
+
+    /// How long a respawned session is given to accept prompts before the
+    /// revised edit-and-resubmit turn is written regardless. Injected so tests
+    /// do not pay the production budget.
+    let promptReadinessTimeout: Duration
 
     /// User preferences (appearance + auto-approval rules) — public so the
     /// UI and remote-control server can subscribe to mutations.
@@ -125,9 +139,11 @@ public actor AgentEngine: AgentEngineCommandPort {
 
     init(seams: Seams = .live,
          permissionTimeout: Duration = AgentEngine.defaultPermissionTimeout,
+         promptReadinessTimeout: Duration = ActivityTiming.sessionHandshakeColdStartTimeout,
          transportFactory: @escaping AgentTransportFactory) {
         self.seams = seams
         self.permissionTimeout = permissionTimeout
+        self.promptReadinessTimeout = promptReadinessTimeout
         self.transportFactory = transportFactory
         self.bus = MulticastEventBus(random: seams.random)
         self.phraseResolver = StatusPhraseResolver()
@@ -412,7 +428,7 @@ public actor AgentEngine: AgentEngineCommandPort {
         currentSessionID = nil
         currentTurnID = nil
         pendingPermissions.removeAll()
-        lastUserBubbleID = nil
+        lastUserAdapterTurnID = nil
         for task in permissionTimeouts.values { task.cancel() }
         permissionTimeouts.removeAll()
         if case .rollbackPartialStart = mode {
@@ -632,7 +648,7 @@ public actor AgentEngine: AgentEngineCommandPort {
         case agentGone(projectPath: String)
     }
 
-    private func startPermissionTimeout(for id: UUID) {
+    private func startPermissionTimeout(for id: PermissionPromptID) {
         let clock = seams.clock
         let duration = permissionTimeout
         permissionTimeouts[id] = Task {
@@ -642,10 +658,10 @@ public actor AgentEngine: AgentEngineCommandPort {
         }
     }
 
-    private func handlePermissionTimeout(_ id: UUID) async {
+    private func handlePermissionTimeout(_ id: PermissionPromptID) async {
         guard let pending = pendingPermissions.removeValue(forKey: id) else { return }
         permissionTimeouts.removeValue(forKey: id)?.cancel()
-        log.notice("permission timeout for \(id, privacy: .public) — auto-denying")
+        log.notice("permission timeout for \(id.rawValue, privacy: .public) — auto-denying")
 
         do {
             try await deliverPermissionResponse(.deny,
@@ -670,19 +686,25 @@ public actor AgentEngine: AgentEngineCommandPort {
     /// entirely, between the prompt and the answer.
     func deliverPermissionResponse(_ decision: PermissionDecision,
                                    for prompt: PermissionPrompt,
-                                   id: UUID,
+                                   id: PermissionPromptID,
                                    owner: AgentRuntimeKey) async throws {
         guard let runtime = runtimes[owner] else {
             throw PermissionDeliveryError.agentGone(projectPath: owner.projectPath)
         }
+        // Hook-based agents answer on the socket the prompt arrived on, so the
+        // prompt id has to double as the connection key. That only holds
+        // because the adapter minted the prompt id from the hook request id
+        // (see `ClaudeHookDecoder.decodePermissionPrompt`); a client that
+        // invents a prompt id simply misses the table and gets no reply.
+        let hookRequestID = HookRequestID(rawValue: id.rawValue)
         switch runtime.adapter.encodePermissionResponse(decision, for: prompt) {
         case .writePTY(let data):
             try await runtime.transport.write(data)
         case .respondToHookProcess(let json):
-            await runtime.hookServer?.respond(to: id, with: json)
+            await runtime.hookServer?.respond(to: hookRequestID, with: json)
         case .both(let ptyBytes, let hookOut):
             try await runtime.transport.write(ptyBytes)
-            await runtime.hookServer?.respond(to: id, with: hookOut)
+            await runtime.hookServer?.respond(to: hookRequestID, with: hookOut)
         }
     }
 

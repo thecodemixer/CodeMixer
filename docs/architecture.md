@@ -386,16 +386,16 @@ Codemixer's core data flow is **event sourced**. Every observable thing is an `A
 ```swift
 public enum AgentEvent: Sendable {
     case sessionStarted(sessionID: String, model: String?, cwd: URL)
-    case userTurn(id: String, text: String)
+    case userTurn(id: AdapterTurnID, text: String)
     case textDelta(messageID: UUID, delta: String)
     case assistantText(id: String, blockID: String, text: String, isFinal: Bool)
     case thinkingChunk(blockID: UUID, delta: String)
     case thinkingComplete(blockID: UUID, duration: Duration)
-    case toolStart(id: String, name: String, input: ToolInput, startedAt: Date)
-    case toolProgress(callID: UUID, progress: ToolProgress)
-    case toolEnd(id: String, success: Bool, output: ToolOutput, durationMS: Int)
+    case toolStart(id: ToolCallID, name: String, input: ToolInput, startedAt: Date)
+    case toolProgress(callID: ToolCallID, progress: ToolProgress)
+    case toolEnd(id: ToolCallID, success: Bool, output: ToolOutput, durationMS: Int)
     case permissionRequest(prompt: PermissionPrompt)
-    case permissionAlreadyResolved(id: UUID, byDevice: String)
+    case permissionAlreadyResolved(id: PermissionPromptID, byDevice: String)
     case statusPhraseChanged(source: StatusPhraseSource, phrase: String)
     case activityStateChanged(ActivitySubstate)
     case noEventGap(turnID: UUID, elapsed: Duration)
@@ -1209,7 +1209,7 @@ hook (Notification or PreToolUse)  ───► HookServer  ───► adapter
 - **Auto-approval rules** are a higher-level service that consumes `permissionRequest` events and synthesizes `respondToPermission` commands; rules are user-editable per project.
 - **Headless timeout.** With no client connected, the engine waits `permissionTimeout` (default 5 min) then synthesizes `.deny`.
 - **Delivery modes are adapter-owned.** Some agents accept permission answers by pty bytes, some by hook stdout, and Claude can need both. The engine preserves adapter intent and propagates pty write failures for `.writePTY` and `.both`.
-- **Stale-edit guard.** `editAndResubmitLast` requires the target bubble UUID to match `lastUserBubbleID`. If it doesn't (because another client already resubmitted), the engine throws `AgentError.staleEditTarget`.
+- **Stale-edit guard.** `editAndResubmitLast` requires the target `InternalEntryID` to match `lastUserEntryID` (derived from `lastUserAdapterTurnID`). If it doesn't (because another client already resubmitted), the engine throws `AgentError.staleEditTarget`.
 
 ---
 
@@ -1409,7 +1409,7 @@ public enum ServerFrame: Codable, Sendable {
 }
 ```
 
-Every frame carries `"v": WireVersion.current` (today `2`). Decoders reject mismatches — there is no dual-speak across versions.
+Every frame carries `"v": WireVersion.current` (today `5`). Decoders reject mismatches — there is no dual-speak across versions.
 
 ### Pairing
 
@@ -1689,11 +1689,11 @@ Three canonical walkthroughs. Reading them in order is the fastest way to intern
     the same AgentEngineCommandPort.)
 4. AgentEngine actor receives the command:
      - guard sessionActivationState is `.ready`
-     - lastUserBubbleID = seams.random.uuid()
+     - mint AdapterTurnID / derive InternalEntryID for the new user turn
      - bytes = adapter.encodeUserPrompt("fix the test failure")  // for Claude: text + "\r"
      - transcriptRepository.record(.userTurn(...))
      - await bus.publish(.userTurn(id: ..., text: ...))
-     - currentTurnID = lastUserBubbleID
+     - currentTurnID = lastUserEntryID
      - heartbeat.startTurn(...)
      - await transport.write(bytes)
 5. PTYHost writes bytes to the master FD.
@@ -1787,7 +1787,7 @@ The wire protocol is the most rigid part of the system because clients we don't 
 
 ### Version field
 
-Every frame carries `"v": WireVersion.current` (today `2`), declared in `Core/AgentProtocol/WireVersion.swift`. Decoders read `v` first; mismatches produce `ServerFrame.versionMismatch(supported:)` and a `SilentDiagnostics.wireVersionRejected` record. **There is no dual-speak** — servers and clients must agree on the version.
+Every frame carries `"v": WireVersion.current` (today `5`), declared in `Core/AgentProtocol/WireVersion.swift`. Decoders read `v` first; mismatches produce `ServerFrame.versionMismatch(supported:)` and a `SilentDiagnostics.wireVersionRejected` record. **There is no dual-speak** — servers and clients must agree on the version.
 
 ### Compatibility policy
 
@@ -2330,7 +2330,7 @@ data, not a name or diagnostic string.
 | Layer | Coverage |
 | --- | --- |
 | Schema/limit/catalog structural rules | `tests/Core/A2UICoreTests/*` |
-| Wire round-trip (`AgentEvent.a2uiBatch`, both new `AgentCommand` cases) | `tests/Remote/RemoteParityTests/WireCodecParityTests.swift`, `tests/Core/AgentProtocolTests/WireFrameRoundTripTests.swift` (`WireVersion.current == .v4`) |
+| Wire round-trip (`AgentEvent.a2uiBatch`, both new `AgentCommand` cases) | `tests/Remote/RemoteParityTests/WireCodecParityTests.swift`, `tests/Core/AgentProtocolTests/WireFrameRoundTripTests.swift` (`WireVersion.current == .v5`) |
 | ACP decode/encode (capability, resource extraction, action/error encoding) | `tests/AgenticCLIs/AgentClientProtocol/ACPAdapterTests/*` |
 | Durable persistence/replay | `tests/Core/AgentCoreTests/SessionTranscriptTests.swift` |
 | `EngineViewModel` reduction | `tests/AgentUITests/EngineViewModelTests.swift` |

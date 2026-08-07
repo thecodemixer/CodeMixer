@@ -49,7 +49,8 @@ struct CursorTranscriptDecoder: Sendable {
         case "user":
             let text = blocks.compactMap(\.text).joined(separator: "\n")
             guard !text.isEmpty else { return [] }
-            return [.userTurn(id: idPrefix, text: Self.userPrompt(from: text))]
+            return [.userTurn(id: AdapterTurnID(rawValue: idPrefix),
+                              text: Self.userPrompt(from: text))]
         case "assistant":
             return assistantEvents(blocks, idPrefix: idPrefix, timestamp: timestamp)
         case "tool":
@@ -83,7 +84,7 @@ struct CursorTranscriptDecoder: Sendable {
                 ))
             case "tool-call", "toolCall", "tool_use":
                 events.append(.toolStart(
-                    id: block.toolID ?? blockID,
+                    id: ToolCallID(rawValue: block.toolID ?? blockID),
                     name: block.toolName ?? "Tool",
                     input: ToolInput(
                         summary: block.toolName ?? "Tool call",
@@ -106,7 +107,7 @@ struct CursorTranscriptDecoder: Sendable {
                               fallbackID: String) -> AgentEvent? {
         guard let output = block.text ?? block.payload else { return nil }
         return .toolEnd(
-            id: block.toolID ?? fallbackID,
+            id: ToolCallID(rawValue: block.toolID ?? fallbackID),
             success: true,
             output: ToolOutput(summary: output),
             durationMS: 0

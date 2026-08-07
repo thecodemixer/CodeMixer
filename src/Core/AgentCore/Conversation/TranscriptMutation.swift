@@ -4,20 +4,20 @@ import AgentProtocol
 import Foundation
 
 enum TranscriptMutation: Sendable, Codable, Equatable {
-    case appendUser(id: String, text: String, recordedAt: Date)
-    case replaceUser(id: String, text: String, recordedAt: Date)
+    case appendUser(id: AdapterTurnID, text: String, recordedAt: Date)
+    case replaceUser(id: AdapterTurnID, text: String, recordedAt: Date)
     case finalizeAssistant(id: String, blockID: String, text: String, recordedAt: Date)
     case appendThinking(blockID: UUID, delta: String, recordedAt: Date)
     case completeThinking(blockID: UUID, durationMS: Int, recordedAt: Date)
-    case startTool(id: String, name: String, input: ToolInput, startedAt: Date)
-    case updateTool(id: String, progress: ToolProgress, recordedAt: Date)
-    case finishTool(id: String, success: Bool, output: ToolOutput, durationMS: Int, recordedAt: Date)
+    case startTool(id: ToolCallID, name: String, input: ToolInput, startedAt: Date)
+    case updateTool(id: ToolCallID, progress: ToolProgress, recordedAt: Date)
+    case finishTool(id: ToolCallID, success: Bool, output: ToolOutput, durationMS: Int, recordedAt: Date)
     case touchFile(file: ChangedFile, kind: FileChangeKind, recordedAt: Date)
     case removeChangedFile(ChangedFile, recordedAt: Date)
     case reconcileChangedFiles([ChangedFile], recordedAt: Date)
     case changePhase(sessionID: String, phase: SessionPhase, recordedAt: Date)
     case appendClientAction(ClientAction, recordedAt: Date)
-    case truncateAfterUser(id: String, recordedAt: Date)
+    case truncateAfterUser(id: AdapterTurnID, recordedAt: Date)
     /// Folds a whole A2UI batch through `A2UISurfaceReducer` (see
     /// `SessionTranscript.applyA2UIBatch`). Kept as a single mutation instead
     /// of one mutation per surface message so the durable journal stays an

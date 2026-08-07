@@ -28,7 +28,7 @@ public actor HookServer {
     private var listener: NetworkListenerHandle?
     private var acceptTask: Task<Void, Never>?
     private let requestContinuation: AsyncStream<HookRequest>.Continuation
-    private var pendingResponses: [UUID: any NetworkConnection] = [:]
+    private var pendingResponses: [HookRequestID: any NetworkConnection] = [:]
 
     /// Outbound stream of hook requests; adapter consumes this and replies via
     /// the bound `HookSocketHandle.respond` closure.
@@ -80,7 +80,7 @@ public actor HookServer {
     }
 
     /// Send `data` as the response body for the pending request `id`, then close.
-    public func respond(to id: UUID, with data: Data) {
+    public func respond(to id: HookRequestID, with data: Data) {
         guard let connection = pendingResponses.removeValue(forKey: id) else { return }
         Task {
             try? await connection.send(data)
@@ -117,7 +117,7 @@ public actor HookServer {
     // MARK: - Connection processing
 
     private func acceptConnection(_ connection: any NetworkConnection) async {
-        let id = random.uuid()
+        let id = HookRequestID(rawValue: random.uuid())
         // The hook protocol sends the JSON request body and half-closes its
         // write side; we read frames until the peer signals EOF (nil).
         var payload = Data()

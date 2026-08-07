@@ -52,7 +52,7 @@ extension CodexEventDecoder {
         // schema from the user's installed Codex version replaces it.
         return Batch(events: [
             .toolStart(
-                id: itemID,
+                id: ToolCallID(rawValue: itemID),
                 name: toolName(type: type, item: item),
                 input: ToolInput(
                     summary: toolSummary(type: type, item: item),
@@ -95,7 +95,7 @@ extension CodexEventDecoder {
             guard Self.toolTypes.contains(type) else { return Batch() }
             var events: [AgentEvent] = [
                 .toolEnd(
-                    id: itemID,
+                    id: ToolCallID(rawValue: itemID),
                     success: toolSucceeded(item),
                     output: toolOutput(type: type, item: item),
                     durationMS: durationMilliseconds(itemID: itemID, item: item)
@@ -138,7 +138,10 @@ extension CodexEventDecoder {
     private func commandOutputDelta(_ params: JSONValue) -> Batch {
         guard let delta = params["delta"]?.stringValue,
               let itemID = params["itemId"]?.stringValue else { return Batch() }
-        let id = state.itemUUID(for: itemID, random: random)
+        // Keyed on the raw item id so this folds onto the `toolStart` above.
+        // `itemUUID` is for block-scoped ids (reasoning, assistant text); it
+        // mints a fresh UUID per item and would never match a tool call.
+        let id = ToolCallID(rawValue: itemID)
         let events = delta.split(separator: "\n", omittingEmptySubsequences: true)
             .map { AgentEvent.toolProgress(callID: id, progress: .bashLine(String($0))) }
         return Batch(events: events)

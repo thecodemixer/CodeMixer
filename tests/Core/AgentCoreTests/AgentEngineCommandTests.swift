@@ -340,8 +340,8 @@ struct AgentEngineCommandTests {
         }) else {
             Issue.record("no userTurn event captured"); return
         }
-        let targetID = UUID(uuidString: idString)!
-        try await h.engine.send(.editAndResubmitLast(targetBubbleID: targetID,
+        let targetID = InternalEntryID.derive(fromAdapterTurnID: idString)
+        try await h.engine.send(.editAndResubmitLast(targetEntryID: targetID,
                                                     text: "edited",
                                                     attachments: []))
         try await Task.sleep(for: .milliseconds(80))
@@ -356,10 +356,10 @@ struct AgentEngineCommandTests {
         let h = try await EngineHarness.make(transport: transport)
         try await h.engine.send(.sendPrompt(text: "first", attachments: []))
         try await Task.sleep(for: .milliseconds(20))
-        let targetID = try await requireLastUserTurnID(h)
+        let targetID = try await requireLastUserEntryID(h)
 
         do {
-            try await h.engine.send(.editAndResubmitLast(targetBubbleID: targetID,
+            try await h.engine.send(.editAndResubmitLast(targetEntryID: targetID,
                                                         text: "edited",
                                                         attachments: []))
             Issue.record("editAndResubmitLast should propagate cancel write failure")
@@ -381,10 +381,10 @@ struct AgentEngineCommandTests {
         let h = try await EngineHarness.make(transportFactory: factory.makeTransport)
         try await h.engine.send(.sendPrompt(text: "first", attachments: []))
         try await Task.sleep(for: .milliseconds(20))
-        let targetID = try await requireLastUserTurnID(h)
+        let targetID = try await requireLastUserEntryID(h)
 
         do {
-            try await h.engine.send(.editAndResubmitLast(targetBubbleID: targetID,
+            try await h.engine.send(.editAndResubmitLast(targetEntryID: targetID,
                                                         text: "edited fail",
                                                         attachments: []))
             Issue.record("editAndResubmitLast should propagate revised prompt write failure")
@@ -399,12 +399,93 @@ struct AgentEngineCommandTests {
         await h.shutdown()
     }
 
+    @Test("editAndResubmitLast accepts the last user turn restored from history")
+    func editAndResubmitAfterHistoryRestore() async throws {
+        let sessionID = "resumed-session"
+        let h = try await EngineHarness.make(resumeSessionID: sessionID)
+        // A reopened session never minted its bubble ids in this engine run:
+        // the ids clients hold come from the journal replay.
+        let key = SessionTranscriptKey(projectRoot: h.workspace.standardizedFileURL,
+                                       namespace: h.adapter.historyNamespace,
+                                       sessionID: sessionID)
+        let restoredTurnID = UUID()
+        try await h.engine.transcriptRepository.record(
+            .userTurn(id: AdapterTurnID(rawValue: restoredTurnID.uuidString), text: "first"),
+            for: key
+        )
+        await h.engine.restoreHistory(for: key)
+
+        try await h.engine.send(.editAndResubmitLast(
+            targetEntryID: InternalEntryID(rawValue: restoredTurnID),
+                                                     text: "edited",
+                                                     attachments: []))
+        try await Task.sleep(for: .milliseconds(80))
+        #expect(h.adapter.recorded.contains(.userPrompt("edited")))
+        await h.shutdown()
+    }
+
+    @Test("editAndResubmitLast accepts a restored turn whose journal id is not a UUID")
+    func editAndResubmitAfterRestoringAdapterMintedID() async throws {
+        let sessionID = "resumed-adapter-session"
+        let h = try await EngineHarness.make(resumeSessionID: sessionID)
+        let key = SessionTranscriptKey(projectRoot: h.workspace.standardizedFileURL,
+                                       namespace: h.adapter.historyNamespace,
+                                       sessionID: sessionID)
+        // Codex rollout keys, Cursor message ids and the Claude tailer fallback
+        // are not UUIDs — clients derive the bubble id instead of parsing it.
+        let journalTurnID = "2026-08-07T09:15:00Z-12"
+        try await h.engine.transcriptRepository.record(
+            .userTurn(id: AdapterTurnID(rawValue: journalTurnID), text: "first"),
+            for: key
+        )
+        await h.engine.restoreHistory(for: key)
+
+        try await h.engine.send(
+            .editAndResubmitLast(targetEntryID: InternalEntryID.derive(fromAdapterTurnID: AdapterTurnID(rawValue: journalTurnID)),
+                                 text: "edited",
+                                 attachments: [])
+        )
+        try await Task.sleep(for: .milliseconds(80))
+        #expect(h.adapter.recorded.contains(.userPrompt("edited")))
+
+        // Truncation has to address the journal by its raw id, so the revised
+        // text lands on the existing turn rather than forking a second one.
+        let restored = try await h.engine.transcriptRepository.transcript(for: key)
+        #expect(restored.lastUserAdapterTurnID?.rawValue == journalTurnID)
+        #expect(restored.snapshotMessages().filter { $0.role == .user }.map(\.text) == ["edited"])
+        await h.shutdown()
+    }
+
+    @Test("editAndResubmitLast reports an unusable session when the respawn fails")
+    func editAndResubmitRespawnFailurePublishesReadinessError() async throws {
+        let firstPTY = ScriptedTransport()
+        let factory = ScriptedTransportFactory([firstPTY])
+        let h = try await EngineHarness.make(transportFactory: factory.makeTransport)
+        try await h.engine.send(.sendPrompt(text: "first", attachments: []))
+        try await Task.sleep(for: .milliseconds(20))
+        let targetID = try await requireLastUserEntryID(h)
+
+        await #expect(throws: (any Error).self) {
+            try await h.engine.send(.editAndResubmitLast(targetEntryID: targetID,
+                                                         text: "edited",
+                                                         attachments: []))
+        }
+        try await Task.sleep(for: .milliseconds(20))
+
+        let events = await h.collectedSoFar()
+        #expect(events.contains {
+            if case .error(.sessionReadinessFailed) = $0 { return true }
+            return false
+        })
+        await h.shutdown()
+    }
+
     @Test("editAndResubmitLast throws staleEditTarget for unknown id")
     func editAndResubmitStaleThrows() async throws {
         let h = try await EngineHarness.make()
-        let bogus = UUID()
+        let bogus = InternalEntryID(rawValue: UUID())
         await #expect(throws: AgentError.self) {
-            try await h.engine.send(.editAndResubmitLast(targetBubbleID: bogus,
+            try await h.engine.send(.editAndResubmitLast(targetEntryID: bogus,
                                                         text: "x",
                                                         attachments: []))
         }
@@ -614,7 +695,8 @@ struct AgentEngineCommandTests {
     @Test("respondToPermission for unknown id is a no-op")
     func respondToPermissionUnknown() async throws {
         let h = try await EngineHarness.make()
-        try await h.engine.send(.respondToPermission(id: UUID(), decision: .deny))
+        try await h.engine.send(.respondToPermission(id: PermissionPromptID(rawValue: UUID()),
+                                                     decision: .deny))
         await h.shutdown()
     }
 
@@ -987,16 +1069,16 @@ struct AgentEngineCommandTests {
         await h.shutdown()
     }
 
-    private func requireLastUserTurnID(_ h: EngineHarness) async throws -> UUID {
+    private func requireLastUserEntryID(_ h: EngineHarness) async throws -> InternalEntryID {
         let events = await h.collectedSoFar()
-        guard case .userTurn(let idString, _)? = events.last(where: {
+        guard case .userTurn(let turnID, _)? = events.last(where: {
             if case .userTurn = $0 { return true }
             return false
-        }), let id = UUID(uuidString: idString) else {
+        }) else {
             Issue.record("no userTurn event captured")
             throw AgentError.internalInvariant(detail: "missing userTurn in test harness")
         }
-        return id
+        return InternalEntryID.derive(fromAdapterTurnID: turnID)
     }
 
     private func permissionPrompt() -> PermissionPrompt {
@@ -1086,6 +1168,9 @@ struct EngineHarness {
                      workspace: URL? = nil,
                      environment: FakeEnvironment? = nil,
                      permissionTimeout: Duration = .seconds(300),
+                     // The mock adapter never republishes SessionStart after a
+                     // respawn, so keep the readiness wait short in tests.
+                     promptReadinessTimeout: Duration = .milliseconds(200),
                      adapter: RecordingMockAdapter? = nil,
                      resumeSessionID: String? = nil,
                      transport: ScriptedTransport? = nil,
@@ -1097,18 +1182,18 @@ struct EngineHarness {
         try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
         let env = environment ?? FakeEnvironment(home: workspace)
         let seams = Seams.fake(environment: env, fileSystem: fs).with(clock: clock)
-        let engine: AgentEngine
+        let factory: AgentTransportFactory
         if let transportFactory {
-            engine = AgentEngine(seams: seams,
-                                 permissionTimeout: permissionTimeout,
-                                 transportFactory: transportFactory)
+            factory = transportFactory
         } else if let transport {
-            engine = AgentEngine(seams: seams,
-                                 permissionTimeout: permissionTimeout,
-                                 transportFactory: { _, _ in transport })
+            factory = { _, _ in transport }
         } else {
-            engine = AgentEngine(seams: seams, permissionTimeout: permissionTimeout)
+            factory = LiveAgentTransportFactory.make
         }
+        let engine = AgentEngine(seams: seams,
+                                 permissionTimeout: permissionTimeout,
+                                 promptReadinessTimeout: promptReadinessTimeout,
+                                 transportFactory: factory)
         await engine.bootstrap()
         let adapter = adapter ?? RecordingMockAdapter()
         try await engine.start(adapter: adapter,

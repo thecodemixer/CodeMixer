@@ -30,7 +30,7 @@ public extension EngineViewModel {
         public let thinkingPreview: String?
         /// True only while this is the live turn and its thinking is still streaming.
         public let isThinking: Bool
-        public let toolCallIDs: [String]
+        public let toolCallIDs: [ToolCallID]
         public let status: Status
         /// File-level pipeline phase in effect when this turn started
         /// (Custom ACP only); `nil` until the first `sessionPhaseChanged`.
@@ -432,7 +432,7 @@ public extension EngineViewModel {
         var promptText: String?
         var thinkingPreview: String?
         var isThinking = false
-        var toolCallIDs: [String] = []
+        var toolCallIDs: [ToolCallID] = []
         var anyToolFailed = false
         var hasContent = false
         var anchorMessageID: String?
@@ -526,7 +526,7 @@ public extension EngineViewModel {
         var promptText: String?
         var thinkingPreview: String?
         var isThinking = false
-        var toolCallIDs: [String] = []
+        var toolCallIDs: [ToolCallID] = []
         var anyToolFailed = false
 
         for message in slice {

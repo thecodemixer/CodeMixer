@@ -16,7 +16,7 @@ struct EngineViewModelTests {
         vm.subscribe()
         defer { vm.unsubscribe() }
 
-        await bus.publish(.userTurn(id: UUID().uuidString, text: "hi"))
+        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: UUID().uuidString), text: "hi"))
         await bus.publish(.assistantText(id: UUID().uuidString, blockID: UUID().uuidString,
                                          text: "Hello.", isFinal: true))
         await drain()
@@ -50,7 +50,7 @@ struct EngineViewModelTests {
         vm.subscribe()
         defer { vm.unsubscribe() }
 
-        await bus.publish(.userTurn(id: UUID().uuidString, text: "old"))
+        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: UUID().uuidString), text: "old"))
         await drain()
         #expect(vm.messages.count == 1)
 
@@ -382,11 +382,11 @@ struct EngineViewModelTests {
         defer { vm.unsubscribe() }
 
         vm.sendPrompt("hello")
-        guard let turnID = vm.lastUserBubbleID else {
-            Issue.record("expected lastUserBubbleID after sendPrompt")
+        guard let turnID = vm.lastUserEntryID else {
+            Issue.record("expected lastUserEntryID after sendPrompt")
             return
         }
-        await bus.publish(.noEventGap(turnID: turnID, elapsed: .seconds(91)))
+        await bus.publish(.noEventGap(turnID: turnID.rawValue, elapsed: .seconds(91)))
         await drain()
 
         #expect(vm.stalledToastVisible)
@@ -454,12 +454,12 @@ struct EngineViewModelTests {
         defer { vm.unsubscribe() }
 
         vm.sendPrompt("hello")
-        guard let turnID = vm.lastUserBubbleID else {
-            Issue.record("expected lastUserBubbleID after sendPrompt")
+        guard let turnID = vm.lastUserEntryID else {
+            Issue.record("expected lastUserEntryID after sendPrompt")
             return
         }
         await bus.publish(.textDelta(messageID: UUID(), delta: "Working"))
-        await bus.publish(.noEventGap(turnID: turnID, elapsed: .seconds(91)))
+        await bus.publish(.noEventGap(turnID: turnID.rawValue, elapsed: .seconds(91)))
         await drain()
 
         #expect(!vm.stalledToastVisible)
@@ -474,11 +474,11 @@ struct EngineViewModelTests {
         defer { vm.unsubscribe() }
 
         vm.sendPrompt("hello")
-        guard let turnID = vm.lastUserBubbleID else {
-            Issue.record("expected lastUserBubbleID after sendPrompt")
+        guard let turnID = vm.lastUserEntryID else {
+            Issue.record("expected lastUserEntryID after sendPrompt")
             return
         }
-        await bus.publish(.noEventGap(turnID: turnID, elapsed: .seconds(11)))
+        await bus.publish(.noEventGap(turnID: turnID.rawValue, elapsed: .seconds(11)))
         await drain()
 
         if case .working(let phrase) = vm.status {
@@ -498,16 +498,16 @@ struct EngineViewModelTests {
         defer { vm.unsubscribe() }
 
         vm.sendPrompt("hello")
-        guard let turnID = vm.lastUserBubbleID else {
-            Issue.record("expected lastUserBubbleID after sendPrompt")
+        guard let turnID = vm.lastUserEntryID else {
+            Issue.record("expected lastUserEntryID after sendPrompt")
             return
         }
-        await bus.publish(.noEventGap(turnID: turnID, elapsed: .seconds(91)))
+        await bus.publish(.noEventGap(turnID: turnID.rawValue, elapsed: .seconds(91)))
         await drain()
         #expect(vm.stalledToastVisible)
 
         // Second 91-second event — flag prevents a reset that re-fires auto-dismiss.
-        await bus.publish(.noEventGap(turnID: turnID, elapsed: .seconds(95)))
+        await bus.publish(.noEventGap(turnID: turnID.rawValue, elapsed: .seconds(95)))
         await drain()
         #expect(vm.stalledToastVisible)
 
@@ -521,11 +521,11 @@ struct EngineViewModelTests {
         defer { vm.unsubscribe() }
 
         vm.sendPrompt("hello")
-        guard let turnID = vm.lastUserBubbleID else {
-            Issue.record("expected lastUserBubbleID after sendPrompt")
+        guard let turnID = vm.lastUserEntryID else {
+            Issue.record("expected lastUserEntryID after sendPrompt")
             return
         }
-        await bus.publish(.noEventGap(turnID: turnID, elapsed: .seconds(91)))
+        await bus.publish(.noEventGap(turnID: turnID.rawValue, elapsed: .seconds(91)))
         await drain()
         #expect(vm.stalledToastVisible)
 
@@ -547,11 +547,11 @@ struct EngineViewModelTests {
         defer { vm.unsubscribe() }
 
         vm.sendPrompt("hello")
-        guard let turnID = vm.lastUserBubbleID else {
-            Issue.record("expected lastUserBubbleID after sendPrompt")
+        guard let turnID = vm.lastUserEntryID else {
+            Issue.record("expected lastUserEntryID after sendPrompt")
             return
         }
-        await bus.publish(.noEventGap(turnID: turnID, elapsed: .seconds(91)))
+        await bus.publish(.noEventGap(turnID: turnID.rawValue, elapsed: .seconds(91)))
         await drain()
         #expect(vm.stalledToastVisible)
 
@@ -576,11 +576,11 @@ struct EngineViewModelTests {
         defer { vm.unsubscribe() }
 
         vm.sendPrompt("hello")
-        guard let turnID = vm.lastUserBubbleID else {
-            Issue.record("expected lastUserBubbleID after sendPrompt")
+        guard let turnID = vm.lastUserEntryID else {
+            Issue.record("expected lastUserEntryID after sendPrompt")
             return
         }
-        await bus.publish(.noEventGap(turnID: turnID, elapsed: .seconds(91)))
+        await bus.publish(.noEventGap(turnID: turnID.rawValue, elapsed: .seconds(91)))
         await drain()
         #expect(vm.stalledToastVisible)
 
@@ -657,15 +657,15 @@ struct EngineViewModelTests {
         vm.subscribe()
         defer { vm.unsubscribe() }
 
-        let callID = UUID()
-        await bus.publish(.toolStart(id: callID.uuidString, name: "Task",
+        let callID = ToolCallID(rawValue: "toolu_subagent")
+        await bus.publish(.toolStart(id: callID, name: "Task",
                                      input: ToolInput(summary: "Subagent"),
                                      startedAt: Date()))
         await bus.publish(.toolProgress(callID: callID, progress: .generic(message: "Step 1")))
         await bus.publish(.toolProgress(callID: callID, progress: .generic(message: "Step 2")))
         await drain()
 
-        let entry = vm.activeToolCalls.first(where: { $0.id == callID.uuidString })
+        let entry = vm.activeToolCalls.first(where: { $0.id == callID })
         #expect(entry?.subagentLines == ["Step 1", "Step 2"])
 
         await bus.shutdown()
@@ -708,21 +708,21 @@ struct EngineViewModelTests {
         await bus.shutdown()
     }
 
-    @Test("lastUserBubbleID tracks the latest user turn UUID")
-    func lastUserBubbleIDTracked() async {
+    @Test("lastUserEntryID tracks the latest user turn UUID")
+    func lastUserEntryIDTracked() async {
         let (vm, bus) = makeModel()
         vm.subscribe()
         defer { vm.unsubscribe() }
 
         let id1 = UUID()
-        await bus.publish(.userTurn(id: id1.uuidString, text: "first"))
+        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: id1.uuidString), text: "first"))
         await drain()
-        #expect(vm.lastUserBubbleID == id1)
+        #expect(vm.lastUserEntryID == InternalEntryID(rawValue: id1))
 
         let id2 = UUID()
-        await bus.publish(.userTurn(id: id2.uuidString, text: "second"))
+        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: id2.uuidString), text: "second"))
         await drain()
-        #expect(vm.lastUserBubbleID == id2)
+        #expect(vm.lastUserEntryID == InternalEntryID(rawValue: id2))
 
         await bus.shutdown()
     }
@@ -1055,12 +1055,12 @@ struct EngineViewModelTests {
         defer { vm.unsubscribe() }
 
         let cwd = URL(fileURLWithPath: "/tmp/project")
-        let promptA = PermissionPrompt(id: UUID(),
+        let promptA = PermissionPrompt(id: PermissionPromptID(rawValue: UUID()),
                                        toolName: "Review",
                                        summary: "Review A",
                                        argumentsSummary: "{}",
                                        requestedAt: Date())
-        let promptB = PermissionPrompt(id: UUID(),
+        let promptB = PermissionPrompt(id: PermissionPromptID(rawValue: UUID()),
                                        toolName: "Review",
                                        summary: "Review B",
                                        argumentsSummary: "{}",
@@ -1255,6 +1255,53 @@ struct EngineViewModelTests {
         await bus.shutdown()
     }
 
+    @Test("an adapter-minted user turn id derives the same bubble id on every replay")
+    func adapterMintedUserTurnIDIsStable() async {
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: StubCommandPort(), bus: bus)
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        let journalTurnID = "2026-08-07T09:15:00Z-12"
+        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: journalTurnID), text: "first"))
+        await drain()
+        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: journalTurnID), text: "first"))
+        await drain()
+
+        // Same turn replayed twice: one bubble, and an id the engine can
+        // resolve back to the journal entry.
+        #expect(vm.messages.count == 1)
+        #expect(vm.lastUserEntryID == InternalEntryID.derive(fromAdapterTurnID: AdapterTurnID(rawValue: journalTurnID)))
+
+        await bus.shutdown()
+    }
+
+    @Test("a rejected edit-and-resubmit restores the conversation and the draft")
+    func rejectedEditAndResubmitRollsBack() async {
+        let targetID = UUID()
+        let entryID = InternalEntryID(rawValue: targetID)
+        let stub = ThrowingCommandPort(error: AgentError.staleEditTarget(targetID: entryID))
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: stub, bus: bus)
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: targetID.uuidString), text: "first"))
+        await drain()
+        let before = vm.messages
+
+        vm.editAndResubmit(targetEntryID: entryID, text: "edited")
+        try? await Task.sleep(for: .milliseconds(50))
+
+        #expect(vm.messages == before)
+        #expect(vm.lastUserEntryID == entryID)
+        #expect(vm.editDraft == "edited")
+        #expect(vm.status == .idle)
+        #expect(vm.diagnostics.contains { $0.level == .error })
+
+        await bus.shutdown()
+    }
+
     @Test("send() with a non-AgentError falls back to localizedDescription in diagnostics")
     func sendForwardsGenericError() async {
         struct DummyError: Error, LocalizedError {
@@ -1310,7 +1357,7 @@ struct EngineViewModelTests {
         vm.openSession(projectPath: workspace.path, id: "file:Orders.cs")
         #expect(vm.isSwitchingSession)
 
-        await bus.publish(.userTurn(id: "u1", text: "prior user"))
+        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: "u1"), text: "prior user"))
         await bus.publish(.assistantText(
             id: UUID().uuidString,
             blockID: "a1",

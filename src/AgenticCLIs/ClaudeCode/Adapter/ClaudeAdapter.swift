@@ -41,6 +41,12 @@ public final class ClaudeAdapter: AgentAdapter, @unchecked Sendable {
 
     public var transportDescriptor: AgentTransportDescriptor { .interactiveTerminal }
 
+    /// Claude's `SessionStart` hook fires while the TUI is still drawing its
+    /// first frame; keystrokes written in that window are swallowed silently.
+    /// Matches the settle the live harness has always needed before its first
+    /// prompt.
+    public var promptWriteSettleDelay: Duration { .seconds(6) }
+
     private let binaryLocator: ClaudeBinaryLocator
     private let hookDecoder: ClaudeHookDecoder
     private let environment: any AgentEnvironment
@@ -276,7 +282,7 @@ public final class ClaudeAdapter: AgentAdapter, @unchecked Sendable {
 
     // MARK: - Transcript management
 
-    public func truncateTranscript(afterUserTurnID turnID: String,
+    public func truncateTranscript(afterUserTurnID turnID: AdapterTurnID,
                                    sessionID: String,
                                    workspace: URL) async -> Bool {
         let jsonlURL = ClaudeProjectPaths.transcriptURL(sessionID: sessionID,
@@ -295,7 +301,7 @@ public final class ClaudeAdapter: AgentAdapter, @unchecked Sendable {
             // to appear inside a message body or a file path in the same record.
             if let lineData = String(line).data(using: .utf8),
                let record = try? JSONDecoder().decode(TranscriptBoundary.self, from: lineData),
-               record.uuid == turnID {
+               record.uuid == turnID.rawValue {
                 foundTurn = true
                 break
             }

@@ -32,14 +32,14 @@ struct ClaudeAdapterEventStreamTests {
             sessionID: AsyncStream { $0.finish() }
         ))
 
-        hookContinuation.yield(HookRequest(id: UUID(),
+        hookContinuation.yield(HookRequest(id: HookRequestID(rawValue: UUID()),
                                            eventName: "SessionStart",
                                            jsonPayload: Data(#"{"session_id":"hook-session","cwd":"/tmp/codemixer-workspace"}"#.utf8)))
         try fileSystem.writeAtomically(
             Data(#"{"type":"assistant","uuid":"answer-1","sessionId":"hook-session","message":{"role":"assistant","content":[{"type":"text","text":"hook-bound reply"}]}}"#.utf8),
             to: projects.appendingPathComponent("\(sessionID).jsonl")
         )
-        hookContinuation.yield(HookRequest(id: UUID(),
+        hookContinuation.yield(HookRequest(id: HookRequestID(rawValue: UUID()),
                                            eventName: "Stop",
                                            jsonPayload: Data(#"{"hook_event_name":"Stop"}"#.utf8)))
 
@@ -78,7 +78,7 @@ struct ClaudeAdapterEventStreamTests {
             Data(#"{"type":"assistant","uuid":"answer-2","sessionId":"stop-session","message":{"role":"assistant","content":[{"type":"text","text":"stop-bound reply"}]}}"#.utf8),
             to: projects.appendingPathComponent("\(sessionID).jsonl")
         )
-        hookContinuation.yield(HookRequest(id: UUID(),
+        hookContinuation.yield(HookRequest(id: HookRequestID(rawValue: UUID()),
                                            eventName: "Stop",
                                            jsonPayload: Data(#"{"hook_event_name":"Stop","session_id":"stop-session"}"#.utf8)))
 
@@ -113,14 +113,14 @@ struct ClaudeAdapterEventStreamTests {
             sessionID: AsyncStream { $0.finish() }
         ))
 
-        hookContinuation.yield(HookRequest(id: UUID(),
+        hookContinuation.yield(HookRequest(id: HookRequestID(rawValue: UUID()),
                                            eventName: "SessionStart",
                                            jsonPayload: Data(#"{"session_id":"dedup-session","cwd":"/tmp/codemixer-workspace"}"#.utf8)))
         try fileSystem.writeAtomically(
             Data(#"{"type":"assistant","uuid":"answer-dedup","sessionId":"dedup-session","message":{"role":"assistant","content":[{"type":"text","text":"transcript reply"}]}}"#.utf8),
             to: projects.appendingPathComponent("\(sessionID).jsonl")
         )
-        hookContinuation.yield(HookRequest(id: UUID(),
+        hookContinuation.yield(HookRequest(id: HookRequestID(rawValue: UUID()),
                                            eventName: "Stop",
                                            jsonPayload: Data(#"{"hook_event_name":"Stop","session_id":"dedup-session","last_assistant_message":"hook duplicate"}"#.utf8)))
 
@@ -157,11 +157,11 @@ struct ClaudeAdapterEventStreamTests {
             sessionID: AsyncStream { $0.finish() }
         ))
 
-        hookContinuation.yield(HookRequest(id: UUID(),
+        hookContinuation.yield(HookRequest(id: HookRequestID(rawValue: UUID()),
                                            eventName: "SessionStart",
                                            jsonPayload: Data(#"{"session_id":"late-dedup-session","cwd":"/tmp/codemixer-workspace"}"#.utf8)))
         // Stop before any JSONL exists — hook fallback must surface the reply.
-        hookContinuation.yield(HookRequest(id: UUID(),
+        hookContinuation.yield(HookRequest(id: HookRequestID(rawValue: UUID()),
                                            eventName: "Stop",
                                            jsonPayload: Data(#"{"hook_event_name":"Stop","session_id":"late-dedup-session","last_assistant_message":"first-turn reply"}"#.utf8)))
 
@@ -211,7 +211,7 @@ struct ClaudeAdapterEventStreamTests {
 
         // A hook firing marks hooks active; the TUI scraper must stop feeding
         // new snapshots even though the framebuffer keeps changing.
-        hookContinuation.yield(HookRequest(id: UUID(),
+        hookContinuation.yield(HookRequest(id: HookRequestID(rawValue: UUID()),
                                            eventName: "SessionStart",
                                            jsonPayload: Data(#"{"session_id":"fusion-session"}"#.utf8)))
         try await Task.sleep(for: .milliseconds(50))

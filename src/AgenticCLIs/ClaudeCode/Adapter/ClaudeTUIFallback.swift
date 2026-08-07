@@ -123,7 +123,7 @@ public actor ClaudeTUIFallback {
             .first(where: { !$0.isEmpty })
 
         return .permissionRequest(prompt: PermissionPrompt(
-            id: random.uuid(),
+            id: PermissionPromptID(rawValue: random.uuid()),
             toolName: Self.workspaceTrustToolName,
             summary: "Trust this workspace?",
             argumentsSummary: workspace ?? "Claude is asking whether this folder should be trusted.",

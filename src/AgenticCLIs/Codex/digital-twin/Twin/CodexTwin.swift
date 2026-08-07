@@ -163,7 +163,7 @@ public final class CodexTwin: AgentAdapter {
         []
     }
 
-    public func truncateTranscript(afterUserTurnID turnID: String,
+    public func truncateTranscript(afterUserTurnID turnID: AdapterTurnID,
                                    sessionID: String,
                                    workspace: URL) async -> Bool {
         false

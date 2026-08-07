@@ -142,7 +142,7 @@ struct LiveClaudeHarness {
         let sub = await engine.bus.subscribe()
         let ingest = Task { await sink.ingest(sub.stream) }
 
-        var respondedPermissions: Set<UUID> = []
+        var respondedPermissions: Set<PermissionPromptID> = []
         let approver = Task {
             while !Task.isCancelled {
                 if let permissionID = await sink.pendingPermissionID(excluding: respondedPermissions) {
@@ -258,7 +258,7 @@ struct LiveClaudeHarness {
         let sink = LiveClaudeEventSink()
         let sub = await engine.bus.subscribe()
         let ingest = Task { await sink.ingest(sub.stream) }
-        var respondedPermissions: Set<UUID> = []
+        var respondedPermissions: Set<PermissionPromptID> = []
         let approver = Task {
             while !Task.isCancelled {
                 if let permissionID = await sink.pendingPermissionID(excluding: respondedPermissions) {
@@ -352,6 +352,120 @@ struct LiveClaudeHarness {
         )
     }
 
+    struct EditAfterResumeResult: Sendable {
+        let priorSessionID: String
+        let restoredTurnID: AdapterTurnID
+        let editedAssistantText: String?
+        let editedUserTurnObserved: Bool
+    }
+
+    /// Seed a turn, reopen the session from local history, then edit-and-resubmit
+    /// that restored turn — the flow a user drives with the composer's pencil.
+    ///
+    /// This is the only path that proves the stale-edit guard survives a restore:
+    /// the reopened engine never minted the turn id, so it has to adopt the one
+    /// the journal replayed.
+    func runEditAndResubmitAfterResume(_ configuration: Configuration) async throws
+        -> EditAfterResumeResult {
+        let first = try await runTurn(configuration)
+        guard let sessionID = first.sessionID, !sessionID.isEmpty else {
+            throw LiveClaudeHarnessError.hookSessionTimedOut
+        }
+
+        let engine = AgentEngine(seams: .live)
+        await engine.bootstrap()
+        let adapter = ClaudeAdapter(environment: environment, fileSystem: fileSystem)
+        let sink = LiveClaudeEventSink()
+        let sub = await engine.bus.subscribe()
+        let ingest = Task { await sink.ingest(sub.stream) }
+        var respondedPermissions: Set<PermissionPromptID> = []
+        let approver = Task {
+            while !Task.isCancelled {
+                if let permissionID = await sink.pendingPermissionID(excluding: respondedPermissions) {
+                    respondedPermissions.insert(permissionID)
+                    try? await engine.send(.respondToPermission(id: permissionID, decision: .allow))
+                }
+                try? await Task.sleep(for: .milliseconds(400))
+            }
+        }
+        defer {
+            approver.cancel()
+            ingest.cancel()
+            Task { await engine.bus.unsubscribe(sub.id) }
+        }
+
+        await engine.restoreHistory(for: SessionTranscriptKey(
+            projectRoot: configuration.workspace,
+            namespace: adapter.historyNamespace,
+            sessionID: sessionID
+        ))
+        let historyReady = await livePollUntil(timeout: .seconds(5)) {
+            await sink.containsUserTurn(matching: configuration.prompt)
+        }
+        guard historyReady, let restoredTurnID = await sink.latestUserTurnID() else {
+            let events = await sink.snapshot()
+            await engine.shutdown(reason: .naturalExit)
+            throw LiveClaudeHarnessError.historyLoadTimedOut(
+                events: events,
+                sessionID: sessionID,
+                detail: "no restored user turn to edit"
+            )
+        }
+
+        try await engine.start(adapter: adapter,
+                               workspace: configuration.workspace,
+                               resumeSessionID: sessionID)
+        let sawHookSession = await livePollUntil(timeout: configuration.hookSessionTimeout) {
+            if await sink.hasHookSessionStarted() { return true }
+            return await sink.hasSessionStarted(sessionID: sessionID)
+        }
+        guard sawHookSession else {
+            await engine.shutdown(reason: .naturalExit)
+            throw LiveClaudeHarnessError.hookSessionTimedOut
+        }
+        try await Task.sleep(for: configuration.sessionReadyDelay)
+
+        let editedPrompt = "Reply with exactly: edited-pong"
+        try await engine.send(.editAndResubmitLast(
+            targetEntryID: InternalEntryID.derive(fromAdapterTurnID: restoredTurnID),
+            text: editedPrompt,
+            attachments: []
+        ))
+
+        let sawEditedReply = await livePollUntil(timeout: configuration.assistantTextTimeout) {
+            await sink.containsFinalAssistantText(matching: "edited-pong")
+        }
+        let editedUserTurnObserved = await sink.containsUserTurn(matching: editedPrompt)
+        let editedText = await sink.latestFinalAssistantTextMatching("edited-pong")
+        let events = await sink.snapshot()
+        // A readiness timeout here means the write raced the respawned TUI —
+        // the exact failure this flow exists to catch, so surface it rather
+        // than letting the assistant-text timeout report it as a hang.
+        let readinessTimeouts = await SilentDiagnostics.shared.snapshot().filter {
+            $0.summary.contains("prompt readiness")
+        }
+        await engine.shutdown(reason: .naturalExit)
+        if !readinessTimeouts.isEmpty {
+            print("live Claude edit: respawn never reported readiness in budget")
+        }
+
+        guard sawEditedReply else {
+            throw LiveClaudeHarnessError.assistantTextTimedOut(
+                events: events,
+                transcriptURL: ClaudeProjectPaths.transcriptURL(
+                    sessionID: sessionID,
+                    workspace: configuration.workspace,
+                    claudeDirectory: environment.claudeDirectory
+                )
+            )
+        }
+
+        return EditAfterResumeResult(priorSessionID: sessionID,
+                                     restoredTurnID: restoredTurnID,
+                                     editedAssistantText: editedText,
+                                     editedUserTurnObserved: editedUserTurnObserved)
+    }
+
     /// Manual resume-hang probe — seed a turn, `--resume`, then dump SwiftTerm
     /// rows once per second around the follow-up write.
     ///
@@ -381,7 +495,7 @@ struct LiveClaudeHarness {
         let sink = LiveClaudeEventSink()
         let sub = await engine.bus.subscribe()
         let ingest = Task { await sink.ingest(sub.stream) }
-        var respondedPermissions: Set<UUID> = []
+        var respondedPermissions: Set<PermissionPromptID> = []
         let approver = Task {
             while !Task.isCancelled {
                 if let permissionID = await sink.pendingPermissionID(excluding: respondedPermissions) {
@@ -558,7 +672,7 @@ actor LiveClaudeEventSink {
         return nil
     }
 
-    func pendingPermissionID(excluding responded: Set<UUID>) -> UUID? {
+    func pendingPermissionID(excluding responded: Set<PermissionPromptID>) -> PermissionPromptID? {
         for event in events.reversed() {
             if case .permissionRequest(let prompt) = event, !responded.contains(prompt.id) {
                 return prompt.id
@@ -574,6 +688,13 @@ actor LiveClaudeEventSink {
             }
             return false
         }
+    }
+
+    func latestUserTurnID() -> AdapterTurnID? {
+        for event in events.reversed() {
+            if case .userTurn(let id, _) = event { return id }
+        }
+        return nil
     }
 
     func containsFinalAssistantText(matching substring: String) -> Bool {

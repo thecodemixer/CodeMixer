@@ -64,6 +64,7 @@ Codemixer/
 | Headless terminal emulation (SwiftTerm) | `Core/AgentCore/Terminal/TerminalEngine.swift` |
 | The typed event alphabet | `Core/AgentCore/Events/AgentEvent.swift` |
 | Client-owned conversation markers (mode / model / slash / permission / session) | `Core/AgentProtocol/ClientAction.swift` (`AgentCommand.recordClientAction` / `AgentEvent.clientAction`) |
+| The identifier vocabulary (`AdapterTurnID`, `InternalEntryID`, `ToolCallID`, `PermissionPromptID`) | `Core/AgentProtocol/Identifiers.swift` — each id is its own `RawRepresentable` type encoding as a bare scalar; `HookRequestID` lives with `HookRequest` in `Core/AgentCore/Events/AgentAdapter.swift`. Never pass one id where another belongs; derive explicitly (`InternalEntryID.derive(fromAdapterTurnID:)`) so the coupling is visible |
 | The adapter protocol or supporting types | `Core/AgentCore/Events/AgentAdapter.swift`, `SupportingTypes.swift`, `AgentID.swift`, `Core/AgentCore/Transport/AgentTransport.swift` |
 | The error model | `Core/AgentCore/Events/AgentError.swift` |
 | Wire codec (domain ↔ wire) | `Core/AgentCore/Events/WireCodec.swift` |
@@ -353,6 +354,7 @@ Use A2UI instead of hand-rolled text-sniffing in `AgentUI` — see
 2. New SPM library target + product under that path; top-level type conforming to `AgentAdapter`.
 3. Declare `transportDescriptor` (`.interactiveTerminal`, `.stdioJSONRPC`, or a real future ACP descriptor) and the relevant `AgentCapabilities`.
 4. Implement `sessionBootstrapBytes(context:)` and `encodeCommand(_:)` when the agent is not Claude slash-text compatible.
+4b. If the agent is an interactive TUI, override `promptWriteSettleDelay` — the engine writes an unsolicited prompt after an edit-and-resubmit respawn, and a TUI drops keystrokes that land before its input row is live. Protocol adapters keep the `.zero` default.
 5. If the CLI has selectable chat modes (Claude Think/Review, Cursor agent/plan/ask, …), override `availableAgentModes()` returning `[AgentModeOption]` — never hardcode the vendor's modes in `AgentUI`; the composer bottom-bar dropdown renders whatever the active adapter publishes.
 6. Override `availableModels()` / `refreshModelCatalog()` as needed. Prefer `.automatic` (daily disk cache via `WorkspaceLifecycle` + `workspace-<AgentID>.json`) unless discovery is expensive — then use `.manual(detail:)` so that adapter's catalog is persisted without a daily TTL (Claude Code pattern).
 7. Register at startup: `await AdapterRegistry.shared.register(CodexAdapter())`.

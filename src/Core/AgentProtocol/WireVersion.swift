@@ -15,6 +15,20 @@ public enum WireVersion: Int, Sendable, Codable {
     /// repository's strict decoder policy — older clients must reconnect
     /// against a matching daemon rather than silently drop the new cases.
     case v4 = 4
+    /// Moves identifiers onto the typed vocabulary in `Identifiers.swift`.
+    ///
+    /// Two changes are wire-breaking. `AgentCommand.editAndResubmitLast`'s
+    /// first label goes from `targetBubbleID` to `targetEntryID`, and
+    /// synthesized `Codable` keys off the label. `AgentEvent.toolProgress`'s
+    /// `callID` changes from a `UUID` to a `ToolCallID`, which is a bare
+    /// string, because vendors do not mint UUIDs for tool calls; a v4 client
+    /// would fail to decode `"toolu_01ABC"` as a UUID.
+    ///
+    /// Every other identifier (`AdapterTurnID`, `InternalEntryID`,
+    /// `PermissionPromptID`) encodes as the same scalar it did before, so
+    /// those are type-level changes only. `WireFrameRoundTripTests`
+    /// pins the encodings.
+    case v5 = 5
 
-    public static let current: WireVersion = .v4
+    public static let current: WireVersion = .v5
 }

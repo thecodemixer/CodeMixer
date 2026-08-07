@@ -26,7 +26,8 @@ extension AgentEngine {
                 )
             }
             let bubbleID = seams.random.uuid()
-            lastUserBubbleID = bubbleID
+            let adapterTurnID = AdapterTurnID(rawValue: bubbleID.uuidString)
+            lastUserAdapterTurnID = adapterTurnID
             let prompt = try await promptText(text, attachments: attachments)
             let bytes = adapter.encodeUserPrompt(prompt)
             guard !bytes.isEmpty else {
@@ -38,8 +39,8 @@ extension AgentEngine {
             // Echo the turn BEFORE the awaited write so every connected surface
             // reflects the turn instantly. If the write then fails, `send` still
             // throws so the caller surfaces the error.
-            await record(.userTurn(id: bubbleID.uuidString, text: prompt))
-            await bus.publish(.userTurn(id: bubbleID.uuidString, text: prompt))
+            await record(.userTurn(id: adapterTurnID, text: prompt))
+            await bus.publish(.userTurn(id: adapterTurnID, text: prompt))
             currentTurnID = bubbleID
             await heartbeat?.startTurn(bubbleID, baseline: .awaitingFirstChunk)
             do {
@@ -60,7 +61,7 @@ extension AgentEngine {
             await heartbeat?.endTurn()
 
         case .editAndResubmitLast(let target, let text, let attachments):
-            guard target == lastUserBubbleID else {
+            guard target == lastUserEntryID, let adapterTurnID = lastUserAdapterTurnID else {
                 throw AgentError.staleEditTarget(targetID: target)
             }
             guard let ws = workspace else {
@@ -87,11 +88,11 @@ extension AgentEngine {
                                                sessionID: sid)
                 do {
                     try await transcriptRepository.truncate(
-                        afterUserTurnID: target.uuidString,
+                        afterUserTurnID: adapterTurnID,
                         for: key
                     )
                     try await transcriptRepository.replaceUserTurn(
-                        id: target.uuidString,
+                        id: adapterTurnID,
                         text: revisedPrompt,
                         for: key
                     )
@@ -106,7 +107,7 @@ extension AgentEngine {
                     )
                 }
                 if await savedAdapter.truncateTranscript(
-                    afterUserTurnID: target.uuidString,
+                    afterUserTurnID: adapterTurnID,
                     sessionID: sid,
                     workspace: ws
                 ) {
@@ -130,17 +131,34 @@ extension AgentEngine {
                                 resumeSessionID: resumeSessionID,
                                 runtimeKey: resumeKey)
             } catch {
-                // Respawn failed; surface the error and leave the engine stopped.
+                // The pre-edit process is already gone, so a failed respawn
+                // leaves the session unusable. Every attached surface needs to
+                // know that — not just the client that asked for the edit.
                 log.error("editAndResubmit respawn failed: \(error, privacy: .public)")
+                await bus.publish(.error(.sessionReadinessFailed(
+                    sessionID: savedSessionID ?? "",
+                    detail: "The agent could not be restarted after the edit. Reopen the session to continue."
+                )))
                 throw error
             }
 
-            // Step 5: send the revised prompt.
+            // Step 5: send the revised prompt once the fresh process can take
+            // it. An interactive TUI silently drops bytes written before it has
+            // painted its input row, which reads as "the edit vanished".
+            if await !awaitPromptReadiness(timeout: promptReadinessTimeout) {
+                await SilentDiagnostics.shared.record(
+                    kind: .other,
+                    owner: "AgentEngine",
+                    summary: "Respawned session never reported prompt readiness",
+                    details: "Writing the revised turn anyway for session \(currentSessionID ?? "")"
+                )
+            }
+            try? await seams.clock.sleep(for: savedAdapter.promptWriteSettleDelay)
             let bytes = savedAdapter.encodeUserPrompt(revisedPrompt)
-            await record(.userTurn(id: target.uuidString, text: revisedPrompt))
-            await bus.publish(.userTurn(id: target.uuidString, text: revisedPrompt))
+            await record(.userTurn(id: adapterTurnID, text: revisedPrompt))
+            await bus.publish(.userTurn(id: adapterTurnID, text: revisedPrompt))
             try await writePromptBytes(bytes)
-            lastUserBubbleID = target
+            lastUserAdapterTurnID = adapterTurnID
 
         case .respondToPermission(let id, let decision):
             permissionTimeouts.removeValue(forKey: id)?.cancel()

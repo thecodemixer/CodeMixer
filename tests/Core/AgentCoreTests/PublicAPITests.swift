@@ -67,7 +67,7 @@ struct AgentCapabilitiesTests {
 struct PermissionPromptTests {
     @Test("Two prompts with same id are equal")
     func equality() {
-        let id = UUID()
+        let id = PermissionPromptID(rawValue: UUID())
         let a = PermissionPrompt(id: id, toolName: "Bash", summary: "Run shell",
                                  argumentsSummary: "echo hi", requestedAt: testEpoch)
         let b = PermissionPrompt(id: id, toolName: "Bash", summary: "Run shell",
@@ -77,16 +77,18 @@ struct PermissionPromptTests {
 
     @Test("Different ids are not equal")
     func inequality() {
-        let a = PermissionPrompt(id: UUID(), toolName: "Bash", summary: "s",
+        let a = PermissionPrompt(id: PermissionPromptID(rawValue: UUID()),
+                                 toolName: "Bash", summary: "s",
                                  argumentsSummary: "a", requestedAt: testEpoch)
-        let b = PermissionPrompt(id: UUID(), toolName: "Bash", summary: "s",
+        let b = PermissionPrompt(id: PermissionPromptID(rawValue: UUID()),
+                                 toolName: "Bash", summary: "s",
                                  argumentsSummary: "a", requestedAt: testEpoch)
         #expect(a != b)
     }
 
     @Test("id property matches constructor argument")
     func idPropagation() {
-        let id = UUID()
+        let id = PermissionPromptID(rawValue: UUID())
         let prompt = PermissionPrompt(id: id, toolName: "X", summary: "y",
                                       argumentsSummary: "z", requestedAt: testEpoch)
         #expect(prompt.id == id)
@@ -332,7 +334,7 @@ struct LaunchContextTests {
 struct HookRequestTests {
     @Test("Two HookRequests with the same id are equal")
     func equality() {
-        let id = UUID()
+        let id = HookRequestID(rawValue: UUID())
         let a = HookRequest(id: id, eventName: "PreToolUse", jsonPayload: Data("{}".utf8))
         let b = HookRequest(id: id, eventName: "PreToolUse", jsonPayload: Data("{}".utf8))
         #expect(a == b)
@@ -340,7 +342,9 @@ struct HookRequestTests {
 
     @Test("HookRequest is usable as Dictionary key")
     func hashable() {
-        let req = HookRequest(id: UUID(), eventName: "Stop", jsonPayload: Data())
+        let req = HookRequest(id: HookRequestID(rawValue: UUID()),
+                              eventName: "Stop",
+                              jsonPayload: Data())
         var dict = [HookRequest: String]()
         dict[req] = "handled"
         #expect(dict[req] == "handled")

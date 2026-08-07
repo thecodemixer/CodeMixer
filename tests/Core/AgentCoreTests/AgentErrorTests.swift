@@ -14,10 +14,10 @@ struct AgentErrorTests {
             .transcriptDecodeFailed(path: "/x.jsonl", detail: "JSON error"),
             .workspaceInvalid(path: "/x", detail: "not a dir"),
             .authenticationRequired(agentID: .claudeCode),
-            .staleEditTarget(targetID: UUID()),
+            .staleEditTarget(targetID: InternalEntryID(rawValue: UUID())),
             .unsupportedCommand(name: "/wat"),
             .engineRestartLimitReached,
-            .permissionTimeout(promptID: UUID(), action: .deny),
+            .permissionTimeout(promptID: PermissionPromptID(rawValue: UUID()), action: .deny),
             .historyWriteFailed(path: "/workspace", detail: "disk full"),
             .historyLoadFailed(path: "/workspace", detail: "invalid journal"),
             .historyJournalLocked(sessionID: "session-1", ownerPID: 42),
@@ -68,9 +68,9 @@ struct AgentErrorTests {
 
     @Test("AgentError is Equatable for matching arms")
     func equalityHolds() {
-        let a = AgentError.staleEditTarget(targetID: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!)
-        let b = AgentError.staleEditTarget(targetID: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!)
-        let c = AgentError.staleEditTarget(targetID: UUID(uuidString: "00000000-0000-0000-0000-000000000002")!)
+        let a = AgentError.staleEditTarget(targetID: InternalEntryID(rawValue: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!))
+        let b = AgentError.staleEditTarget(targetID: InternalEntryID(rawValue: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!))
+        let c = AgentError.staleEditTarget(targetID: InternalEntryID(rawValue: UUID(uuidString: "00000000-0000-0000-0000-000000000002")!))
         #expect(a == b)
         #expect(a != c)
     }

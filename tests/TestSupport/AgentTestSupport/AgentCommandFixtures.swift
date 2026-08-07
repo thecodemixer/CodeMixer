@@ -7,7 +7,10 @@ public enum AgentCommandFixtures {
     /// Stable UUIDs so remote dispatch parity assertions stay deterministic.
     public enum IDs {
         public static let bubble = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
-        public static let permission = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+        public static let entry = InternalEntryID(rawValue: bubble)
+        public static let permission = PermissionPromptID(
+            rawValue: UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+        )
         public static let hunk = UUID(uuidString: "00000000-0000-0000-0000-000000000003")!
         public static let clientAction = UUID(uuidString: "00000000-0000-0000-0000-000000000004")!
     }
@@ -22,7 +25,7 @@ public enum AgentCommandFixtures {
         [
             .sendPrompt(text: "hello", attachments: [sampleAttachment]),
             .cancelCurrentTurn,
-            .editAndResubmitLast(targetBubbleID: IDs.bubble, text: "edited", attachments: []),
+            .editAndResubmitLast(targetEntryID: IDs.entry, text: "edited", attachments: []),
             .newSession,
             .compact,
             .selectModel(id: "claude-sonnet-4-5"),
@@ -50,7 +53,8 @@ public enum AgentCommandFixtures {
     }
 
     /// Extra variants for wire JSON round-trip coverage beyond `dispatchParitySamples()`.
-    public static func wireRoundTripExtras(bubbleID: UUID, permissionID: UUID) -> [AgentCommand] {
+    public static func wireRoundTripExtras(bubbleID: UUID,
+                                           permissionID: PermissionPromptID) -> [AgentCommand] {
         [
             .setPermissionMode(.acceptEdits),
             .setAgentMode(id: AgentModeCommandID.thinkOff),

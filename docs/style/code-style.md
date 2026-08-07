@@ -1102,6 +1102,7 @@ Each extension file is < 100 lines. If it grows beyond that, split by capability
 ### Protocol conformances
 
 - **Conformances declared with the type when natural.** `Equatable`, `Hashable`, `Codable`, `Sendable`.
+- **The conformance list stays on the declaration line** so the type name and what it is read as one phrase. Wrap it only when the line passes the 120-column limit; SwiftFormat wraps such a line for you but will never unwrap a hand-wrapped one, so `conformances_on_declaration_line` in `.swiftlint.yml` flags the manual case.
 - **Other conformances in an extension** at the type's primary file or a `+Conformances.swift` companion.
 - **Conditional conformances** (`extension Foo: Bar where T: Baz`) are powerful but should be tested.
 
@@ -1577,10 +1578,9 @@ Used only for golden fixtures > 100KB. Most fixtures are small JSON / JSONL and 
 Checked-in `.swiftformat`:
 
 - 4-space indent
-- 100-column line limit
+- 120-column line limit
 - Trailing-closure preferred
-- `--decimalgrouping 3`
-- `--wraparguments before-first --wrapcollections before-first`
+- `--wraparguments after-first --wrapparameters after-first --wrapcollections after-first` (paren-aligned; SwiftLint's `vertical_parameter_alignment_on_call` and `collection_alignment` enforce the same shape)
 
 ### SwiftLint
 
@@ -1595,6 +1595,7 @@ Minimal opinionated `.swiftlint.yml`:
   - Reject `internal` keyword (it's the default; spelling it is noise)
   - Reject `Color.…` literals outside `Theme.swift`
   - Reject magic numeric padding outside `Theme.swift`
+  - Reject a conformance list wrapped off the declaration line (`conformances_on_declaration_line`) — SwiftFormat cannot unwrap it
 
 ### Pre-commit hook
 

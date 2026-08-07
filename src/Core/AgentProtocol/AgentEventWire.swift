@@ -11,7 +11,7 @@ public enum AgentEventWire: Sendable, Codable, Hashable {
 
     case sessionStarted(sessionID: String, model: String?, cwd: String)
 
-    case userTurn(id: String, text: String)
+    case userTurn(id: AdapterTurnID, text: String)
 
     case textDelta(messageID: UUID, delta: String)
 
@@ -20,12 +20,12 @@ public enum AgentEventWire: Sendable, Codable, Hashable {
     case thinkingChunk(blockID: UUID, delta: String)
     case thinkingComplete(blockID: UUID, durationMS: Int)
 
-    case toolStart(id: String, name: String, input: ToolInput, startedAt: Date)
-    case toolProgress(callID: UUID, progress: ToolProgress)
-    case toolEnd(id: String, success: Bool, output: ToolOutput, durationMS: Int)
+    case toolStart(id: ToolCallID, name: String, input: ToolInput, startedAt: Date)
+    case toolProgress(callID: ToolCallID, progress: ToolProgress)
+    case toolEnd(id: ToolCallID, success: Bool, output: ToolOutput, durationMS: Int)
 
     case permissionRequest(prompt: PermissionPrompt)
-    case permissionAlreadyResolved(id: UUID, byDevice: String)
+    case permissionAlreadyResolved(id: PermissionPromptID, byDevice: String)
 
     case statusPhraseChanged(source: StatusPhraseSource, phrase: String)
     case activityStateChanged(ActivitySubstate)

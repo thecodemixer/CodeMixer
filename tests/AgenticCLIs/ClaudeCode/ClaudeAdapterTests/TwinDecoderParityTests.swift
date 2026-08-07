@@ -25,7 +25,7 @@ struct TwinDecoderParityTests {
             project: TestPaths.underTemporary("test"),
             model: "claude-parity-model"
         )
-        let request = HookRequest(id: UUID(), eventName: "SessionStart", jsonPayload: data)
+        let request = HookRequest(id: HookRequestID(rawValue: UUID()), eventName: "SessionStart", jsonPayload: data)
         let events = decoder.events(from: request)
 
         guard case let .sessionStarted(id, model, _) = events.first else {
@@ -42,7 +42,7 @@ struct TwinDecoderParityTests {
             sessionID: "sess-2",
             prompt: "What is 2+2?"
         )
-        let request = HookRequest(id: UUID(), eventName: "UserPromptSubmit", jsonPayload: data)
+        let request = HookRequest(id: HookRequestID(rawValue: UUID()), eventName: "UserPromptSubmit", jsonPayload: data)
         let events = decoder.events(from: request)
 
         guard case let .userTurn(_, text) = events.first else {
@@ -61,7 +61,7 @@ struct TwinDecoderParityTests {
             input: ["command": "ls"],
             needsPermission: false
         )
-        let request = HookRequest(id: UUID(), eventName: "PreToolUse", jsonPayload: data)
+        let request = HookRequest(id: HookRequestID(rawValue: UUID()), eventName: "PreToolUse", jsonPayload: data)
         let events = decoder.events(from: request)
 
         let hasPermission = events.contains { if case .permissionRequest = $0 { return true }; return false }
@@ -79,7 +79,7 @@ struct TwinDecoderParityTests {
             input: ["command": "rm -rf /"],
             needsPermission: true
         )
-        let request = HookRequest(id: UUID(), eventName: "PreToolUse", jsonPayload: data)
+        let request = HookRequest(id: HookRequestID(rawValue: UUID()), eventName: "PreToolUse", jsonPayload: data)
         let events = decoder.events(from: request)
 
         let hasPermission = events.contains { if case .permissionRequest = $0 { return true }; return false }
@@ -99,7 +99,7 @@ struct TwinDecoderParityTests {
             isError: false,
             durationMS: 25
         )
-        let request = HookRequest(id: UUID(), eventName: "PostToolUse", jsonPayload: data)
+        let request = HookRequest(id: HookRequestID(rawValue: UUID()), eventName: "PostToolUse", jsonPayload: data)
         let events = decoder.events(from: request)
 
         guard case let .toolEnd(_, success, _, ms) = events.first(where: { if case .toolEnd = $0 { return true }; return false }) else {
@@ -120,7 +120,7 @@ struct TwinDecoderParityTests {
             exitCode: 1,
             isError: true
         )
-        let request = HookRequest(id: UUID(), eventName: "PostToolUse", jsonPayload: data)
+        let request = HookRequest(id: HookRequestID(rawValue: UUID()), eventName: "PostToolUse", jsonPayload: data)
         let events = decoder.events(from: request)
 
         guard case let .toolEnd(_, success, _, _) = events.first(where: { if case .toolEnd = $0 { return true }; return false }) else {
@@ -136,7 +136,7 @@ struct TwinDecoderParityTests {
             sessionID: "sess-7",
             message: "Searching codebase…"
         )
-        let request = HookRequest(id: UUID(), eventName: "Notification", jsonPayload: data)
+        let request = HookRequest(id: HookRequestID(rawValue: UUID()), eventName: "Notification", jsonPayload: data)
         let events = decoder.events(from: request)
 
         guard case let .statusPhraseChanged(source, phrase) = events.first else {
@@ -150,7 +150,7 @@ struct TwinDecoderParityTests {
     @Test("stop without last message -> idle only")
     func stopParity() {
         let data = ClaudeCodeTwinHookEmitter.stop(sessionID: "sess-8")
-        let request = HookRequest(id: UUID(), eventName: "Stop", jsonPayload: data)
+        let request = HookRequest(id: HookRequestID(rawValue: UUID()), eventName: "Stop", jsonPayload: data)
         let events = decoder.events(from: request)
 
         #expect(events.count == 1)
@@ -164,7 +164,7 @@ struct TwinDecoderParityTests {
     func stopWithLastMessageParity() {
         let data = ClaudeCodeTwinHookEmitter.stop(sessionID: "sess-9",
                                                   lastAssistantMessage: "Final.")
-        let request = HookRequest(id: UUID(), eventName: "Stop", jsonPayload: data)
+        let request = HookRequest(id: HookRequestID(rawValue: UUID()), eventName: "Stop", jsonPayload: data)
         let events = decoder.events(from: request)
 
         #expect(events.contains { if case .assistantText(_, _, let t, _) = $0 { return t == "Final." }; return false })

@@ -102,7 +102,7 @@ extension ACPEventDecoder {
             let bufferedEvents: [AgentEvent]
             switch pending.role.stored {
             case .user:
-                bufferedEvents = [.userTurn(id: random.uuid().uuidString,
+                bufferedEvents = [.userTurn(id: AdapterTurnID(rawValue: random.uuid().uuidString),
                                             text: pending.text)]
             case .thinking:
                 let id = random.uuid()

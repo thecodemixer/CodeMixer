@@ -71,7 +71,7 @@ actor SessionTranscriptRepository {
         try transcript(for: key).truncatedEntryCount
     }
 
-    func truncate(afterUserTurnID id: String,
+    func truncate(afterUserTurnID id: AdapterTurnID,
                   for key: SessionTranscriptKey) throws {
         try record([.truncateAfterUser(id: id, recordedAt: clock.now())],
                    for: key,
@@ -79,7 +79,7 @@ actor SessionTranscriptRepository {
         try flush(key)
     }
 
-    func replaceUserTurn(id: String,
+    func replaceUserTurn(id: AdapterTurnID,
                          text: String,
                          for key: SessionTranscriptKey) throws {
         try record([.replaceUser(id: id, text: text, recordedAt: clock.now())],

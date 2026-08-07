@@ -7,19 +7,19 @@ import AgentProtocol
 /// (foreign-session) permissions parked until that session's next
 /// `session/load`.
 extension ACPClientState {
-    func registerApproval(id: UUID, requestID: JSONValue, optionIDs: [String: String]) {
+    func registerApproval(id: PermissionPromptID, requestID: JSONValue, optionIDs: [String: String]) {
         withLock {
             pendingApprovals[id] = PendingApproval(requestID: requestID, optionIDs: optionIDs)
         }
     }
 
-    func takeApproval(id: UUID) -> PendingApproval? {
+    func takeApproval(id: PermissionPromptID) -> PendingApproval? {
         withLock { pendingApprovals.removeValue(forKey: id) }
     }
 
     /// Drain live approvals (prompt id + wire request) so callers can cancel them.
     @discardableResult
-    func takeAllPendingApprovals() -> [(promptID: UUID, approval: PendingApproval)] {
+    func takeAllPendingApprovals() -> [(promptID: PermissionPromptID, approval: PendingApproval)] {
         withLock {
             let pairs = pendingApprovals.map { (promptID: $0.key, approval: $0.value) }
             pendingApprovals.removeAll()

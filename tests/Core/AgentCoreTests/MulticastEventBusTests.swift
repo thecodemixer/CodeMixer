@@ -9,7 +9,7 @@ struct MulticastEventBusTests {
     func historyReplay() async {
         let bus = MulticastEventBus(historyLimit: 8)
         for i in 0..<3 {
-            await bus.publish(.userTurn(id: "u\(i)", text: "msg\(i)"))
+            await bus.publish(.userTurn(id: AdapterTurnID(rawValue: "u\(i)"), text: "msg\(i)"))
         }
         let sub = await bus.subscribe()
         var iterator = sub.stream.makeAsyncIterator()
@@ -44,7 +44,7 @@ struct MulticastEventBusTests {
 
         // Publish one more than the limit.
         for i in 0...limit {
-            await bus.publish(.userTurn(id: "u\(i)", text: "msg\(i)"))
+            await bus.publish(.userTurn(id: AdapterTurnID(rawValue: "u\(i)"), text: "msg\(i)"))
         }
 
         // Late subscriber should only see the most recent `limit` events.
@@ -108,7 +108,7 @@ struct MulticastEventBusTests {
 
         let burst = 100
         for i in 0..<burst {
-            await bus.publish(.userTurn(id: "u\(i)", text: "m\(i)"))
+            await bus.publish(.userTurn(id: AdapterTurnID(rawValue: "u\(i)"), text: "m\(i)"))
         }
 
         for sub in subs {
@@ -164,9 +164,9 @@ struct MulticastEventBusTests {
         let bus = MulticastEventBus(historyLimit: 10)
 
         // Publish three events, capturing their IDs.
-        let id1 = await bus.publish(.userTurn(id: "u1", text: "first"))
-        _  = await bus.publish(.userTurn(id: "u2", text: "second"))
-        _ = await bus.publish(.userTurn(id: "u3", text: "third"))
+        let id1 = await bus.publish(.userTurn(id: AdapterTurnID(rawValue: "u1"), text: "first"))
+        _  = await bus.publish(.userTurn(id: AdapterTurnID(rawValue: "u2"), text: "second"))
+        _ = await bus.publish(.userTurn(id: AdapterTurnID(rawValue: "u3"), text: "third"))
 
         // Subscribe after the first event — should replay only 2nd and 3rd.
         let sub = await bus.subscribe(after: id1)

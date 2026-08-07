@@ -811,7 +811,7 @@ The honesty principle (§1.6) demands a continuous, structured visible signal du
 - `.turnStarted` — first user prompt sent.
 - `.thinking(phrase: String?)` — the assistant is reasoning. Optional phrase from `/think`-mode output.
 - `.toolStarted(name: String)` — a tool is about to run.
-- `.toolProgress(callID: UUID, progress: ToolProgress)` — incremental progress.
+- `.toolProgress(callID: ToolCallID, progress: ToolProgress)` — incremental progress.
 - `.noEventGap(elapsed: Duration)` — emitted every 500ms while busy; tells the UI "still working."
 - `.turnEnded` — the turn is complete.
 

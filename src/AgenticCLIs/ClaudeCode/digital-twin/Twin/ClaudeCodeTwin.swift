@@ -148,10 +148,10 @@ public final class ClaudeCodeTwin: AgentAdapter, @unchecked Sendable {
                                     runtime: runtime)
 
         case .withBash(let command, let stdout, let exitCode, let reply):
-            let toolID = runtime.uuid()
+            let toolID = ToolCallID(rawValue: runtime.uuid().uuidString)
             let input = ToolInput(summary: "Run: \(command)",
                                   jsonPayload: #"{"command":"\#(command)"}"#)
-            continuation.yield(.toolStart(id: toolID.uuidString,
+            continuation.yield(.toolStart(id: toolID,
                                           name: "Bash",
                                           input: input,
                                           startedAt: runtime.now()))
@@ -161,7 +161,7 @@ public final class ClaudeCodeTwin: AgentAdapter, @unchecked Sendable {
             }
             let output = ToolOutput(summary: stdout, jsonPayload: nil,
                                     errorMessage: exitCode == 0 ? nil : "exit \(exitCode)")
-            continuation.yield(.toolEnd(id: toolID.uuidString,
+            continuation.yield(.toolEnd(id: toolID,
                                         success: exitCode == 0,
                                         output: output,
                                         durationMS: 42))
@@ -171,13 +171,13 @@ public final class ClaudeCodeTwin: AgentAdapter, @unchecked Sendable {
                                     runtime: runtime)
 
         case .withEdit(let path, let diff, let reply):
-            let toolID = runtime.uuid()
-            continuation.yield(.toolStart(id: toolID.uuidString,
+            let toolID = ToolCallID(rawValue: runtime.uuid().uuidString)
+            continuation.yield(.toolStart(id: toolID,
                                           name: "Edit",
                                           input: ToolInput(summary: "Modify \(path)",
                                                            jsonPayload: #"{"file_path":"\#(path)"}"#),
                                           startedAt: runtime.now()))
-            continuation.yield(.toolEnd(id: toolID.uuidString,
+            continuation.yield(.toolEnd(id: toolID,
                                         success: true,
                                         output: ToolOutput(summary: diff),
                                         durationMS: 12))
@@ -188,7 +188,7 @@ public final class ClaudeCodeTwin: AgentAdapter, @unchecked Sendable {
                                     runtime: runtime)
 
         case .permissionPrompt(let tool, let summary, let reply):
-            let id = runtime.uuid()
+            let id = PermissionPromptID(rawValue: runtime.uuid())
             continuation.yield(.permissionRequest(prompt: PermissionPrompt(
                 id: id,
                 toolName: tool,
@@ -219,7 +219,7 @@ public final class ClaudeCodeTwin: AgentAdapter, @unchecked Sendable {
 
         case .workspaceTrust:
             continuation.yield(.permissionRequest(prompt: PermissionPrompt(
-                id: runtime.uuid(),
+                id: PermissionPromptID(rawValue: runtime.uuid()),
                 toolName: ClaudeInputEncoding.workspaceTrustToolName,
                 summary: "Trust this workspace?",
                 argumentsSummary: "{}",

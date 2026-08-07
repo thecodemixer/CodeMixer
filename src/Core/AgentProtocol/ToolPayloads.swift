@@ -85,7 +85,7 @@ public struct PermissionOption: PermissionOptionPayload, Sendable, Codable, Hash
 
 /// Contract for a permission prompt shared by domain and wire.
 public protocol PermissionPromptPayload: Sendable, Identifiable {
-    var id: UUID { get }
+    var id: PermissionPromptID { get }
     var toolName: String { get }
     var summary: String { get }
     var argumentsSummary: String { get }
@@ -96,14 +96,14 @@ public protocol PermissionPromptPayload: Sendable, Identifiable {
 /// Permission prompt the agent surfaced before executing a tool. Shared by
 /// domain and wire — fields are already Codable-portable.
 public struct PermissionPrompt: PermissionPromptPayload, Sendable, Codable, Hashable, Identifiable {
-    public let id: UUID
+    public let id: PermissionPromptID
     public let toolName: String
     public let summary: String
     public let argumentsSummary: String
     public let requestedAt: Date
     public let options: [PermissionOption]?
 
-    public init(id: UUID,
+    public init(id: PermissionPromptID,
                 toolName: String,
                 summary: String,
                 argumentsSummary: String,
@@ -138,8 +138,8 @@ public struct PermissionPrompt: PermissionPromptPayload, Sendable, Codable, Hash
     private static func stableID(toolName: String,
                                  summary: String,
                                  argumentsSummary: String,
-                                 requestedAt: Date) -> UUID {
+                                 requestedAt: Date) -> PermissionPromptID {
         let material = "\(toolName)|\(summary)|\(argumentsSummary)|\(requestedAt.timeIntervalSince1970)"
-        return StableID.uuid(from: material)
+        return PermissionPromptID(rawValue: StableID.uuid(from: material))
     }
 }

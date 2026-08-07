@@ -39,7 +39,7 @@ struct WireCodecParityTests {
             .generic(message: "still working"),
         ]
         for p in progresses {
-            let event = AgentEvent.toolProgress(callID: UUID(), progress: p)
+            let event = AgentEvent.toolProgress(callID: "tool-1", progress: p)
             let restored = WireCodec.decode(WireCodec.encode(event))
             guard case .toolProgress(_, let restoredP) = restored else {
                 Issue.record("not a toolProgress: \(restored)"); return
@@ -80,7 +80,7 @@ struct WireCodecParityTests {
 
     @Test("PermissionPrompt preserves every field")
     func permissionPromptFields() {
-        let id = UUID()
+        let id = PermissionPromptID(rawValue: UUID())
         let at = Date(timeIntervalSince1970: 1_700_000_000)
         let prompt = PermissionPrompt(id: id,
                                       toolName: "Bash",
@@ -144,7 +144,7 @@ struct WireCodecParityTests {
 
     @Test("PermissionPrompt preserves custom options")
     func permissionPromptOptions() {
-        let id = UUID()
+        let id = PermissionPromptID(rawValue: UUID())
         let at = Date(timeIntervalSince1970: 1_700_000_000)
         let prompt = PermissionPrompt(
             id: id,
@@ -186,7 +186,7 @@ struct WireCodecParityTests {
                                       requestedAt: Date(timeIntervalSince1970: 1_700_000_000))
         return [
             .sessionStarted(sessionID: "s1", model: "claude-sonnet-4-5", cwd: cwd),
-            .userTurn(id: "u1", text: "hello"),
+            .userTurn(id: AdapterTurnID(rawValue: "u1"), text: "hello"),
             .textDelta(messageID: UUID(), delta: "world"),
             .assistantText(id: "a1", blockID: "b1", text: "ok", isFinal: true),
             .thinkingChunk(blockID: UUID(), delta: "step"),
@@ -194,12 +194,12 @@ struct WireCodecParityTests {
             .toolStart(id: "t1", name: "Bash",
                        input: ToolInput(summary: "ls"),
                        startedAt: Date(timeIntervalSince1970: 1_700_000_000)),
-            .toolProgress(callID: UUID(), progress: .bashLine("line 1")),
-            .toolProgress(callID: UUID(), progress: .fileBytes(written: 1, total: 2)),
-            .toolProgress(callID: UUID(), progress: .generic(message: "x")),
+            .toolProgress(callID: "t1", progress: .bashLine("line 1")),
+            .toolProgress(callID: "t1", progress: .fileBytes(written: 1, total: 2)),
+            .toolProgress(callID: "t1", progress: .generic(message: "x")),
             .toolEnd(id: "t1", success: true, output: ToolOutput(summary: "done"), durationMS: 12),
             .permissionRequest(prompt: prompt),
-            .permissionAlreadyResolved(id: UUID(), byDevice: "Phone"),
+            .permissionAlreadyResolved(id: PermissionPromptID(rawValue: UUID()), byDevice: "Phone"),
             .statusPhraseChanged(source: .hookHint, phrase: "Reading"),
             .activityStateChanged(.stillWorking),
             .noEventGap(turnID: UUID(), elapsed: .seconds(11)),

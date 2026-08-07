@@ -116,7 +116,8 @@ enum ACPSessionStoreCodec {
         return turns.flatMap { turn -> [AgentEvent] in
             switch turn.role {
             case .user:
-                return [.userTurn(id: random.uuid().uuidString, text: turn.text)]
+                return [.userTurn(id: AdapterTurnID(rawValue: random.uuid().uuidString),
+                                  text: turn.text)]
             case .thinking:
                 let blockID = random.uuid()
                 return [
@@ -124,7 +125,7 @@ enum ACPSessionStoreCodec {
                     .thinkingComplete(blockID: blockID, duration: .zero),
                 ]
             case .tool:
-                let id = turn.toolCallID ?? random.uuid().uuidString
+                let id = ToolCallID(rawValue: turn.toolCallID ?? random.uuid().uuidString)
                 return [
                     .toolStart(
                         id: id,

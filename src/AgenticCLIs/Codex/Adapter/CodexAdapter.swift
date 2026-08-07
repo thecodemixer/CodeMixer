@@ -296,7 +296,7 @@ public final class CodexAdapter: AgentAdapter {
         ]
     }
 
-    public func truncateTranscript(afterUserTurnID turnID: String,
+    public func truncateTranscript(afterUserTurnID turnID: AdapterTurnID,
                                    sessionID: String,
                                    workspace: URL) async -> Bool {
         return false

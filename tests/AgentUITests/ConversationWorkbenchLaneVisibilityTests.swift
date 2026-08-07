@@ -77,7 +77,7 @@ struct ConversationWorkbenchLaneVisibilityTests {
         defer { vm.unsubscribe() }
 
         await bus.publish(.sessionStarted(sessionID: "s1", model: nil, cwd: TestPaths.underTemporary("proj")))
-        await bus.publish(.userTurn(id: UUID().uuidString, text: "hello"))
+        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: UUID().uuidString), text: "hello"))
         await drain()
 
         #expect(!WorkLaneView.hasContent(model: vm))
@@ -92,7 +92,7 @@ struct ConversationWorkbenchLaneVisibilityTests {
         defer { vm.unsubscribe() }
 
         await bus.publish(.sessionStarted(sessionID: "s1", model: nil, cwd: TestPaths.underTemporary("proj")))
-        await bus.publish(.userTurn(id: UUID().uuidString, text: "migrate orders.ts"))
+        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: UUID().uuidString), text: "migrate orders.ts"))
         await bus.publish(.toolStart(id: "call-1", name: "edit_file", input: ToolInput(summary: "orders.ts"), startedAt: Date()))
         await drain()
 
@@ -114,7 +114,7 @@ struct ConversationWorkbenchLaneVisibilityTests {
             sessionID: "restored",
             phase: SessionPhase(id: "verify", label: "Verify", ordinal: 4, group: .verify)
         ))
-        await bus.publish(.userTurn(id: "user-1", text: "Run the checks"))
+        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: "user-1"), text: "Run the checks"))
         await bus.publish(.thinkingChunk(blockID: thinkingID, delta: "Inspecting failures"))
         await bus.publish(.thinkingComplete(blockID: thinkingID, duration: .seconds(2)))
         await bus.publish(.toolStart(
@@ -155,7 +155,7 @@ struct ConversationWorkbenchLaneVisibilityTests {
 
         let cwd = TestPaths.underTemporary("proj")
         await bus.publish(.sessionStarted(sessionID: "s1", model: nil, cwd: cwd))
-        await bus.publish(.userTurn(id: UUID().uuidString, text: "hello"))
+        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: UUID().uuidString), text: "hello"))
         await bus.publish(.fileTouched(cwd.appendingPathComponent("src/main.swift"), kind: .fsObserved))
         await drain()
 
@@ -171,7 +171,7 @@ struct ConversationWorkbenchLaneVisibilityTests {
         defer { vm.unsubscribe() }
 
         await bus.publish(.sessionStarted(sessionID: "s1", model: nil, cwd: TestPaths.underTemporary("proj")))
-        await bus.publish(.userTurn(id: UUID().uuidString, text: "hello"))
+        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: UUID().uuidString), text: "hello"))
         await drain()
 
         #expect(WorkLaneView.hasContent(

@@ -6,10 +6,34 @@ import AgentTestSupport
 @Suite("Wire frames — JSON round-trip")
 struct WireFrameRoundTripTests {
 
+    @Test("Turn identifiers keep scalar wire encoding")
+    func turnIdentifierWireEncoding() throws {
+        let adapterTurnID = AdapterTurnID(rawValue: "codex-rollout-7")
+        let adapterData = try JSONEncoder().encode(adapterTurnID)
+        #expect(String(decoding: adapterData, as: UTF8.self) == #""codex-rollout-7""#)
+        #expect(try JSONDecoder().decode(AdapterTurnID.self, from: adapterData) == adapterTurnID)
+
+        let uuid = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000007"))
+        let entryID = InternalEntryID(rawValue: uuid)
+        let entryData = try JSONEncoder().encode(entryID)
+        #expect(String(decoding: entryData, as: UTF8.self) == #""00000000-0000-0000-0000-000000000007""#)
+        #expect(try JSONDecoder().decode(InternalEntryID.self, from: entryData) == entryID)
+
+        let toolCallID = ToolCallID(rawValue: "toolu_01ABC")
+        let toolData = try JSONEncoder().encode(toolCallID)
+        #expect(String(decoding: toolData, as: UTF8.self) == #""toolu_01ABC""#)
+        #expect(try JSONDecoder().decode(ToolCallID.self, from: toolData) == toolCallID)
+
+        let promptID = PermissionPromptID(rawValue: uuid)
+        let promptData = try JSONEncoder().encode(promptID)
+        #expect(String(decoding: promptData, as: UTF8.self) == #""00000000-0000-0000-0000-000000000007""#)
+        #expect(try JSONDecoder().decode(PermissionPromptID.self, from: promptData) == promptID)
+    }
+
     @Test("Every AgentCommand case survives encode → decode inside a ClientFrame")
     func everyCommandRoundTrips() throws {
         let bubbleID = UUID()
-        let permID = UUID()
+        let permID = PermissionPromptID(rawValue: UUID())
         let snapshotID = UUID()
         var commands = AgentCommandFixtures.dispatchParitySamples()
         commands.append(contentsOf: AgentCommandFixtures.wireRoundTripExtras(bubbleID: bubbleID,
@@ -43,13 +67,13 @@ struct WireFrameRoundTripTests {
 
     @Test("Every ServerFrame case survives encode → decode")
     func serverFrameRoundTrip() throws {
-        let prompt = PermissionPrompt(id: UUID(),
+        let prompt = PermissionPrompt(id: PermissionPromptID(rawValue: UUID()),
                                       toolName: "Bash",
                                       summary: "Run: ls",
                                       argumentsSummary: "{}",
                                       requestedAt: Date(timeIntervalSince1970: 1_700_000_000))
         let cases: [ServerFrame] = [
-            .event(id: UUID(), event: .userTurn(id: "u1", text: "hi")),
+            .event(id: UUID(), event: .userTurn(id: AdapterTurnID(rawValue: "u1"), text: "hi")),
             .event(id: UUID(), event: .permissionRequest(prompt: prompt)),
             .event(id: UUID(), event: .bell),
             .commandSucceeded(for: UUID()),
@@ -89,7 +113,7 @@ struct WireFrameRoundTripTests {
 
     @Test("Shared wire-frame codec helpers configure .iso8601 date handling")
     func sharedCodecHelpersUseISO8601Dates() throws {
-        let prompt = PermissionPrompt(id: UUID(),
+        let prompt = PermissionPrompt(id: PermissionPromptID(rawValue: UUID()),
                                       toolName: "Bash",
                                       summary: "Run: ls",
                                       argumentsSummary: "{}",
@@ -131,7 +155,8 @@ struct WireFrameRoundTripTests {
         #expect(WireVersion.v2.rawValue == 2)
         #expect(WireVersion.v3.rawValue == 3)
         #expect(WireVersion.v4.rawValue == 4)
-        #expect(WireVersion.current == .v4)
+        #expect(WireVersion.v5.rawValue == 5)
+        #expect(WireVersion.current == .v5)
     }
 
     /// Round-trip via re-encoding: encode → decode → encode, compare bytes.

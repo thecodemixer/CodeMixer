@@ -15,7 +15,7 @@ struct TranscriptEntryID: Sendable, Codable, Hashable, RawRepresentable {
 }
 
 enum TranscriptBlock: Sendable, Codable, Equatable {
-    case user(id: String, text: String)
+    case user(id: AdapterTurnID, text: String)
     case assistant(id: String, blockID: String, text: String)
     case thinking(blockID: UUID, text: String, durationMS: Int?)
     case tool(ToolTranscript)
@@ -31,7 +31,7 @@ enum TranscriptBlock: Sendable, Codable, Equatable {
 }
 
 struct ToolTranscript: Sendable, Codable, Equatable {
-    let id: String
+    let id: ToolCallID
     var name: String
     var input: ToolInput
     var startedAt: Date

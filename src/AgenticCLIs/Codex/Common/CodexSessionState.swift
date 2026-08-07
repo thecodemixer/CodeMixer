@@ -55,7 +55,7 @@ public final class CodexSessionState: @unchecked Sendable {
     private var context: Context?
     private var threadPhase: ThreadPhase = .awaitingThread(queued: [])
     private var turnPhase: TurnPhase = .idle
-    private var pendingApprovals: [UUID: PendingApproval] = [:]
+    private var pendingApprovals: [PermissionPromptID: PendingApproval] = [:]
     private var autoApprovalSignatures: Set<String> = []
     private var itemIDs: [String: UUID] = [:]
     private var itemStartedAt: [String: Date] = [:]
@@ -176,7 +176,7 @@ public final class CodexSessionState: @unchecked Sendable {
         }
     }
 
-    func registerApproval(id: UUID, requestID: JSONValue, signature: String) {
+    func registerApproval(id: PermissionPromptID, requestID: JSONValue, signature: String) {
         withLock {
             pendingApprovals[id] = PendingApproval(
                 requestID: requestID,
@@ -185,7 +185,7 @@ public final class CodexSessionState: @unchecked Sendable {
         }
     }
 
-    func takeApproval(id: UUID, remember: Bool) -> PendingApproval? {
+    func takeApproval(id: PermissionPromptID, remember: Bool) -> PendingApproval? {
         withLock {
             guard let approval = pendingApprovals.removeValue(forKey: id) else {
                 return nil

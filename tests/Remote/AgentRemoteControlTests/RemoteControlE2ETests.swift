@@ -580,7 +580,7 @@ struct RemoteControlE2ETests {
                                                     useTLS: false))
         let port = try #require(await server.boundPort)
 
-        _ = await engine.bus.publish(.userTurn(id: "u1", text: "hello"))
+        _ = await engine.bus.publish(.userTurn(id: AdapterTurnID(rawValue: "u1"), text: "hello"))
         let staleID = await engine.bus.lastPublishedID
         for _ in 0..<StreamBufferDefaults.eventHistory {
             _ = await engine.bus.publish(.bell)
@@ -689,7 +689,11 @@ struct RemoteControlE2ETests {
         let restartedPTY = RemoteScriptedTransport(writeSteps: [.fail(.writeFailed(errno: 5))])
         let factory = RemoteScriptedTransportFactory([firstPTY, restartedPTY])
         let seams = seamsWithRunningClock()
-        let engine = AgentEngine(seams: seams, transportFactory: factory.makeTransport)
+        // The mock adapter never republishes SessionStart after the respawn, so
+        // the readiness wait would otherwise burn its full production budget.
+        let engine = AgentEngine(seams: seams,
+                                 promptReadinessTimeout: .milliseconds(200),
+                                 transportFactory: factory.makeTransport)
         await engine.bootstrap()
         let adapter = RecordingMockAdapter()
         let workspace = URL(fileURLWithPath: NSTemporaryDirectory())
@@ -715,18 +719,19 @@ struct RemoteControlE2ETests {
         _ = try #require(try await client.receive())
 
         let history = await engine.bus.historySnapshot
-        guard case .userTurn(let idString, _)? = history.map(\.event).last(where: {
+        guard case .userTurn(let adapterTurnID, _)? = history.map(\.event).last(where: {
             if case .userTurn = $0 { return true }
             return false
-        }), let targetID = UUID(uuidString: idString) else {
+        }) else {
             Issue.record("expected userTurn in bus history")
             return
         }
+        let targetID = InternalEntryID.derive(fromAdapterTurnID: adapterTurnID)
 
         let editCommandID = UUID()
         try await client.send(try encoder.encode(ClientFrame.command(
             id: editCommandID,
-            command: .editAndResubmitLast(targetBubbleID: targetID,
+            command: .editAndResubmitLast(targetEntryID: targetID,
                                           text: "edited fail",
                                           attachments: [])
         )))

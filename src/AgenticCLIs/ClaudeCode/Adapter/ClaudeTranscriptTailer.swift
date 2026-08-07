@@ -311,7 +311,7 @@ public actor ClaudeTranscriptTailer {
             if userTurnReplayActive,
                let text = userText(from: record),
                !text.isEmpty {
-                return [.userTurn(id: recordID, text: text)]
+                return [.userTurn(id: AdapterTurnID(rawValue: recordID), text: text)]
             }
             return []
         case .assistant:
@@ -329,10 +329,10 @@ public actor ClaudeTranscriptTailer {
         for block in blocks {
             switch block {
             case .text(let text) where !text.isEmpty:
-                if isSubagent, let parentID = record.parentMessageId,
-                   let callID = UUID(uuidString: parentID) {
+                if isSubagent, let parentID = record.parentMessageId {
                     // Subagent turn: surface as tool progress keyed to the parent call.
-                    out.append(.toolProgress(callID: callID, progress: .generic(message: text)))
+                    out.append(.toolProgress(callID: ToolCallID(rawValue: parentID),
+                                             progress: .generic(message: text)))
                 } else {
                     out.append(.assistantText(id: recordID,
                                               blockID: random.uuid().uuidString,
@@ -340,9 +340,8 @@ public actor ClaudeTranscriptTailer {
                                               isFinal: true))
                 }
             case .thinking(let text) where !text.isEmpty:
-                if isSubagent, let parentID = record.parentMessageId,
-                   let callID = UUID(uuidString: parentID) {
-                    out.append(.toolProgress(callID: callID,
+                if isSubagent, let parentID = record.parentMessageId {
+                    out.append(.toolProgress(callID: ToolCallID(rawValue: parentID),
                                              progress: .generic(message: "Thinking:\n\(text)")))
                 } else {
                     let id = random.uuid()
@@ -352,7 +351,7 @@ public actor ClaudeTranscriptTailer {
             case .toolUse(let id, let name, let json):
                 let toolID = id ?? random.uuid().uuidString
                 transcriptTools[toolID] = TranscriptTool(name: name, inputJSON: json)
-                out.append(.toolStart(id: toolID,
+                out.append(.toolStart(id: ToolCallID(rawValue: toolID),
                                       name: name,
                                       input: ToolInput(summary: toolSummary(name: name, inputJSON: json),
                                                        jsonPayload: json),
@@ -396,7 +395,7 @@ public actor ClaudeTranscriptTailer {
         }
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
         let summary = trimmed.isEmpty ? "Tool completed" : trimmed
-        events.append(.toolEnd(id: id,
+        events.append(.toolEnd(id: ToolCallID(rawValue: id),
                                success: !isError,
                                output: ToolOutput(summary: summary,
                                                   errorMessage: isError ? summary : nil),

@@ -58,7 +58,7 @@ struct TranscriptTruncationTests {
         let adapter = ClaudeAdapter(environment: FakeEnvironment(home: home))
 
         let ok = await adapter.truncateTranscript(
-            afterUserTurnID: turnID,
+            afterUserTurnID: AdapterTurnID(rawValue: turnID),
             sessionID: sessionID,
             workspace: workspace
         )
@@ -98,7 +98,7 @@ struct TranscriptTruncationTests {
         let adapter = ClaudeAdapter(environment: FakeEnvironment(home: home))
 
         let ok = await adapter.truncateTranscript(
-            afterUserTurnID: targetID,
+            afterUserTurnID: AdapterTurnID(rawValue: targetID),
             sessionID: sessionID,
             workspace: workspace
         )
@@ -132,7 +132,7 @@ struct TranscriptTruncationTests {
 
         let adapter = ClaudeAdapter(environment: FakeEnvironment(home: home))
         let ok = await adapter.truncateTranscript(
-            afterUserTurnID: "not-in-file",
+            afterUserTurnID: AdapterTurnID(rawValue: "not-in-file"),
             sessionID: sessionID,
             workspace: workspace
         )
@@ -148,7 +148,7 @@ struct TranscriptTruncationTests {
 
         let adapter = ClaudeAdapter(environment: FakeEnvironment(home: home))
         let ok = await adapter.truncateTranscript(
-            afterUserTurnID: UUID().uuidString,
+            afterUserTurnID: AdapterTurnID(rawValue: UUID().uuidString),
             sessionID: "nonexistent",
             workspace: URL(fileURLWithPath: "/tmp/test-ws")
         )

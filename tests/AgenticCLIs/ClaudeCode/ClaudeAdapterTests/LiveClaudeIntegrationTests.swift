@@ -101,6 +101,32 @@ struct LiveClaudeIntegrationTests {
         )
     }
 
+    @Test("editing a restored turn resubmits it to the resumed Claude session")
+    func editAndResubmitAfterResume() async throws {
+        guard LiveClaudeHarness.isEnabled() else { return }
+        if let reason = LiveClaudeHarness.prerequisiteFailure() {
+            Issue.record("\(reason)")
+            return
+        }
+
+        let harness = LiveClaudeHarness()
+        let configuration = LiveClaudeHarness.defaultConfiguration()
+
+        let result: LiveClaudeHarness.EditAfterResumeResult
+        do {
+            result = try await harness.runEditAndResubmitAfterResume(configuration)
+        } catch {
+            Issue.record("\(error)")
+            return
+        }
+
+        #expect(result.editedUserTurnObserved)
+        #expect(result.editedAssistantText?.localizedCaseInsensitiveContains("edited-pong") == true)
+        print(
+            "live Claude edit-and-resubmit: session=\(result.priorSessionID) restoredTurn=\(result.restoredTurnID)"
+        )
+    }
+
     /// Opt-in TUI dump for resume hangs. Skipped unless
     /// `CODEMIXER_LIVE_CLAUDE=1` **and** `CODEMIXER_LIVE_CLAUDE_RESUME_DIAG=1`.
     ///

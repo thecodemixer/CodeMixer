@@ -266,7 +266,7 @@ struct LiveCustomACPHarness {
         let sub = await engine.bus.subscribe()
         let collector = Task { await sink.ingest(sub.stream) }
         let permissionLoop = Task {
-            var responded = Set<UUID>()
+            var responded = Set<PermissionPromptID>()
             var loadedAttention = Set<String>()
             var dashboardResolved = Set<String>()
             while !Task.isCancelled {
@@ -782,7 +782,7 @@ private actor LiveCustomEventSink {
         return latest.compactMap { id, needs in needs ? id : nil }.sorted()
     }
 
-    func pendingPermission(excluding responded: Set<UUID>) -> PermissionPrompt? {
+    func pendingPermission(excluding responded: Set<PermissionPromptID>) -> PermissionPrompt? {
         for event in events {
             if case .permissionRequest(let prompt) = event, !responded.contains(prompt.id) {
                 return prompt

@@ -296,8 +296,8 @@ public struct PromptComposerView: View {
             return
         }
         draft = ""
-        if isEditMode, let bubbleID = model.lastUserBubbleID {
-            model.editAndResubmit(targetBubbleID: bubbleID, text: text, attachments: [])
+        if isEditMode, let bubbleID = model.lastUserEntryID {
+            model.editAndResubmit(targetEntryID: bubbleID, text: text, attachments: [])
         } else {
             model.sendPrompt(text, attachments: [])
         }

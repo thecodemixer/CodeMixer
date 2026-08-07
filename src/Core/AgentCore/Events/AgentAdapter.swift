@@ -40,22 +40,35 @@ public struct AgentInputs: Sendable {
 /// short-lived request; the adapter responds with stdout bytes.
 public struct HookSocketHandle: Sendable {
     public let incoming: AsyncStream<HookRequest>
-    public let respond: @Sendable (UUID, Data) async -> Void
+    public let respond: @Sendable (HookRequestID, Data) async -> Void
 
     public init(incoming: AsyncStream<HookRequest>,
-                respond: @escaping @Sendable (UUID, Data) async -> Void) {
+                respond: @escaping @Sendable (HookRequestID, Data) async -> Void) {
         self.incoming = incoming
         self.respond = respond
     }
 }
 
+/// Identity of one open hook connection.
+///
+/// Minted per accepted UDS connection and used as the key of the server's
+/// pending-response table, so it names a live socket rather than anything in
+/// the conversation. It outlives the request only until the reply is written.
+public struct HookRequestID: RawRepresentable, Sendable, Codable, Hashable {
+    public let rawValue: UUID
+
+    public init(rawValue: UUID) {
+        self.rawValue = rawValue
+    }
+}
+
 /// One inbound hook request as decoded from the UDS connection.
 public struct HookRequest: Sendable, Hashable, Identifiable {
-    public let id: UUID
+    public let id: HookRequestID
     public let eventName: String
     public let jsonPayload: Data
 
-    public init(id: UUID, eventName: String, jsonPayload: Data) {
+    public init(id: HookRequestID, eventName: String, jsonPayload: Data) {
         self.id = id
         self.eventName = eventName
         self.jsonPayload = jsonPayload
@@ -202,6 +215,15 @@ public protocol AgentAdapter: Sendable {
                                   workspace: URL,
                                   fileSystem: any FileSystem) async throws
 
+    /// How long the engine should let a freshly spawned agent settle after it
+    /// reports prompt readiness, before writing a prompt it did not ask for.
+    ///
+    /// Protocol adapters answer `.zero`: a JSON-RPC peer that has replied to
+    /// `initialize` can take a request. Interactive TUIs need more — their
+    /// session hook fires while the input row is still being painted, and
+    /// keystrokes that arrive first are dropped with no error.
+    var promptWriteSettleDelay: Duration { get }
+
     // MARK: Transcript management (optional)
 
     /// Truncate the persisted conversation transcript so it ends just after the
@@ -212,7 +234,7 @@ public protocol AgentAdapter: Sendable {
     /// Returns `true` if truncation succeeded and the caller may respawn with
     /// the same session ID. The default no-op returns `false`, signalling that
     /// the caller should fall back to a fresh session.
-    func truncateTranscript(afterUserTurnID turnID: String,
+    func truncateTranscript(afterUserTurnID turnID: AdapterTurnID,
                             sessionID: String,
                             workspace: URL) async -> Bool
 
@@ -242,9 +264,11 @@ public extension AgentAdapter {
                                   workspace: URL,
                                   fileSystem: any FileSystem) async throws {}
 
-    func truncateTranscript(afterUserTurnID turnID: String,
+    func truncateTranscript(afterUserTurnID turnID: AdapterTurnID,
                             sessionID: String,
                             workspace: URL) async -> Bool { false }
+
+    var promptWriteSettleDelay: Duration { .zero }
 
     func encodeA2UIAction(_ envelope: A2UIActionEnvelope) -> Data? { nil }
 

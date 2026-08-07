@@ -120,7 +120,7 @@ struct LiveCodexHarness {
         let sub = await engine.bus.subscribe()
         let ingest = Task { await sink.ingest(sub.stream) }
 
-        var respondedPermissions: Set<UUID> = []
+        var respondedPermissions: Set<PermissionPromptID> = []
         let approver = Task {
             while !Task.isCancelled {
                 if let permissionID = await sink.pendingPermissionID(excluding: respondedPermissions) {
@@ -184,7 +184,7 @@ struct LiveCodexHarness {
         let sink = LiveCodexEventSink()
         let sub = await engine.bus.subscribe()
         let ingest = Task { await sink.ingest(sub.stream) }
-        var respondedPermissions: Set<UUID> = []
+        var respondedPermissions: Set<PermissionPromptID> = []
         let approver = Task {
             while !Task.isCancelled {
                 if let permissionID = await sink.pendingPermissionID(excluding: respondedPermissions) {
@@ -259,6 +259,106 @@ struct LiveCodexHarness {
         )
     }
 
+    struct EditAfterResumeResult: Sendable {
+        let priorThreadID: String
+        let restoredTurnID: AdapterTurnID
+        let editedAssistantText: String?
+        let editedUserTurnObserved: Bool
+    }
+
+    /// Seed a turn, reopen the thread from local history, then edit-and-resubmit
+    /// that restored turn — the flow a user drives with the composer's pencil.
+    ///
+    /// This is the only path that proves the stale-edit guard survives a restore:
+    /// the reopened engine never minted the turn id, so it has to adopt the one
+    /// the journal replayed. Codex cannot truncate its own transcript, so the
+    /// engine supersedes the thread and writes the revised prompt into a fresh
+    /// one — this asserts the revised prompt is what the new thread answers.
+    func runEditAndResubmitAfterResume(
+        _ configuration: Configuration,
+        editedPrompt: String = "Reply with exactly: codemixer-codex-edited-pong",
+        expectedEditedSubstring: String = "codemixer-codex-edited-pong"
+    ) async throws -> EditAfterResumeResult {
+        let seed = try await runTurn(configuration)
+        guard let threadID = seed.threadID, !threadID.isEmpty else {
+            throw LiveCodexHarnessError.threadStartTimedOut
+        }
+
+        let engine = AgentEngine(seams: .live)
+        await engine.bootstrap()
+        let adapter = CodexAdapter(environment: environment, fileSystem: fileSystem)
+        let sink = LiveCodexEventSink()
+        let sub = await engine.bus.subscribe()
+        let ingest = Task { await sink.ingest(sub.stream) }
+        var respondedPermissions: Set<PermissionPromptID> = []
+        let approver = Task {
+            while !Task.isCancelled {
+                if let permissionID = await sink.pendingPermissionID(excluding: respondedPermissions) {
+                    respondedPermissions.insert(permissionID)
+                    try? await engine.send(.respondToPermission(id: permissionID, decision: .allow))
+                }
+                try? await Task.sleep(for: .milliseconds(400))
+            }
+        }
+        defer {
+            approver.cancel()
+            ingest.cancel()
+            Task { await engine.bus.unsubscribe(sub.id) }
+        }
+
+        await engine.restoreHistory(for: SessionTranscriptKey(
+            projectRoot: configuration.workspace,
+            namespace: adapter.historyNamespace,
+            sessionID: threadID
+        ))
+        let historyReady = await liveCodexPollUntil(timeout: .seconds(5)) {
+            await sink.containsUserTurn(matching: configuration.prompt)
+        }
+        guard historyReady, let restoredTurnID = await sink.latestUserTurnID() else {
+            let events = await sink.snapshot()
+            await engine.shutdown(reason: .naturalExit)
+            throw LiveCodexHarnessError.historyLoadTimedOut(
+                events: events,
+                threadID: threadID,
+                detail: "no restored user turn to edit"
+            )
+        }
+
+        try await engine.start(adapter: adapter,
+                               workspace: configuration.workspace,
+                               resumeSessionID: threadID)
+        let sawThread = await liveCodexPollUntil(timeout: configuration.threadReadyTimeout) {
+            await sink.hasCodexThreadStarted()
+        }
+        guard sawThread else {
+            await engine.shutdown(reason: .naturalExit)
+            throw LiveCodexHarnessError.threadStartTimedOut
+        }
+
+        try await engine.send(.editAndResubmitLast(
+            targetEntryID: InternalEntryID.derive(fromAdapterTurnID: restoredTurnID),
+            text: editedPrompt,
+            attachments: []
+        ))
+
+        let sawEditedReply = await liveCodexPollUntil(timeout: configuration.assistantTextTimeout) {
+            await sink.containsFinalAssistantText(matching: expectedEditedSubstring)
+        }
+        let editedUserTurnObserved = await sink.containsUserTurn(matching: editedPrompt)
+        let editedText = await sink.latestFinalAssistantText()
+        let events = await sink.snapshot()
+        await engine.shutdown(reason: .naturalExit)
+
+        guard sawEditedReply else {
+            throw LiveCodexHarnessError.assistantTextTimedOut(events: events, threadID: threadID)
+        }
+
+        return EditAfterResumeResult(priorThreadID: threadID,
+                                     restoredTurnID: restoredTurnID,
+                                     editedAssistantText: editedText,
+                                     editedUserTurnObserved: editedUserTurnObserved)
+    }
+
     private static func envVariable(_ name: String, environment: any AgentEnvironment) -> String? {
         environment.processEnvironment()[name]
     }
@@ -324,7 +424,7 @@ actor LiveCodexEventSink {
         return nil
     }
 
-    func pendingPermissionID(excluding responded: Set<UUID>) -> UUID? {
+    func pendingPermissionID(excluding responded: Set<PermissionPromptID>) -> PermissionPromptID? {
         for event in events.reversed() {
             if case .permissionRequest(let prompt) = event, !responded.contains(prompt.id) {
                 return prompt.id
@@ -349,6 +449,13 @@ actor LiveCodexEventSink {
             }
             return false
         }
+    }
+
+    func latestUserTurnID() -> AdapterTurnID? {
+        for event in events.reversed() {
+            if case .userTurn(let id, _) = event { return id }
+        }
+        return nil
     }
 
     func latestFinalAssistantText() -> String? {

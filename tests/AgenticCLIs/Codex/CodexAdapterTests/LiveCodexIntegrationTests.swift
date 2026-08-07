@@ -77,4 +77,31 @@ struct LiveCodexIntegrationTests {
             "live Codex thread/resume: thread=\(result.priorThreadID) historyUser=\(result.sawPriorUserTurn) historyAssistant=\(result.sawPriorAssistantFinal)"
         )
     }
+
+    @Test("editing a restored turn resubmits it to a superseded Codex thread")
+    func editAndResubmitAfterResume() async throws {
+        guard LiveCodexHarness.isEnabled() else { return }
+        if let reason = LiveCodexHarness.prerequisiteFailure() {
+            Issue.record("\(reason)")
+            return
+        }
+
+        let harness = LiveCodexHarness()
+        let configuration = LiveCodexHarness.defaultConfiguration()
+
+        let result: LiveCodexHarness.EditAfterResumeResult
+        do {
+            result = try await harness.runEditAndResubmitAfterResume(configuration)
+        } catch {
+            Issue.record("\(error)")
+            return
+        }
+
+        #expect(result.editedUserTurnObserved)
+        #expect(result.editedAssistantText?
+            .localizedCaseInsensitiveContains("codemixer-codex-edited-pong") == true)
+        print(
+            "live Codex edit-and-resubmit: thread=\(result.priorThreadID) restoredTurn=\(result.restoredTurnID)"
+        )
+    }
 }

@@ -79,6 +79,14 @@ struct LiveCursorACPHarness {
         let cliVersion: String?
     }
 
+    struct EditAfterLoadResult: Sendable {
+        let priorSessionID: String
+        let restoredTurnID: AdapterTurnID
+        let editedAssistantText: String?
+        let editedUserTurnObserved: Bool
+        let cliVersion: String?
+    }
+
     /// Live streaming cadence for thoughts + assistant chunks (UI streaming check).
     struct StreamingCadenceResult: Sendable {
         let sessionID: String?
@@ -157,7 +165,7 @@ struct LiveCursorACPHarness {
         let sink = LiveCursorEventSink()
         let sub = await engine.bus.subscribe()
         let ingest = Task { await sink.ingest(sub.stream) }
-        var responded: Set<UUID> = []
+        var responded: Set<PermissionPromptID> = []
         let approver = Task {
             while !Task.isCancelled {
                 if let id = await sink.pendingPermissionID(excluding: responded) {
@@ -283,7 +291,7 @@ struct LiveCursorACPHarness {
         let sink = LiveCursorEventSink()
         let sub = await engine.bus.subscribe()
         let ingest = Task { await sink.ingest(sub.stream) }
-        var responded: Set<UUID> = []
+        var responded: Set<PermissionPromptID> = []
         let approver = Task {
             while !Task.isCancelled {
                 if let id = await sink.pendingPermissionID(excluding: responded) {
@@ -393,7 +401,7 @@ struct LiveCursorACPHarness {
         let sink = LiveCursorEventSink()
         let sub = await engine.bus.subscribe()
         let ingest = Task { await sink.ingest(sub.stream) }
-        var responded: Set<UUID> = []
+        var responded: Set<PermissionPromptID> = []
         let approver = Task {
             while !Task.isCancelled {
                 if let id = await sink.pendingPermissionID(excluding: responded) {
@@ -486,6 +494,129 @@ struct LiveCursorACPHarness {
         )
     }
 
+    /// Seed a turn, reopen the session from local history, then edit-and-resubmit
+    /// that restored turn — the flow a user drives with the composer's pencil.
+    ///
+    /// This is the only path that proves the stale-edit guard survives a restore:
+    /// the reopened engine never minted the turn id, so it has to adopt the one
+    /// the journal replayed. Cursor cannot truncate its own transcript, so the
+    /// engine supersedes the session and writes the revised prompt into a fresh
+    /// one — this asserts the revised prompt is what the new session answers.
+    func runEditAndResubmitAfterLoad(
+        _ configuration: Configuration,
+        editedPrompt: String = "Reply with exactly: codemixer-cursor-acp-edited-pong",
+        expectedEditedSubstring: String = "codemixer-cursor-acp-edited-pong"
+    ) async throws -> EditAfterLoadResult {
+        let version = await Self.readVersion(executablePath: configuration.executablePath)
+
+        let seed = try await runSeedTurn(
+            configuration: configuration,
+            version: version,
+            prompt: configuration.prompt,
+            expectedSubstring: configuration.expectedFinalSubstring
+        )
+        guard let seedSessionID = seed.sessionID, !seedSessionID.isEmpty else {
+            throw LiveCursorHarnessError.sessionStartTimedOut(events: seed.events, version: version)
+        }
+
+        let env = SystemEnvironment()
+        let engine = AgentEngine(seams: .live)
+        await engine.bootstrap()
+        let adapter = CursorACPAdapter(
+            environment: LiveCursorEnvironment(
+                base: env,
+                overrides: ["CURSOR_BIN": configuration.executablePath]
+            ),
+            fileSystem: SystemFileSystem()
+        )
+        let sink = LiveCursorEventSink()
+        let sub = await engine.bus.subscribe()
+        let ingest = Task { await sink.ingest(sub.stream) }
+        var responded: Set<PermissionPromptID> = []
+        let approver = Task {
+            while !Task.isCancelled {
+                if let id = await sink.pendingPermissionID(excluding: responded) {
+                    responded.insert(id)
+                    try? await engine.send(.respondToPermission(id: id, decision: .allow))
+                }
+                try? await Task.sleep(for: .milliseconds(300))
+            }
+        }
+        defer {
+            approver.cancel()
+            ingest.cancel()
+            Task { await engine.bus.unsubscribe(sub.id) }
+        }
+
+        await engine.restoreHistory(for: SessionTranscriptKey(
+            projectRoot: configuration.workspace,
+            namespace: adapter.historyNamespace,
+            sessionID: seedSessionID
+        ))
+        let historyReady = await poll(timeout: .seconds(5)) {
+            await sink.containsUserTurn(matching: configuration.prompt)
+        }
+        guard historyReady, let restoredTurnID = await sink.latestUserTurnID() else {
+            let events = await sink.snapshot()
+            await engine.shutdown(reason: .naturalExit)
+            throw LiveCursorHarnessError.historyLoadTimedOut(
+                events: events,
+                sessionID: seedSessionID,
+                version: version,
+                detail: "no restored user turn to edit"
+            )
+        }
+
+        try await engine.start(
+            adapter: adapter,
+            workspace: configuration.workspace,
+            resumeSessionID: seedSessionID
+        )
+        let ready = await poll(timeout: configuration.sessionReadyTimeout) {
+            if await sink.hasAuthenticationError() { return true }
+            return await sink.hasNonEmptySession()
+        }
+        if await sink.hasAuthenticationError() {
+            let events = await sink.snapshot()
+            await engine.shutdown(reason: .naturalExit)
+            throw LiveCursorHarnessError.authenticationRequired(events: events, version: version)
+        }
+        guard ready else {
+            let events = await sink.snapshot()
+            await engine.shutdown(reason: .naturalExit)
+            throw LiveCursorHarnessError.sessionStartTimedOut(events: events, version: version)
+        }
+
+        try await engine.send(.editAndResubmitLast(
+            targetEntryID: InternalEntryID.derive(fromAdapterTurnID: restoredTurnID),
+            text: editedPrompt,
+            attachments: []
+        ))
+        let sawEditedReply = await poll(timeout: configuration.assistantTextTimeout) {
+            await sink.containsFinalAssistantText(matching: expectedEditedSubstring)
+        }
+        let editedUserTurnObserved = await sink.containsUserTurn(matching: editedPrompt)
+        let editedText = await sink.latestFinalAssistant()?.text
+        let events = await sink.snapshot()
+        await engine.shutdown(reason: .naturalExit)
+
+        guard sawEditedReply else {
+            throw LiveCursorHarnessError.assistantTextTimedOut(
+                events: events,
+                sessionID: seedSessionID,
+                version: version,
+                modes: [:],
+                turn: "edit-and-resubmit"
+            )
+        }
+
+        return EditAfterLoadResult(priorSessionID: seedSessionID,
+                                   restoredTurnID: restoredTurnID,
+                                   editedAssistantText: editedText,
+                                   editedUserTurnObserved: editedUserTurnObserved,
+                                   cliVersion: version)
+    }
+
     private func runSeedTurn(
         configuration: Configuration,
         version: String?,
@@ -505,7 +636,7 @@ struct LiveCursorACPHarness {
         let sink = LiveCursorEventSink()
         let sub = await engine.bus.subscribe()
         let ingest = Task { await sink.ingest(sub.stream) }
-        var responded: Set<UUID> = []
+        var responded: Set<PermissionPromptID> = []
         let approver = Task {
             while !Task.isCancelled {
                 if let id = await sink.pendingPermissionID(excluding: responded) {
@@ -767,7 +898,14 @@ private actor LiveCursorEventSink {
         return nil
     }
 
-    func pendingPermissionID(excluding responded: Set<UUID>) -> UUID? {
+    func latestUserTurnID() -> AdapterTurnID? {
+        for event in events.reversed() {
+            if case .userTurn(let id, _) = event { return id }
+        }
+        return nil
+    }
+
+    func pendingPermissionID(excluding responded: Set<PermissionPromptID>) -> PermissionPromptID? {
         for event in events {
             if case .permissionRequest(let prompt) = event, !responded.contains(prompt.id) {
                 return prompt.id

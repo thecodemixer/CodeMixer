@@ -16,7 +16,7 @@ extension ACPEventDecoder {
         let summary = toolCall?["title"]?.stringValue
             ?? "Approve requested permissions"
         let prompt = PermissionPrompt(
-            id: random.uuid(),
+            id: PermissionPromptID(rawValue: random.uuid()),
             toolName: toolName,
             summary: summary,
             argumentsSummary: stringified(params) ?? "{}",

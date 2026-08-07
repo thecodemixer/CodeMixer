@@ -132,7 +132,7 @@ struct LiveACPHarness {
         let sub = await engine.bus.subscribe()
         let ingest = Task { await sink.ingest(sub.stream) }
 
-        var respondedPermissions: Set<UUID> = []
+        var respondedPermissions: Set<PermissionPromptID> = []
         let approver = Task {
             while !Task.isCancelled {
                 if let permissionID = await sink.pendingPermissionID(excluding: respondedPermissions) {
@@ -251,7 +251,7 @@ private actor LiveACPEventSink {
         return nil
     }
 
-    func pendingPermissionID(excluding responded: Set<UUID>) -> UUID? {
+    func pendingPermissionID(excluding responded: Set<PermissionPromptID>) -> PermissionPromptID? {
         for event in events {
             if case .permissionRequest(let prompt) = event, !responded.contains(prompt.id) {
                 return prompt.id

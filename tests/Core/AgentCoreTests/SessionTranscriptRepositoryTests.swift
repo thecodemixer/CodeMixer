@@ -12,7 +12,7 @@ struct SessionTranscriptRepositoryTests {
         let clock = FakeClock(now: Date(timeIntervalSince1970: 1_700_000_000))
         let key = makeKey("recreation")
         let first = makeRepository(fileSystem: fileSystem, clock: clock, ownerPID: 101)
-        try await first.record(.userTurn(id: "user-1", text: "Persistent prompt"),
+        try await first.record(.userTurn(id: AdapterTurnID(rawValue: "user-1"), text: "Persistent prompt"),
                                for: key)
         clock.advance(by: .seconds(1))
         try await first.record(.assistantText(id: "assistant-1",
@@ -50,16 +50,16 @@ struct SessionTranscriptRepositoryTests {
         let key = makeKey("truncate")
         let first = makeRepository(fileSystem: fileSystem, clock: clock, ownerPID: 201)
         try await first.record([
-            .userTurn(id: "user-1", text: "First"),
+            .userTurn(id: AdapterTurnID(rawValue: "user-1"), text: "First"),
             .assistantText(id: "assistant-1",
                            blockID: "block-1",
                            text: "Reply",
                            isFinal: true),
-            .userTurn(id: "user-2", text: "Second")
+            .userTurn(id: AdapterTurnID(rawValue: "user-2"), text: "Second")
         ], for: key)
 
-        try await first.truncate(afterUserTurnID: "user-1", for: key)
-        try await first.replaceUserTurn(id: "user-1", text: "Revised", for: key)
+        try await first.truncate(afterUserTurnID: AdapterTurnID(rawValue: "user-1"), for: key)
+        try await first.replaceUserTurn(id: AdapterTurnID(rawValue: "user-1"), text: "Revised", for: key)
         try await first.shutdown()
 
         let second = makeRepository(fileSystem: fileSystem, clock: clock, ownerPID: 202)
@@ -87,7 +87,7 @@ struct SessionTranscriptRepositoryTests {
         _ = try await second.transcript(for: key)
 
         do {
-            try await second.record(.userTurn(id: "user-1", text: "Blocked"),
+            try await second.record(.userTurn(id: AdapterTurnID(rawValue: "user-1"), text: "Blocked"),
                                     for: key)
             Issue.record("Expected locked repository error")
         } catch let error as SessionTranscriptRepositoryError {
@@ -105,8 +105,8 @@ struct SessionTranscriptRepositoryTests {
         let key = makeKey("rebuild")
         let recordedAt = Date(timeIntervalSince1970: 1_700_000_000)
         try store.append([
-            .appendUser(id: "user-1", text: "Recovered title", recordedAt: recordedAt),
-            .appendUser(id: "user-2", text: "Follow-up", recordedAt: recordedAt)
+            .appendUser(id: AdapterTurnID(rawValue: "user-1"), text: "Recovered title", recordedAt: recordedAt),
+            .appendUser(id: AdapterTurnID(rawValue: "user-2"), text: "Follow-up", recordedAt: recordedAt)
         ], to: key)
         try fileSystem.writeAtomically(
             Data("invalid index".utf8),
@@ -200,7 +200,7 @@ struct SessionTranscriptRepositoryTests {
                 events: (0 ..< turnsPerSession).flatMap { turnIndex in
                     [
                         AgentEvent.userTurn(
-                            id: "user-\(sessionIndex)-\(turnIndex)",
+                            id: AdapterTurnID(rawValue: "user-\(sessionIndex)-\(turnIndex)"),
                             text: "Prompt \(sessionIndex)-\(turnIndex)"
                         ),
                         .assistantText(

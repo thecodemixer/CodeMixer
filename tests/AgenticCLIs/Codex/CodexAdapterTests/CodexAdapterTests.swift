@@ -345,6 +345,50 @@ struct CodexAdapterTests {
         #expect(secondID == finalID)
     }
 
+    @Test("command output delta carries the same tool call id as its toolStart")
+    func commandOutputDeltaSharesToolStartID() async throws {
+        let adapter = CodexAdapter(
+            environment: FakeEnvironment(),
+            fileSystem: InMemoryFileSystem(),
+            clock: FakeClock(),
+            random: FakeRandomSource()
+        )
+        let recorder = DataRecorder()
+        var outputContinuation: AsyncStream<Data>.Continuation!
+        let output = AsyncStream<Data> { outputContinuation = $0 }
+        let stream = adapter.makeEventStream(inputs: AgentInputs(
+            outputBytes: output,
+            writeBytes: { await recorder.append($0) },
+            terminal: nil,
+            hookSocket: nil,
+            workspace: TestPaths.underTemporary("project"),
+            sessionID: AsyncStream { $0.finish() }
+        ))
+        var iterator = stream.makeAsyncIterator()
+
+        outputContinuation.yield(Self.frame(
+            #"{"method":"item/started","params":{"item":{"id":"item_5","type":"commandExecution","command":"pwd"}}}"#
+        ))
+        guard case .toolStart(let startID, _, _, _) = await iterator.next() else {
+            Issue.record("Expected toolStart")
+            return
+        }
+
+        outputContinuation.yield(Self.frame(
+            #"{"method":"item/commandExecution/outputDelta","params":{"itemId":"item_5","delta":"/tmp/ws\n"}}"#
+        ))
+        guard case .toolProgress(let progressID, .bashLine(let line)) = await iterator.next() else {
+            Issue.record("Expected toolProgress")
+            return
+        }
+
+        // Codex names tool calls with item ids, not UUIDs. The ids must be
+        // equal or the UI has no card to attach the output to.
+        #expect(startID == ToolCallID(rawValue: "item_5"))
+        #expect(progressID == startID)
+        #expect(line == "/tmp/ws")
+    }
+
     @Test("Allow always auto-approves the matching request for this session")
     func allowAlwaysAutoApproves() async throws {
         let adapter = CodexAdapter(

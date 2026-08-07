@@ -24,7 +24,7 @@ enum WireAgentErrorCoding {
         case .authenticationRequired(let agentID):
             context[.agentID] = agentID.rawValue
         case .staleEditTarget(let targetID):
-            context[.targetID] = targetID.uuidString
+            context[.targetID] = targetID.rawValue.uuidString
         case .unsupportedCommand(let name):
             context[.name] = name
         case .gitCheckoutFailed(let path, let detail):
@@ -37,7 +37,7 @@ enum WireAgentErrorCoding {
         case .attachmentNotFound(let id):
             context[.id] = id
         case .permissionTimeout(let promptID, let action):
-            context[.promptID] = promptID.uuidString
+            context[.promptID] = promptID.rawValue.uuidString
             context[.action] = action.wireValue
         case .historyWriteFailed(let path, let detail),
              .historyLoadFailed(let path, let detail):
@@ -83,10 +83,10 @@ enum WireAgentErrorCoding {
             let agentID = AgentID(rawValue: ctx[.agentID] ?? "") ?? .other
             return .authenticationRequired(agentID: agentID)
         case .staleEditTarget:
-            guard let targetID = UUID(uuidString: ctx[.targetID] ?? "") else {
+            guard let rawTargetID = UUID(uuidString: ctx[.targetID] ?? "") else {
                 return invalidContext(code, field: .targetID)
             }
-            return .staleEditTarget(targetID: targetID)
+            return .staleEditTarget(targetID: InternalEntryID(rawValue: rawTargetID))
         case .unsupportedCommand:
             return .unsupportedCommand(name: ctx[.name] ?? wire.message)
         case .gitCheckoutFailed:
@@ -110,7 +110,8 @@ enum WireAgentErrorCoding {
             guard let action = decodePermissionDecision(ctx[.action] ?? "") else {
                 return invalidContext(code, field: .action)
             }
-            return .permissionTimeout(promptID: promptID, action: action)
+            return .permissionTimeout(promptID: PermissionPromptID(rawValue: promptID),
+                                      action: action)
         case .historyWriteFailed:
             return .historyWriteFailed(path: ctx[.path] ?? "",
                                        detail: ctx[.detail] ?? wire.message)

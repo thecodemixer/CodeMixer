@@ -145,4 +145,33 @@ struct LiveCursorACPIntegrationTests {
             "live Cursor ACP session/load: session=\(result.priorSessionID) historyUser=\(result.sawPriorUserTurn) historyAssistant=\(result.sawPriorAssistantFinal)"
         )
     }
+
+    @Test("editing a restored turn resubmits it to a superseded Cursor session")
+    func liveEditAndResubmitAfterLoad() async throws {
+        guard LiveCursorACPHarness.isEnabled() else { return }
+        if let reason = LiveCursorACPHarness.prerequisiteFailure() {
+            Issue.record("\(reason)")
+            return
+        }
+        guard let configuration = LiveCursorACPHarness.defaultConfiguration() else {
+            Issue.record("missing Cursor binary")
+            return
+        }
+
+        let harness = LiveCursorACPHarness()
+        let result: LiveCursorACPHarness.EditAfterLoadResult
+        do {
+            result = try await harness.runEditAndResubmitAfterLoad(configuration)
+        } catch {
+            Issue.record("\(error)")
+            return
+        }
+
+        #expect(result.editedUserTurnObserved)
+        #expect(result.editedAssistantText?
+            .localizedCaseInsensitiveContains("codemixer-cursor-acp-edited-pong") == true)
+        print(
+            "live Cursor ACP edit-and-resubmit: session=\(result.priorSessionID) restoredTurn=\(result.restoredTurnID)"
+        )
+    }
 }

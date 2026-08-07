@@ -18,7 +18,7 @@ struct ConformanceFixturesTests {
     func stopWithLastMessage() throws {
         let url = fixturesRoot.appendingPathComponent("hooks/stop-with-last-message.json")
         let data = try Data(contentsOf: url)
-        let request = HookRequest(id: UUID(), eventName: "Stop", jsonPayload: data)
+        let request = HookRequest(id: HookRequestID(rawValue: UUID()), eventName: "Stop", jsonPayload: data)
         let events = decoder.events(from: request)
 
         #expect(events.contains { if case .assistantText(_, _, let t, let f) = $0 { return f && t == "Fixture reply." }; return false })

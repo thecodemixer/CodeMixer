@@ -56,13 +56,13 @@ struct EngineViewModelNavigatorTests {
         #expect(vm.messages.count == 1)
 
         // First real `.userTurn` — adopts the engine id, no new bubble.
-        await bus.publish(.userTurn(id: engineID.uuidString, text: "hi"))
+        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: engineID.uuidString), text: "hi"))
         await drain()
         #expect(vm.messages.count == 1)
-        #expect(vm.lastUserBubbleID == engineID)
+        #expect(vm.lastUserEntryID == InternalEntryID(rawValue: engineID))
 
         // Second echo (the Claude hook) for the same turn — dropped.
-        await bus.publish(.userTurn(id: hookID.uuidString, text: "hi"))
+        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: hookID.uuidString), text: "hi"))
         await drain()
         #expect(vm.messages.count == 1)
 
@@ -104,7 +104,7 @@ struct EngineViewModelNavigatorTests {
         defer { vm.unsubscribe() }
 
         vm.sendPrompt("hi")
-        await bus.publish(.userTurn(id: UUID().uuidString, text: "a different message"))
+        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: UUID().uuidString), text: "a different message"))
         await drain()
 
         #expect(vm.messages.count == 2)
@@ -566,7 +566,7 @@ struct EngineViewModelNavigatorTests {
         #expect(vm.isSwitchingSession)
         #expect(vm.isComposerLockedForSessionResume)
 
-        await bus.publish(.userTurn(id: UUID().uuidString, text: "historical"))
+        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: UUID().uuidString), text: "historical"))
         await bus.publish(.sessionHistoryRestored(sessionID: "sess-42"))
         await drain()
 

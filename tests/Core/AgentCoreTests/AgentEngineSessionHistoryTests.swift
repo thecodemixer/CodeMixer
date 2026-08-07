@@ -22,7 +22,7 @@ struct AgentEngineSessionHistoryTests {
             sessionID: "session-1"
         )
         try await engine.transcriptRepository.record(
-            .userTurn(id: "user-1", text: "Restored prompt"),
+            .userTurn(id: AdapterTurnID(rawValue: "user-1"), text: "Restored prompt"),
             for: key
         )
 

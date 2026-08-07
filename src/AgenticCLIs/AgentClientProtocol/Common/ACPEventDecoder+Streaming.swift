@@ -175,7 +175,7 @@ extension ACPEventDecoder {
             let event: AgentEvent
             switch role.stored {
             case .user:
-                event = .userTurn(id: random.uuid().uuidString, text: text)
+                event = .userTurn(id: AdapterTurnID(rawValue: random.uuid().uuidString), text: text)
             case .thinking:
                 let id = random.uuid()
                 await recordBackgroundSessionEvents(.init(
@@ -255,14 +255,14 @@ extension ACPEventDecoder {
                 sessionID: sessionID,
                 events: [
                     .toolStart(
-                        id: toolCallID,
+                        id: ToolCallID(rawValue: toolCallID),
                         name: name,
                         input: ToolInput(summary: name,
                                          jsonPayload: meta?.inputJSON ?? stringified(update)),
                         startedAt: clock.now()
                     ),
                     .toolEnd(
-                        id: toolCallID,
+                        id: ToolCallID(rawValue: toolCallID),
                         success: status != "failed",
                         output: ToolOutput(summary: outputSummary,
                                            errorMessage: status == "failed"
@@ -343,7 +343,7 @@ extension ACPEventDecoder {
         state.rememberToolStart(id: toolCallID, name: title, inputJSON: inputJSON)
         return Batch(events: [
             .toolStart(
-                id: toolCallID,
+                id: ToolCallID(rawValue: toolCallID),
                 name: title,
                 input: ToolInput(
                     summary: title,
@@ -375,7 +375,7 @@ extension ACPEventDecoder {
             _ = state.takeToolMeta(id: toolCallID)
             return Batch(events: [
                 .toolEnd(
-                    id: toolCallID,
+                    id: ToolCallID(rawValue: toolCallID),
                     success: success,
                     output: ToolOutput(summary: outputSummary),
                     durationMS: 0
@@ -383,9 +383,12 @@ extension ACPEventDecoder {
             ])
         }
         if let content = update["content"]?.stringValue, !content.isEmpty {
-            let callID = state.itemUUID(for: toolCallID, random: random)
+            // Keyed on the ACP tool call id so this folds onto its `toolStart`.
+            // `itemUUID` mints a per-item UUID for block ids and would never
+            // match a tool call.
             return Batch(events: [
-                .toolProgress(callID: callID, progress: .bashLine(content)),
+                .toolProgress(callID: ToolCallID(rawValue: toolCallID),
+                              progress: .bashLine(content)),
             ])
         }
         return Batch()

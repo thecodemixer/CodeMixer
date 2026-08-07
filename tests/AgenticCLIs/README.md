@@ -241,7 +241,12 @@ swift build --product fake-acp
 
 Scenarios are selected with `CODEMIXER_TWIN_SCENARIO` (`text`, `permission`,
 `fsRead`, `auth`, `authFail`, `resume`, `dashboard`, `backgroundPermission`,
-`degradedNoDashboard`, `degradedArchived`).
+`degradedNoDashboard`, `degradedArchived`, `echo`).
+
+`echo` replies with `echo:<prompt text>` rather than a canned string. Use it
+when a test has to prove *which* prompt reached the agent — edit-and-resubmit
+is the motivating case, since its failure mode is a revised prompt that is
+written but never arrives.
 
 ```bash
 # Always-on unit coverage
@@ -354,3 +359,25 @@ modes; reply `Hello from fake-custom-acp.`). It is distinct from `fake-acp`
 | `CODEMIXER_LIVE_ACP_BIN` / `CODEMIXER_CUSTOM_ACP_BIN` | Yes (live) | ACP executable path |
 | `CODEMIXER_LIVE_MIGRATION_PIPELINE=1` | For migration reflection | Opt in to the multi-file Codemixer reflection suite |
 | `CODEMIXER_LIVE_MIGRATION_HANDSHAKE=1` | For the handshake probe | Opt in to the `initialize`-only A2UI capability check (implied by `…_PIPELINE=1`) |
+
+---
+
+## Edit-and-resubmit coverage
+
+Editing a restored turn (the composer's pencil) is the one flow that exercises
+the stale-edit guard across a process boundary: the reopened engine never minted
+the turn id, so it has to adopt the `AdapterTurnID` the journal replayed. Every
+adapter reaches it through the same `AgentCommand.editAndResubmitLast` path, so
+the deterministic ACP test is the regression guard and the live ones confirm the
+real CLIs behave.
+
+| Suite | Gate | Proves |
+| --- | --- | --- |
+| `FakeACPIntegrationTests` (`editAndResubmitAfterRestoreReachesAgent`) | Always on | Guard survives restore; respawned agent receives the **revised** text (via the `echo` scenario) |
+| `LiveClaudeIntegrationTests` (`editAndResubmitAfterResume`) | `CODEMIXER_LIVE_CLAUDE=1` | PTY respawn writes the revised prompt after the TUI's input row is live |
+| `LiveCodexIntegrationTests` (`editAndResubmitAfterResume`) | `CODEMIXER_LIVE_CODEX=1` | Superseded thread; fresh thread answers the revised prompt |
+| `LiveCursorACPIntegrationTests` (`liveEditAndResubmitAfterLoad`) | `CODEMIXER_LIVE_CURSOR_ACP=1` | Same, over Cursor's ACP `session/load` path |
+
+Claude is the only adapter that can truncate its own transcript; Codex and the
+ACP CLIs cannot, so the engine supersedes the session and replays the revised
+prompt into a fresh one. Both branches are covered above.

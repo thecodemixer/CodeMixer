@@ -14,7 +14,7 @@ public final class RecordingMockAdapter: AgentAdapter, @unchecked Sendable {
     public enum Recorded: Sendable, Equatable {
         case userPrompt(String)
         case cancel
-        case permissionResponse(PermissionDecision, promptID: UUID)
+        case permissionResponse(PermissionDecision, promptID: PermissionPromptID)
         case a2uiAction(surfaceID: String, eventName: String)
         case a2uiClientError(surfaceID: String, code: String)
     }

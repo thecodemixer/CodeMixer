@@ -12,7 +12,7 @@ public enum AgentCommand: Sendable, Codable, Hashable {
 
     case sendPrompt(text: String, attachments: [AttachmentRef])
     case cancelCurrentTurn
-    case editAndResubmitLast(targetBubbleID: UUID, text: String, attachments: [AttachmentRef])
+    case editAndResubmitLast(targetEntryID: InternalEntryID, text: String, attachments: [AttachmentRef])
 
     // MARK: Slash commands (typed, not stringified)
 
@@ -25,7 +25,7 @@ public enum AgentCommand: Sendable, Codable, Hashable {
 
     // MARK: Permission prompts
 
-    case respondToPermission(id: UUID, decision: PermissionDecision)
+    case respondToPermission(id: PermissionPromptID, decision: PermissionDecision)
 
     // MARK: Session lifecycle
 

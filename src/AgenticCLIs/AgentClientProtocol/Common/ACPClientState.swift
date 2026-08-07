@@ -74,7 +74,7 @@ public final class ACPClientState: @unchecked Sendable {
     var resumeSessionSupported = false
     var listSessionsSupported = false
     var queuedPrompts: [String] = []
-    var pendingApprovals: [UUID: PendingApproval] = [:]
+    var pendingApprovals: [PermissionPromptID: PendingApproval] = [:]
     var autoApprovalSignatures: Set<String> = []
     var itemIDs: [String: UUID] = [:]
     var assistantTextByItemID: [String: String] = [:]

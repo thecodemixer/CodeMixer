@@ -56,6 +56,11 @@ private let _idleCheck = DaemonDefaults.idleCheckInterval
 private let _idleExit = DaemonDefaults.idleExitAfterChecks
 private let _idlePhrase = ActivityTiming.idlePhrase
 private let _thinkingPhrase = ActivityTiming.thinkingPhrase
+private let _promptReadinessPollInterval = ActivityTiming.promptReadinessPollInterval
+private func _promptWriteSettleDelay(_ adapter: some AgentAdapter) -> Duration {
+    adapter.promptWriteSettleDelay
+}
+private let _derivedInternalEntryID = InternalEntryID.derive(fromAdapterTurnID: AdapterTurnID(rawValue: "turn-1"))
 private let _modelCatalogProbeTimeout = ModelCatalogTiming.probeTimeout
 private let _bonjourType = RemoteDefaults.bonjourServiceType
 private let _bonjourName = RemoteDefaults.bonjourServiceName
@@ -64,7 +69,8 @@ private let _p12Name = AppSupportPaths.remoteServerP12FileName
 
 // PermissionPrompt
 private let _pp = PermissionPrompt(
-    id: UUID(), toolName: "T", summary: "S", argumentsSummary: "A",
+    id: PermissionPromptID(rawValue: UUID()),
+    toolName: "T", summary: "S", argumentsSummary: "A",
     requestedAt: Date()
 )
 
@@ -104,13 +110,15 @@ private let _ss = SessionSummary(
 // HookSocketHandle — init declared; stream type checked
 private func _hookSocketHandleInit(
     stream: AsyncStream<HookRequest>,
-    respond: @escaping @Sendable (UUID, Data) async -> Void
+    respond: @escaping @Sendable (HookRequestID, Data) async -> Void
 ) -> HookSocketHandle {
     HookSocketHandle(incoming: stream, respond: respond)
 }
 
 // HookRequest
-private let _hookReq = HookRequest(id: UUID(), eventName: "Stop", jsonPayload: Data())
+private let _hookReq = HookRequest(id: HookRequestID(rawValue: UUID()),
+                                   eventName: "Stop",
+                                   jsonPayload: Data())
 
 // FSEvent
 private let _fsEvent = FSEvent(
@@ -234,7 +242,7 @@ private let _networkOptionsMetadata = NetworkOptions.webSocket(authorizationBear
 // Verified by calling the default (no-op) extension through a protocol existential.
 private func _truncateTranscript(adapter: any AgentAdapter) async {
     let ws = URL(fileURLWithPath: "/tmp")
-    let _: Bool = await adapter.truncateTranscript(afterUserTurnID: "id", sessionID: "sid", workspace: ws)
+    let _: Bool = await adapter.truncateTranscript(afterUserTurnID: AdapterTurnID(rawValue: "id"), sessionID: "sid", workspace: ws)
 }
 
 // subagentTranscriptURLs — ClaudeTranscriptTailer (verified via type-check only;
@@ -616,6 +624,7 @@ private func _a2uiPropsMembers() {
 // ActivitySubstate
 // ActivityTiming
 // AdapterRegistry
+// AdapterTurnID
 // AgentAdapter
 // AgentCapabilities
 // AgentClock
@@ -779,6 +788,7 @@ private func _a2uiPropsMembers() {
 // HistoryImportState
 // HookCommand
 // HookRequest
+// HookRequestID
 // HookServer
 // HookServerError
 // HookSink
@@ -790,6 +800,7 @@ private func _a2uiPropsMembers() {
 // InstallError
 // IntentReveal
 // InteractionCoverage
+// InternalEntryID
 // Item
 // ItemOutcome
 // JSONLFraming
@@ -838,6 +849,7 @@ private func _a2uiPropsMembers() {
 // PermissionOption
 // PermissionOptionPayload
 // PermissionPrompt
+// PermissionPromptID
 // PermissionPromptPayload
 // PermissionResponseDelivery
 // Pill
@@ -936,6 +948,7 @@ private func _a2uiPropsMembers() {
 // Theme
 // ThinkingEffort
 // Tick
+// ToolCallID
 // ToolInput
 // ToolInputPayload
 // ToolOutput
@@ -1174,6 +1187,7 @@ private func _a2uiPropsMembers() {
 // deletions
 // densityMode
 // depth
+// derive
 // description
 // design
 // detail
@@ -1200,6 +1214,7 @@ private func _a2uiPropsMembers() {
 // dropdownRadius
 // durationMS
 // echo
+// echoReplyPrefix
 // editAndResubmit
 // editDraft
 // elapsed
@@ -1627,9 +1642,11 @@ private func _a2uiPropsMembers() {
 // projects
 // prominentName
 // prompt
+// promptReadinessPollInterval
 // promptReady
 // promptText
 // promptWithShortcutFooter
+// promptWriteSettleDelay
 // prose
 // ptyChunks
 // ptyReadQueueLabel
@@ -2038,7 +2055,6 @@ private func _a2uiPropsMembers() {
 // workingDirectory
 // workingPhrase
 // workspace
-// workspaceURL
 // workspaceAdapterStateFileName
 // workspaceAdapterStateURL
 // workspaceFileName
@@ -2048,6 +2064,7 @@ private func _a2uiPropsMembers() {
 // workspaceStateURL
 // workspaceTrust
 // workspaceTrustToolName
+// workspaceURL
 // workspacesFileName
 // workspacesURL
 // write

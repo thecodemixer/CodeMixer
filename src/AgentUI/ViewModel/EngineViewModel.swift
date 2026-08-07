@@ -280,7 +280,7 @@ public final class EngineViewModel {
 
     /// UUID of the last user-turn bubble, extracted from the engine event id.
     /// Used by the edit-and-resubmit affordance.
-    public internal(set) var lastUserBubbleID: UUID?
+    public internal(set) var lastUserEntryID: InternalEntryID?
 
     /// When non-nil, `PromptComposerView` should pre-fill its draft text and
     /// clear this field after consuming it.
@@ -549,7 +549,7 @@ public extension EngineViewModel {
         /// An ordering marker for a tool call. The card content is read live
         /// from `activeToolCalls` by `callID`, so the entry can keep mutating
         /// (progress, completion) while its position in the turn stays fixed.
-        case toolCall(callID: String)
+        case toolCall(callID: ToolCallID)
         /// Codemixer-owned history marker for an agent-affecting client intent
         /// (mode, slash, permission). Live session + export only.
         case clientAction(ClientAction)
@@ -572,7 +572,7 @@ public extension EngineViewModel {
             // torn down and rebuilt.
             case .thinkingChunk(let id, _):     return "thinking-\(id)"
             case .thinkingComplete(let id, _, _):  return "thinking-\(id)"
-            case .toolCall(let id):             return "tool-\(id)"
+            case .toolCall(let id):             return "tool-\(id.rawValue)"
             case .clientAction(let action):     return "action-\(action.id)"
             case .a2uiSurface(let surfaceID):   return "a2ui-\(surfaceID)"
             }
@@ -593,7 +593,7 @@ public extension EngineViewModel {
     }
 
     struct ToolCallEntry: Sendable, Hashable, Identifiable {
-        public let id: String
+        public let id: ToolCallID
         public let name: String
         public let input: ToolInput
         public var finished: Bool

@@ -54,7 +54,7 @@ extension CodexEventDecoder {
             summary = params["reason"]?.stringValue ?? "Approve requested permissions"
         }
         return PermissionPrompt(
-            id: random.uuid(),
+            id: PermissionPromptID(rawValue: random.uuid()),
             toolName: toolName,
             summary: summary,
             argumentsSummary: jsonString(params) ?? "{}",

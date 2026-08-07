@@ -109,7 +109,9 @@ struct CodexSessionCatalogImporter: Sendable {
             let isFallbackUser = record.payload["type"]?.stringValue == "user_message"
                 && !hasResponseUser
             let text = record.payload["message"]?.stringValue ?? ""
-            return isFallbackUser && !text.isEmpty ? [.userTurn(id: recordID, text: text)] : []
+            return isFallbackUser && !text.isEmpty
+                ? [.userTurn(id: AdapterTurnID(rawValue: recordID), text: text)]
+                : []
         }
         guard record.type == "response_item" else { return [] }
         switch record.payload["type"]?.stringValue {
@@ -127,14 +129,14 @@ struct CodexSessionCatalogImporter: Sendable {
             let id = record.payload["call_id"]?.stringValue ?? recordID
             let name = record.payload["name"]?.stringValue ?? "Tool"
             let arguments = record.payload["arguments"]?.stringValue ?? "{}"
-            return [.toolStart(id: id,
+            return [.toolStart(id: ToolCallID(rawValue: id),
                                name: name,
                                input: ToolInput(summary: name, jsonPayload: arguments),
                                startedAt: record.date ?? .distantPast)]
         case "function_call_output":
             let id = record.payload["call_id"]?.stringValue ?? recordID
             let result = record.payload["output"]?.stringValue ?? "Tool completed"
-            return [.toolEnd(id: id,
+            return [.toolEnd(id: ToolCallID(rawValue: id),
                              success: true,
                              output: ToolOutput(summary: result),
                              durationMS: 0)]
@@ -149,7 +151,7 @@ struct CodexSessionCatalogImporter: Sendable {
         guard !text.isEmpty else { return [] }
         switch payload["role"]?.stringValue {
         case "user":
-            return [.userTurn(id: recordID, text: text)]
+            return [.userTurn(id: AdapterTurnID(rawValue: recordID), text: text)]
         case "assistant":
             return [.assistantText(id: recordID,
                                    blockID: recordID,
