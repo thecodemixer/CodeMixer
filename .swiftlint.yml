@@ -88,6 +88,18 @@ custom_rules:
     message: "Inject RandomSource seam instead of calling UUID() directly."
     severity: warning
 
+  conformances_on_declaration_line:
+    name: "Conformances On Declaration Line"
+    # SwiftFormat wraps a conformance list past --maxwidth but never unwraps one,
+    # so a hand-wrapped list survives `swiftformat` untouched. Catch it here.
+    regex: '\b(?:struct|class|actor|enum|protocol|extension)\s+\w+(?:<[^>\n]*>)?\s*:[ \t]*$'
+    message: "Keep the conformance list on the declaration line; wrap it only when the line exceeds 120 columns."
+    excluded_match_kinds:
+      - comment
+      - doccomment
+      - string
+    severity: warning
+
   no_userdefaults:
     name: "No UserDefaults"
     regex: 'UserDefaults\.standard'

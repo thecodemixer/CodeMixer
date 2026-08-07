@@ -9,6 +9,10 @@
 --wrapparameters after-first
 --wrapcollections after-first
 --closingparen same-line
+# SwiftFormat has no inheritance-clause equivalent of the options above: it will
+# wrap a conformance list that exceeds --maxwidth, but it never unwraps one that
+# fits. The `conformances_on_declaration_line` custom rule in .swiftlint.yml
+# catches hand-wrapped lists that this formatter would leave alone.
 
 # Spacing
 --commas always
