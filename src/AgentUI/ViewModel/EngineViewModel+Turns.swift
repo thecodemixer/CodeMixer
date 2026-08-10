@@ -178,7 +178,7 @@ public extension EngineViewModel {
     }
 
     /// True once at least one `sessionPhaseChanged` has tagged this session —
-    /// the rail is phase-native (Custom ACP / migration tool). Content-driven:
+    /// the rail is phase-native (Custom ACP). Content-driven:
     /// absent any phase event, this is `false` and the rail falls back to
     /// per-turn.
     var hasPhaseData: Bool {
@@ -232,7 +232,7 @@ public extension EngineViewModel {
     ///
     /// A real user turn appears under every phase its message range overlaps
     /// (so clicking Migrating still shows a pipeline turn that started in Plan).
-    /// Migration-tool sessions often have only a synthetic leading turn — those
+    /// Custom ACP file sessions often have only a synthetic leading turn — those
     /// are clipped into a phase-local row from the messages inside the span so
     /// expanding a phase is never empty when that phase produced work.
     func turns(forPhaseID id: String) -> [ConversationTurn] {
@@ -365,7 +365,7 @@ public extension EngineViewModel {
     /// 0...1 fill fraction for the rail's edge hairline, positioned by the
     /// current phase's *group* (Plan/Migrate/Review/Fix/Verify) rather than
     /// the vendor's finer-grained status — keeps the hairline agent-agnostic
-    /// instead of overfitting to one migration tool's status count.
+    /// instead of overfitting to one Custom ACP tool's status count.
     var currentPhaseProgressFraction: Double? {
         guard let group = phaseMarkers.last?.phase.group else { return nil }
         let order: [SessionPhase.Group] = [.plan, .migrate, .review, .fix, .verify]
@@ -421,7 +421,7 @@ public extension EngineViewModel {
     // MARK: - Private
 
     /// Clips messages inside a phase span into one rail row when the session
-    /// has no per-phase user prompts (Custom ACP / migration tool).
+    /// has no per-phase user prompts (Custom ACP).
     private func makePhaseLocalTurn(phaseID: String,
                                     phase: SessionPhase?,
                                     span: Range<Int>) -> ConversationTurn? {

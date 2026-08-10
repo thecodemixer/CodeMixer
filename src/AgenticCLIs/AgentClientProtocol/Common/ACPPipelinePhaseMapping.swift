@@ -2,7 +2,7 @@ import Foundation
 
 import AgentCore
 
-/// Maps the migration tool's file-level pipeline status string — delivered
+/// Maps a Custom ACP tool's file-level pipeline status string — delivered
 /// over the wire as `codemixer.dev/phase_update` — onto the agent-agnostic
 /// `SessionPhase` the chat workbench's index rail groups by. An explicit
 /// table (not a hash of the vendor string) so an unrecognized status

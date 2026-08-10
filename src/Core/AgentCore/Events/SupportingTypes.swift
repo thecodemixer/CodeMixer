@@ -63,7 +63,7 @@ public struct SlashCommand: Sendable, Hashable, Identifiable {
 }
 
 /// A file-level pipeline phase, bridged agent-agnostically from a Custom ACP
-/// migration tool. Always scoped to the file session that owns it — run/
+/// tool. Always scoped to the file session that owns it — run/
 /// overall status is not modeled here; it stays in the ACP overview
 /// dashboard. `group` buckets the vendor's finer-grained status into the
 /// rail's ordered headers (Plan / Migrate / Review / Fix / Verify).

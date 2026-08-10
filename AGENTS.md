@@ -391,7 +391,7 @@ The product surface is the typed alphabet — `AgentCommand` in, `AgentEvent` ou
 | `scripts/swift-test.swift` (and `--filter …`) for unit/integration; `--allow-live` only for intentional live harnesses | Raw `swift test` while leftover `CODEMIXER_LIVE_*=1` / `MIGRATION_LIVE=1` are exported (looks like a hang) |
 | `AgentEngine.send(.submitA2UIInteraction(…))` / `.reportA2UIClientError(…)` / other commands | Click `A2UISurfaceView` buttons in the GUI to prove the trust boundary |
 | Assert adapter encode bytes / bus events / `SilentDiagnostics` / transport writes | Treat a screenshot or manual GUI smoke as the pass criterion |
-| Live harnesses under `tests/AgenticCLIs/**` (`Live*Harness`, Custom/Cursor ACP, migration ACP) | Launch Xcode GUI and drive the workbench by hand (or via computer-use) as the primary test |
+| Live harnesses under `tests/AgenticCLIs/**` (`Live*Harness`, Custom/Cursor ACP, external Custom ACP) | Launch Xcode GUI and drive the workbench by hand (or via computer-use) as the primary test |
 | Cover A2UI decode/encode/resolver/engine in `A2UICoreTests`, `ACP*Tests`, `AgentEngineA2UICommandTests` | Add heuristics or one-off GUI probes that bypass `AgentCommand` |
 
 GUI launch (`Codemixer.xcodeproj`) remains for **visual** checks only — layout, Theme tokens, a11y labels — after the API path already proves behaviour. If a behaviour cannot be exercised via `AgentCommand`/`AgentEvent`, that is a product gap: add the command/event (or adapter encode hook), then test it.

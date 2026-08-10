@@ -463,7 +463,7 @@ public final class EngineViewModel {
         messages = fixture.messages
         activeToolCalls = fixture.toolCalls
         phaseMarkers = fixture.phaseMarkers
-        changedFiles = [ChangedFile(relativePath: "migration-tool/src/orders.ts")]
+        changedFiles = [ChangedFile(relativePath: "src/orders.ts")]
         sessionID = "file-orders-ts"
         status = .idle
         activity = .idle

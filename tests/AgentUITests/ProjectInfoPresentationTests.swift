@@ -67,10 +67,10 @@ struct ProjectInfoPresentationTests {
     @Test("A custom ACP project surfaces every launch field")
     func customProject() {
         let ref = CustomAgentRef(
-            id: "migration",
+            id: "custom-acp",
             displayName: "Mixer",
             transport: .agentClientProtocol,
-            executablePath: "/opt/migration-acp",
+            executablePath: "/opt/custom-acp",
             arguments: ["acp", "--cwd", "/My Projects/api"]
         )
         let info = ProjectInfoPresentation.make(
@@ -81,7 +81,7 @@ struct ProjectInfoPresentationTests {
         )
         #expect(info.categoryLabel == "Custom")
         #expect(info.detailRows == [
-            .init(label: "Executable path", value: "/opt/migration-acp"),
+            .init(label: "Executable path", value: "/opt/custom-acp"),
             .init(label: "Arguments", value: "acp --cwd \"/My Projects/api\""),
             .init(label: "Transport", value: "Agent Client Protocol"),
         ])

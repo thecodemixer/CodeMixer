@@ -10,7 +10,7 @@ struct ACPEventDecoderA2UITests {
 
     @Test("MIME-typed A2UI resource in agent_message_chunk becomes a2uiBatch")
     func decodesValidResource() async throws {
-        let fixture = ACPDecoderFixture(customAgentID: "migration-acp")
+        let fixture = ACPDecoderFixture(customAgentID: "custom-acp")
         _ = await fixture.openSession(id: "s1")
 
         let payload: JSONValue = .array([
@@ -47,7 +47,7 @@ struct ACPEventDecoderA2UITests {
             return
         }
         #expect(a2ui.resourceURI == "a2ui://migration/review/x")
-        #expect(a2ui.agentID == "migration-acp")
+        #expect(a2ui.agentID == "custom-acp")
         #expect(a2ui.items.count == 1)
         #expect(a2ui.items[0].message != nil)
         #expect(a2ui.items[0].validationError == nil)

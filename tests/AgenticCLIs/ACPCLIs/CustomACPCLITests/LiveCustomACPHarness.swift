@@ -8,9 +8,9 @@ import AgentProtocol
 ///
 /// Gate: `CODEMIXER_LIVE_CUSTOM_ACP=1` and `CODEMIXER_LIVE_ACP_BIN=/path/to/agent`.
 ///
-/// Multi-file migration reflection (dashboard + file sessions + dual-review → fixer):
+/// Multi-file Custom ACP reflection (dashboard + file sessions + dual-review → fixer):
 ///   CODEMIXER_LIVE_CUSTOM_ACP=1 \
-///   CODEMIXER_LIVE_ACP_BIN=$PWD/migration-tool/dist/migration-acp \
+///   CODEMIXER_LIVE_ACP_BIN=/path/to/acp-binary \
 ///   CODEMIXER_LIVE_MIGRATION_PIPELINE=1 \
 ///   swift test --no-parallel --filter liveMigrationReflection
 struct LiveCustomACPHarness {
@@ -102,7 +102,7 @@ struct LiveCustomACPHarness {
         ProcessInfo.processInfo.environment["CODEMIXER_LIVE_CUSTOM_ACP"] == "1"
     }
 
-    /// Cross-language `initialize` check against the real `migration-acp`, which
+    /// Cross-language `initialize` check against an external Custom ACP binary, which
     /// refuses clients that cannot render A2UI. Cheap enough (seconds) to run
     /// without the full pipeline gate.
     static func isMigrationHandshakeEnabled() -> Bool {
@@ -195,7 +195,7 @@ struct LiveCustomACPHarness {
 
         let ref = CustomAgentRef(
             id: "live-migration-handshake",
-            displayName: "Migration Tool",
+            displayName: "Custom ACP Tool",
             transport: .agentClientProtocol,
             executablePath: config.executablePath,
             arguments: config.arguments
@@ -237,7 +237,7 @@ struct LiveCustomACPHarness {
         )
     }
 
-    /// Runs live `migration-acp` through Codemixer's Custom ACP adapter and asserts
+    /// Runs a live Custom ACP binary through Codemixer's Custom ACP adapter and asserts
     /// the same surfaces the GUI reduces: dashboard URL, reverse file sessions,
     /// attention badges, parked review permissions, and full per-file pipeline roles.
     func runMigrationReflection(_ config: MigrationReflectionConfiguration) async throws
@@ -246,7 +246,7 @@ struct LiveCustomACPHarness {
 
         let ref = CustomAgentRef(
             id: "live-migration",
-            displayName: "Migration Tool",
+            displayName: "Custom ACP Tool",
             transport: .agentClientProtocol,
             executablePath: config.executablePath,
             arguments: config.arguments
@@ -517,7 +517,7 @@ struct LiveCustomACPHarness {
         let agentID = "live-migration"
         let ref = CustomAgentRef(
             id: agentID,
-            displayName: "Migration Tool",
+            displayName: "Custom ACP Tool",
             transport: .agentClientProtocol,
             executablePath: executablePath,
             arguments: ["acp", "--cwd", root.path]

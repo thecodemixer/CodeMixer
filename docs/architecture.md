@@ -1946,9 +1946,9 @@ IndexRailView | TranscriptLaneView | WorkLaneView
 
 ### File-level phase as a durable transcript event
 
-Custom ACP's per-file pipeline status (`PipelineStatus` in the migration tool) is bridged into `AgentEvent.sessionPhaseChanged(sessionID:phase:)`, a small `Codable` `SessionPhase { id, label, ordinal, group }` — deliberately file-scoped only; the migration tool's run/overall status (assessment → characterization → wave N → cutover) stays exclusively in the Custom ACP overview dashboard WebView and is not duplicated here.
+Custom ACP's per-file pipeline status (a Custom ACP tool's own status enum) is bridged into `AgentEvent.sessionPhaseChanged(sessionID:phase:)`, a small `Codable` `SessionPhase { id, label, ordinal, group }` — deliberately file-scoped only; a tool's run/overall status (when it has one) stays exclusively in the Custom ACP overview dashboard WebView and is not duplicated here.
 
-The key design constraint: phase is an **ordered transcript entry**, not session-level `_meta`. The migration tool appends a `{ kind: "phase", status, wave? }` `TranscriptChunk` from the same `commitStatus(...)` seam that mutates file state, so it persists to `TranscriptStore` (JSONL) and replays in order on `session/load` for free — no special re-emit hack. `ACPEventDecoder+Streaming` decodes the resulting `codemixer.dev/phase_update` session-update into `sessionPhaseChanged` on the live path; `ACPConversationTurn` carries a `phase` field and `ACPSessionStoreCodec.events(from:)` re-derives `sessionPhaseChanged` from it on the **cached**-transcript path too, so phase grouping survives both live and reopened sessions.
+The key design constraint: phase is an **ordered transcript entry**, not session-level `_meta`. A Custom ACP tool appends a `{ kind: "phase", status, wave? }` transcript chunk from the same status-commit seam that mutates per-file state, so it persists to `TranscriptStore` (JSONL) and replays in order on `session/load` for free — no special re-emit hack. `ACPEventDecoder+Streaming` decodes the resulting `codemixer.dev/phase_update` session-update into `sessionPhaseChanged` on the live path; `ACPConversationTurn` carries a `phase` field and `ACPSessionStoreCodec.events(from:)` re-derives `sessionPhaseChanged` from it on the **cached**-transcript path too, so phase grouping survives both live and reopened sessions.
 
 ### Deviations from `docs/style/visual-style.md`
 
@@ -1962,9 +1962,9 @@ Recorded here per the guide's own "update the doc in the same PR" rule; full det
 
 ## 36. A2UI — generalized custom-tool UI
 
-Custom ACP tools (the migration tool is the reference implementation) used to
-get their structured output — reviewer verdicts, plans, human-review
-decisions — onto screen by having `AgentUI` **guess**: sniff assistant text
+Custom ACP tools (a reference Custom ACP tool, in its own repository, is the
+canonical example) used to get their structured output — reviewer verdicts,
+plans, human-review decisions — onto screen by having `AgentUI` **guess**: sniff assistant text
 for `Reviewer A: {…}` prefixes, regex-balance a JSON object out of the
 string, and hand-render a "reviewer comment" card. That heuristic was
 per-tool, flaky (any prose containing `{"verdict":...}`-shaped text was fair
@@ -1996,7 +1996,7 @@ UI than markdown prose now emits a typed
   a deliberate no-partial-component-claim decision: CodeMixer will not claim
   full spec conformance until the complete component/accessibility/security
   matrix has an explicit sign-off. Custom ACP servers that gate A2UI emission
-  on capability negotiation (the migration tool does — see §36.6) already
+  on capability negotiation (a well-behaved Custom ACP server does — see §36.6) already
   see this exact id and degrade correctly if/when the id changes.
 - **Not interpreted as a live JSON Schema.** `A2UICore` does not run a
   generic Draft 2020-12 validator against the vendored schema files at
@@ -2075,8 +2075,7 @@ catalog) survives as `A2UIOpaqueComponent` and re-encodes unchanged.
 | `EngineViewModel` → engine command bridge for user interactions | `AgentUI/ViewModel/EngineViewModel+A2UI.swift` |
 | The native SwiftUI Basic Catalog renderer | `AgentUI/Conversation/A2UISurfaceView.swift` |
 | Transcript-lane wiring (renders `.a2uiSurface` rows, feeds search) | `AgentUI/Workbench/TranscriptLaneView.swift` |
-| Migration-tool surface builders (plan / review duel / human review / completion / error) | `migration-tool/src/acp/a2ui.ts` |
-| Migration-tool capability negotiation + surface lifecycle + inbound action routing | `migration-tool/src/acp/server.ts` (`negotiatesA2UI`, `emitA2UI`, `deleteA2UI`, `resolveA2UIReviewDecision`) |
+| Reference Custom ACP A2UI emission (capability gate, surface builders, delete-then-create lifecycle, inbound action routing) | External repository (not in this tree) |
 
 ### 36.3 Wire types and `WireVersion`
 
@@ -2187,7 +2186,7 @@ A2UIActionResolver.resolve(intent, against: canonicalSurface)
         │   [{ type: "clientAction", surfaceId, sourceComponentId,
         │      eventName, context }]
         ▼
-     Custom ACP tool (parseA2UIClientMessage in acp/a2ui.ts)
+     Custom ACP tool (parses the clientAction / clientError EmbeddedResource)
 ```
 
 **This is the trust boundary.** The renderer's `A2UIInteractionIntent` is
@@ -2233,54 +2232,46 @@ CodeMixer's `ACPInputEncoding.bootstrap` advertises A2UI support on
 is accepted as an inbound compatibility alias when reading a *server's*
 capabilities, but CodeMixer never emits the bare alias itself.
 
-A Custom ACP server that emits A2UI (the migration tool does) must **require**
-this capability rather than degrade without it. The migration tool throws
-`UnsupportedClientError` from `initialize` when either
-`A2UISchemaProfile.clientCapabilitiesMetaKey` (advertising the catalog id) or
-`codemixer.dev/sessionNew` is absent — see `AcpServer.negotiatesA2UI` /
-`emitA2UI` in `migration-tool/src/acp/server.ts`. There is deliberately no
-plain-text fallback: the tool previously degraded silently, and the only
-visible symptom was raw `Reviewer A: {"verdict":…}` JSON in chat hours into a
-run, with the actual cause (a CodeMixer build predating the capability) invisible.
-Failing the handshake names the missing capability at the one moment it is
-cheap to fix.
+A Custom ACP server that emits A2UI must **require** this capability rather
+than degrade without it. A well-behaved tool throws an
+`UnsupportedClientError`-equivalent from `initialize` when either the A2UI
+catalog capability (`A2UISchemaProfile.clientCapabilitiesMetaKey`) or
+`codemixer.dev/sessionNew` is absent. There is deliberately no plain-text
+fallback: a tool that degrades silently surfaces only as raw
+`Reviewer A: {"verdict":…}` JSON in chat hours into a run, with the actual
+cause (a CodeMixer build predating the capability) invisible. Failing the
+handshake names the missing capability at the one moment it is cheap to fix.
 
-Both ends of this contract are pinned by tests, so drift on either side fails
-rather than degrades: `ACPAdapterTests` ("bootstrap advertises the A2UI catalog
-and per-file session capabilities") covers the advertisement, and
-`migration-tool/tests/acp-integration.test.ts` ("ACP client capability
-contract") covers acceptance and each refusal.
+The CodeMixer end of this contract is pinned by tests, so drift fails rather
+than degrades: `ACPAdapterTests` ("bootstrap advertises the A2UI catalog and
+per-file session capabilities") covers the advertisement. The matching
+acceptance/refusal coverage lives with the reference Custom ACP tool in its
+own repository.
 
-### 36.7 The migration tool as the reference custom-tool integration
+### 36.7 Reference Custom ACP pattern
 
-`migration-tool/src/acp/a2ui.ts` builds five surfaces deterministically from
-existing pipeline data — no new state, just a rendering of what the
-orchestrator already computed:
+A reference Custom ACP tool (in its own repository) demonstrates the intended
+integration. The pattern any Custom ACP server should follow:
 
-| Surface | Built from | Replaces this legacy chat text |
-| --- | --- | --- |
-| `migration.plan.<file>` | The planner's free-text plan, split into paragraphs | A raw thought bubble with the planner's prose |
-| `migration.review-duel.<file>` | `buildReviewerDuel(a.verdict, b.verdict)` — the same helper the dashboard already used | `Reviewer A: {"verdict":...}\nReviewer B: {"verdict":...}` — the exact text the removed heuristic (§36.8) used to scrape |
-| `migration.human-review.<file>` (also reused for control-session proceed/canary/wave gates) | The review brief + `ReviewOption[]`, with one nonce-carrying `event` Button per option | ACP `session/request_permission` |
-| `migration.complete.<file>` / `migration.complete.__run__` | Per-file confidence/fix-round summary, or the run's verified-file count | A plain completion chat line |
-| `migration.error.<file>` / `migration.error.__run__` | Characterization/pipeline error title + message | A plain error chat line |
+- Build surfaces deterministically from existing pipeline/domain state — no
+  parallel UI state, just a rendering of what the tool already computed.
+- Emit each surface via a MIME-typed `EmbeddedResource`
+  (`application/a2ui+json`); send `deleteSurface` before re-creating a surface
+  with the same id so CodeMixer's generation counter advances instead of
+  silently reusing stale component ids.
+- Put server-bound decisions on `Button` `event` actions; carry a nonce (or
+  equivalent) in `context` when an action must not be replayable — defense in
+  depth alongside a first-wins server gate, since v0.9.1 has no built-in
+  action replay protection.
+- Dispatch inbound A2UI `clientAction` / `clientError` prompts (they arrive as
+  an ordinary `session/prompt` carrying one MIME-typed `EmbeddedResource`)
+  **before** ordinary text-prompt handling, so an A2UI action never becomes a
+  chat message.
+- Fail `initialize` when A2UI (and any other required) capabilities are
+  missing — no degraded plain-text mode (§36.6).
 
-`AcpServer` (`server.ts`) owns surface lifecycle: `emitA2UI` sends
-`deleteSurface` before re-creating a surface with the same id (so
-CodeMixer's generation counter advances instead of silently reusing stale
-component ids), and `a2uiSurfaceOwners` tracks which session owns which
-surface for cleanup. The human-review Button contexts carry a per-file
-random `nonce` (`reviewNonces`) that `resolveA2UIReviewDecision` must match
-before honoring a `migrationReviewDecision` action — defense in depth
-alongside the pre-existing first-wins `resolvedReviewFiles` gate, since
-v0.9.1 has no built-in action replay protection.
-
-Inbound actions arrive as an ordinary `session/prompt` whose `prompt` carries
-one MIME-typed `EmbeddedResource`; `parseA2UIClientMessage` (`acp/a2ui.ts`)
-recognizes the `clientAction`/`clientError` shape `ACPInputEncoding` emits
-and `AcpServer.sessionPrompt` dispatches to `resolveA2UIReviewDecision`
-*before* falling through to normal text-prompt handling — an A2UI action
-never becomes a chat message.
+Concrete surface ids, builders, and tests for the reference tool live in its
+repository, not here.
 
 ### 36.8 What A2UI replaced (and why the heuristics are gone)
 
@@ -2295,10 +2286,8 @@ Before A2UI, `AgentUI` guessed at custom-tool structure in two places:
   `{"verdict":...}` objects out of assistant prose (even mid-sentence) and
   rendered them as `ReviewerCommentView` cards.
 
-Both were removed once the migration tool emits the equivalent content as an
-A2UI human-review / review-duel surface (§36.7) — see
-`migration-tool/tests/acp-integration.test.ts` (`emits an A2UI human-review
-surface...`) and `migration-tool/tests/a2ui.test.ts`. The plain
+Both were removed once Custom ACP tools emit the equivalent content as A2UI
+human-review / review-duel surfaces (§36.7). The plain
 `Reviewer A: {"verdict":...}` chat text those heuristics used to reconstruct no
 longer exists on any path: a client that cannot render the surface is refused
 at `initialize` (§36.6), so there is no text form left to sniff. Any
@@ -2334,10 +2323,9 @@ data, not a name or diagnostic string.
 | ACP decode/encode (capability, resource extraction, action/error encoding) | `tests/AgenticCLIs/AgentClientProtocol/ACPAdapterTests/*` |
 | Durable persistence/replay | `tests/Core/AgentCoreTests/SessionTranscriptTests.swift` |
 | `EngineViewModel` reduction | `tests/AgentUITests/EngineViewModelTests.swift` |
-| Migration-tool surface builders + client-message parsing (pure, no process spawn) | `migration-tool/tests/a2ui.test.ts` |
-| Client-capability contract (acceptance, `a2ui` alias, split `_meta`, and each refusal) | `migration-tool/tests/acp-integration.test.ts` (`ACP client capability contract`) ↔ `tests/AgenticCLIs/AgentClientProtocol/ACPAdapterTests/ACPAdapterTests.swift` (`bootstrap advertises the A2UI catalog...`) |
-| End-to-end human-review surface + action round-trip + every surface kind reaching the client | `migration-tool/tests/acp-integration.test.ts`, driven by `migration-tool/tests/live/LiveMigrationHarness.ts` |
-| Live cross-language handshake against the real `migration-acp` binary (opt-in) | `tests/AgenticCLIs/ACPCLIs/CustomACPCLITests/LiveCustomACPIntegrationTests.swift` (`CODEMIXER_LIVE_ACP_BIN`) |
+| Client-capability advertisement (CodeMixer side) | `tests/AgenticCLIs/AgentClientProtocol/ACPAdapterTests/ACPAdapterTests.swift` (`bootstrap advertises the A2UI catalog...`) |
+| Live cross-language handshake against an external Custom ACP binary (opt-in) | `tests/AgenticCLIs/ACPCLIs/CustomACPCLITests/LiveCustomACPIntegrationTests.swift` (`CODEMIXER_LIVE_ACP_BIN`) |
+| Reference Custom ACP surface builders, capability acceptance/refusal, and E2E surface/action round-trip | External repository (the tool's own test suite) |
 
 ---
 

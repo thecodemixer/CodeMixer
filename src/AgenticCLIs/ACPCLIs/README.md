@@ -97,8 +97,8 @@ Custom ACP agents may advertise extensions via `_meta` (additive; unknown keys a
 | `codemixer.dev/overviewSession` | `session/new` reverse RPC or `session_info_update` `_meta` | Marks a session as the project overview/control session (`SessionSummary.isOverview`) |
 | `codemixer.dev/sessionNew` | client → agent on `initialize` | Agent may reverse-RPC `session/new` to register sidebar sessions |
 | `_meta.archived` | `session_info_update` | Session hidden from sidebar summaries |
-| `_meta.needsAttention` | `session_info_update` | Per-session sidebar badge; project-row attention count rollup; `sessionAttentionChanged` → macOS notification (`Migration Tool` / `"<title> needs human review"`) |
+| `_meta.needsAttention` | `session_info_update` | Per-session sidebar badge; project-row attention count rollup; `sessionAttentionChanged` → macOS notification (agent display name / `"<title> needs human review"`) |
 
 Streaming `session/update` chunks for foreground sessions enter the normal event stream. Foreign chunks are persisted through `recordBackgroundSessionEvents` without reaching the foreground UI. Background permission prompts are parked per-session (not in `pendingApprovals`, which is cleared on switch) and re-emitted after `session/load`.
 
-Reference product using this contract: top-level [`migration-tool/`](../../../migration-tool/) (SQL Server / API → MongoDB migrator).
+Reference Custom ACP products using this contract live in their own repositories (not in this tree).

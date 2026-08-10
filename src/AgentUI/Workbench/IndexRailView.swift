@@ -5,7 +5,7 @@ import AgentCore
 /// me" without scrolling. Fixed-width, non-draggable leading lane.
 ///
 /// Content-driven:
-/// - Sessions with native `sessionPhaseChanged` (Custom ACP / migration tool)
+/// - Sessions with native `sessionPhaseChanged` (Custom ACP)
 ///   are **phase-first**: the rail lists phases from `phaseMarkers` only.
 ///   Selecting a phase filters the transcript lane; turns do not nest here.
 /// - Sessions without phase data fall back to a flat per-turn list.

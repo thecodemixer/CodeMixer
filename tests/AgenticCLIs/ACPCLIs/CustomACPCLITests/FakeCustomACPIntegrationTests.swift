@@ -22,8 +22,8 @@ struct FakeCustomACPIntegrationTests {
         defer { try? FileManager.default.removeItem(at: ws) }
 
         let ref = CustomAgentRef(
-            id: "migration-assistant",
-            displayName: "Migration Assistant",
+            id: "custom-assistant",
+            displayName: "Custom Assistant",
             transport: .agentClientProtocol,
             executablePath: fakeBin.path,
             arguments: []

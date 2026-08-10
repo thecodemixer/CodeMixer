@@ -131,10 +131,10 @@ struct WorkspaceProjectsStoreTests {
         let fs = InMemoryFileSystem()
         let store = makeStore(fs: fs)
         let custom = CustomAgentRef(
-            id: "migration",
+            id: "custom-acp",
             displayName: "api",
             transport: .agentClientProtocol,
-            executablePath: "/opt/migration-acp",
+            executablePath: "/opt/custom-acp",
             arguments: ["acp"]
         )
         let ref = try await store.createProject(name: "api", projectType: .custom(custom), in: workspace)
@@ -145,8 +145,8 @@ struct WorkspaceProjectsStoreTests {
         }
         #expect(renamed.displayName == "MongoMixer")
         #expect(updated.displayName == "MongoMixer")
-        #expect(updated.executablePath == "/opt/migration-acp")
-        #expect(updated.id == "migration")
+        #expect(updated.executablePath == "/opt/custom-acp")
+        #expect(updated.id == "custom-acp")
 
         let local = ProjectLocalStateStore.load(
             from: URL(fileURLWithPath: renamed.path),

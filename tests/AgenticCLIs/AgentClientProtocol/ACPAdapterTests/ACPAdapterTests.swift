@@ -34,12 +34,12 @@ struct ACPAdapterTests {
         #expect(!text.contains("session/new"))
     }
 
-    /// Pins the client half of the Custom ACP capability contract. The
-    /// migration tool refuses to handshake unless `initialize` advertises both
-    /// of these under `clientCapabilities._meta`, so dropping or renaming
-    /// either one here breaks every Custom ACP project rather than degrading.
-    /// Mirror of `tests/acp-integration.test.ts` "ACP client capability
-    /// contract" in `migration-tool`.
+    /// Pins the client half of the Custom ACP capability contract. A
+    /// reference Custom ACP server refuses to handshake unless `initialize`
+    /// advertises both of these under `clientCapabilities._meta`, so dropping
+    /// or renaming either one here breaks every Custom ACP project rather than
+    /// degrading. Mirror of the server-side "ACP client capability contract"
+    /// suite in the external Custom ACP repository.
     @Test("bootstrap advertises the A2UI catalog and per-file session capabilities")
     func bootstrapAdvertisesClientCapabilities() throws {
         let adapter = makeAdapter()

@@ -31,8 +31,8 @@ struct WarmSessionSwitchTests {
                 permissionMode: .default
             ),
             state: state,
-            customAgentID: "migration-assistant",
-            displayName: "Migration Assistant"
+            customAgentID: "custom-assistant",
+            displayName: "Custom Assistant"
         )
 
         _ = await decoder.decode(.response(

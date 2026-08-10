@@ -105,7 +105,7 @@ struct A2UISurfaceReducerTests {
 
     @Test("Migration review-duel wire JSON reduces to a renderable Codemixer surface")
     func migrationReviewDuelWireIsRenderable() throws {
-        // Exact shape `migration-tool/src/acp/a2ui.ts` `reviewDuelSurface` emits
+        // Exact shape a reference Custom ACP review-duel surface emits
         // (including historical Material-style variants that must still map).
         let wire = """
         [

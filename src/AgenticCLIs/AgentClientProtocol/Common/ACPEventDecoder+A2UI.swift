@@ -9,7 +9,7 @@ import AgentProtocol
 /// only by exact `mimeType == "application/a2ui+json"` — the `uri` is an
 /// opaque accumulator key, never an authority or security boundary.
 ///
-/// Scope note: real Custom ACP servers (including the migration tool) emit
+/// Scope note: real Custom ACP servers (including reference Custom ACP servers) emit
 /// one complete resource body per `session/update`/`tool_call` notification
 /// rather than splitting a single JSON array across multiple deltas, so this
 /// binding treats each observed resource as one self-contained batch rather

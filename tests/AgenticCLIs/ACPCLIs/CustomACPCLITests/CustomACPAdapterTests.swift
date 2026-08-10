@@ -9,11 +9,11 @@ import AgentTestSupport
 @Suite("CustomACPAdapter")
 struct CustomACPAdapterTests {
 
-    private func sampleRef(id: String = "migration-assistant",
-                           path: String = SystemPaths.binary(in: SystemPaths.usrLocalBin, named: "migration-acp").path) -> CustomAgentRef {
+    private func sampleRef(id: String = "custom-assistant",
+                           path: String = SystemPaths.binary(in: SystemPaths.usrLocalBin, named: "custom-acp").path) -> CustomAgentRef {
         CustomAgentRef(
             id: id,
-            displayName: "Migration Assistant",
+            displayName: "Custom Assistant",
             transport: .agentClientProtocol,
             executablePath: path,
             arguments: ["acp"]
@@ -24,19 +24,19 @@ struct CustomACPAdapterTests {
     func identity() {
         let adapter = CustomACPAdapter(ref: sampleRef())
         #expect(adapter.id == .other)
-        #expect(adapter.displayName == "Migration Assistant")
+        #expect(adapter.displayName == "Custom Assistant")
         #expect(adapter.transportDescriptor == .agentClientProtocol)
         #expect(adapter.capabilities.contains(.resumableSessions))
     }
 
     @Test("buildLaunchArgv uses exe basename plus ref arguments")
     func argv() {
-        let adapter = CustomACPAdapter(ref: sampleRef(path: "/opt/tools/migration-acp"))
+        let adapter = CustomACPAdapter(ref: sampleRef(path: "/opt/tools/custom-acp"))
         let argv = adapter.buildLaunchArgv(context: LaunchContext(
             workspace: TestPaths.temporaryRoot,
             permissionMode: .default
         ))
-        #expect(argv == ["migration-acp", "acp"])
+        #expect(argv == ["custom-acp", "acp"])
     }
 
     @Test("binary locator prefers CODEMIXER_CUSTOM_ACP_BIN")
@@ -52,8 +52,8 @@ struct CustomACPAdapterTests {
             home: TestPaths.underTemporary("home")
         )
         let locator = CustomACPBinaryLocator(
-            executablePath: "/missing/migration-acp",
-            displayName: "Migration",
+            executablePath: "/missing/custom-acp",
+            displayName: "Custom ACP",
             environment: env,
             fileSystem: fs
         )
@@ -67,15 +67,15 @@ struct CustomACPAdapterTests {
     @Test("binary locator finds basename on PATH when absolute path is missing")
     func locatorPathBasename() throws {
         let fs = InMemoryFileSystem()
-        let onPath = URL(fileURLWithPath: "/opt/bin/migration-acp")
+        let onPath = URL(fileURLWithPath: "/opt/bin/custom-acp")
         try fs.writeAtomically(Data(), to: onPath)
         let env = FakeEnvironment(
             processEnv: ["PATH": "/opt/bin:/usr/bin"],
             home: TestPaths.underTemporary("home")
         )
         let locator = CustomACPBinaryLocator(
-            executablePath: "migration-acp",
-            displayName: "Migration",
+            executablePath: "custom-acp",
+            displayName: "Custom ACP",
             environment: env,
             fileSystem: fs
         )

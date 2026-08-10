@@ -30,13 +30,13 @@ struct LiveCustomACPIntegrationTests {
         #expect(result.finalAssistantText?.contains("codemixer-custom-acp-pong") == true)
     }
 
-    @Test("live migration-acp accepts Codemixer's advertised A2UI capabilities at initialize")
+    @Test("live Custom ACP accepts Codemixer's advertised A2UI capabilities at initialize")
     func liveMigrationHandshake() async throws {
         guard LiveCustomACPHarness.isMigrationHandshakeEnabled() else {
             return
         }
         guard let exe = LiveCustomACPHarness.executablePath() else {
-            Issue.record("Set CODEMIXER_LIVE_ACP_BIN to migration-tool/dist/migration-acp")
+            Issue.record("Set CODEMIXER_LIVE_ACP_BIN to /path/to/acp-binary")
             return
         }
         guard FileManager.default.isExecutableFile(atPath: exe) else {
@@ -65,7 +65,7 @@ struct LiveCustomACPIntegrationTests {
             return
         }
         guard let exe = LiveCustomACPHarness.executablePath() else {
-            Issue.record("Set CODEMIXER_LIVE_ACP_BIN to migration-tool/dist/migration-acp")
+            Issue.record("Set CODEMIXER_LIVE_ACP_BIN to /path/to/acp-binary")
             return
         }
         guard FileManager.default.isExecutableFile(atPath: exe) else {
