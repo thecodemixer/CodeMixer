@@ -22,7 +22,7 @@ extension FolderView {
     func compactPlainFileTable(_ browser: FolderViewModel) -> some View {
         Table(of: FolderFileEntry.self, selection: Binding(
             get: { browser.selectedPaths },
-            set: { browser.selectMany($0) }
+            set: { browser.selectManyFromTable($0) }
         )) {
             TableColumn("Name") { (entry: FolderFileEntry) in
                 fileNameCell(entry)
@@ -56,7 +56,7 @@ extension FolderView {
             sortedTableRows(browser),
             selection: Binding(
                 get: { browser.selectedPaths },
-                set: { browser.selectMany($0) }
+                set: { browser.selectManyFromTable($0) }
             ),
             sortOrder: $fileTableSortOrder
         ) {
@@ -106,7 +106,7 @@ extension FolderView {
             sortedTableRows(browser),
             selection: Binding(
                 get: { browser.selectedPaths },
-                set: { browser.selectMany($0) }
+                set: { browser.selectManyFromTable($0) }
             ),
             sortOrder: $fileTableSortOrder
         ) {

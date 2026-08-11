@@ -4,6 +4,21 @@ import AgentCore
 /// Pure file/entry helpers shared by `FolderViewModel` and `FolderTreeViewModel`.
 /// Models own scan/watch/preview tasks; this enum never holds state.
 enum FolderFileSupport {
+    /// Runs blocking filesystem work off the main actor.
+    ///
+    /// Both browser models are `@MainActor`, so an unstructured `Task { }` they
+    /// create inherits main-actor isolation — a multi-megabyte read would then
+    /// run on the main thread, and `cancel()` cannot interrupt a synchronous
+    /// read already in flight. Clicking through files faster than they load
+    /// queued those reads behind each other and froze the window. Detaching
+    /// keeps the UI responsive; a superseded read finishes harmlessly in the
+    /// background and is discarded by the caller's generation check.
+    static func offMainActor<Value: Sendable>(
+        _ work: @escaping @Sendable () throws -> Value
+    ) async throws -> Value {
+        try await Task.detached(priority: .userInitiated, operation: work).value
+    }
+
     /// Builds a single entry for a project-relative path under `root`.
     static func makeEntry(relativePath: String,
                           root: URL,

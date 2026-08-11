@@ -193,10 +193,9 @@ final class FolderViewModel {
         let fileSystem = fileSystem
         scanTask = Task { [weak self] in
             do {
-                let result = try FolderScanner.scanDetailed(
-                    root: root,
-                    fileSystem: fileSystem
-                )
+                let result = try await FolderFileSupport.offMainActor {
+                    try FolderScanner.scanDetailed(root: root, fileSystem: fileSystem)
+                }
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
                     guard let self else { return }
@@ -254,11 +253,13 @@ final class FolderViewModel {
         let fileSystem = fileSystem
         scanTask = Task { [weak self] in
             do {
-                let entry = try FolderFileSupport.makeEntry(
-                    relativePath: relativePath,
-                    root: root,
-                    fileSystem: fileSystem
-                )
+                let entry = try await FolderFileSupport.offMainActor {
+                    try FolderFileSupport.makeEntry(
+                        relativePath: relativePath,
+                        root: root,
+                        fileSystem: fileSystem
+                    )
+                }
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
                     guard let self else { return }
@@ -299,6 +300,7 @@ final class FolderViewModel {
     }
 
     func select(_ relativePath: String?) {
+        guard selectedRelativePath != relativePath else { return }
         selectedRelativePath = relativePath
         if let relativePath {
             selectedPaths = [relativePath]
@@ -309,10 +311,19 @@ final class FolderViewModel {
     }
 
     func selectMany(_ paths: Set<String>) {
+        guard paths != selectedPaths else { return }
         selectedPaths = paths
         // Keep multi-select intact; preview follows the primary (sorted) path.
         selectedRelativePath = paths.sorted().first
         updatePreviewForSelection()
+    }
+
+    /// Applies selection emitted by the table. A click in empty row space emits
+    /// an empty set; keep the current file warm rather than tearing its preview
+    /// down and rebuilding it on the user's next row click.
+    func selectManyFromTable(_ paths: Set<String>) {
+        guard !paths.isEmpty else { return }
+        selectMany(paths)
     }
 
     private func updatePreviewForSelection() {
@@ -422,12 +433,20 @@ final class FolderViewModel {
             return
         }
         previewTitle = entry.name
+        // Selection updates the URL immediately. Clear the previous mode so its
+        // renderer cannot consume the new URL before classification finishes.
+        previewMode = .none
+        previewText = ""
+        previewCapped = false
+        tocItems = []
         let url = absoluteURL(for: relativePath)
         let kind = kind
         let docsShowSource = docsShowSource
         previewTask = Task { [weak self] in
             guard let self else { return }
             do {
+                try await Task.sleep(for: FolderBrowserLimits.previewSelectionDebounce)
+                try Task.checkCancellation()
                 try await self.loadPreviewContent(at: url,
                                                   entry: entry,
                                                   kind: kind,
@@ -484,7 +503,11 @@ final class FolderViewModel {
     private func loadLogPreview(at url: URL,
                                 entry: FolderFileEntry,
                                 generation: Int) async throws {
-        let preview = try FolderFileSupport.loadLogTail(at: url, fileSystem: fileSystem)
+        let fileSystem = fileSystem
+        let preview = try await FolderFileSupport.offMainActor {
+            try FolderFileSupport.loadLogTail(at: url, fileSystem: fileSystem)
+        }
+        try Task.checkCancellation()
         await MainActor.run {
             guard generation == self.previewGeneration else { return }
             if preview.isBinary {
@@ -509,11 +532,15 @@ final class FolderViewModel {
                                  entry: FolderFileEntry,
                                  showSource: Bool,
                                  generation: Int) async throws {
-        let document = try FolderFileSupport.loadMarkdownDocument(
-            at: url,
-            fileSystem: fileSystem,
-            includeTOC: true
-        )
+        let fileSystem = fileSystem
+        let document = try await FolderFileSupport.offMainActor {
+            try FolderFileSupport.loadMarkdownDocument(
+                at: url,
+                fileSystem: fileSystem,
+                includeTOC: true
+            )
+        }
+        try Task.checkCancellation()
         await MainActor.run {
             guard generation == self.previewGeneration else { return }
             if document.oversize {
@@ -568,8 +595,11 @@ final class FolderViewModel {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(750))
                 guard let self, self.followLogs, generation == self.previewGeneration else { return }
+                let fileSystem = self.fileSystem
                 do {
-                    let size = try self.fileSystem.byteCount(at: url)
+                    let size = try await FolderFileSupport.offMainActor {
+                        try fileSystem.byteCount(at: url)
+                    }
                     if size < self.logReadOffset {
                         await MainActor.run {
                             guard generation == self.previewGeneration else { return }
@@ -581,9 +611,12 @@ final class FolderViewModel {
                         return
                     }
                     if size > self.logReadOffset {
-                        let data = try self.fileSystem.readData(at: url, fromOffset: self.logReadOffset)
-                        let chunk = String(data: data, encoding: .utf8)
-                            ?? String(decoding: data, as: UTF8.self)
+                        let offset = self.logReadOffset
+                        let chunk = try await FolderFileSupport.offMainActor {
+                            let data = try fileSystem.readData(at: url, fromOffset: offset)
+                            return String(data: data, encoding: .utf8)
+                                ?? String(decoding: data, as: UTF8.self)
+                        }
                         await MainActor.run {
                             guard generation == self.previewGeneration else { return }
                             self.previewText.append(chunk)

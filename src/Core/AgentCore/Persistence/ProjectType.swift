@@ -206,6 +206,10 @@ public enum FolderBrowserLimits {
     public static let filePreviewMaxBytes = 2_097_152
     public static let automaticLogShortcuts = 5
     public static let scanDebounce: Duration = .milliseconds(250)
+    /// Selection must remain stable for this long before preview work begins.
+    /// This coalesces rapid file clicks before they launch uncancellable
+    /// filesystem/framework work.
+    public static let previewSelectionDebounce: Duration = .milliseconds(30)
     /// Ceiling for syntax highlighting. The highlighter walks every character,
     /// so a multi-megabyte file would stall the main thread; past this size the
     /// preview still renders, just as plain monospaced text.

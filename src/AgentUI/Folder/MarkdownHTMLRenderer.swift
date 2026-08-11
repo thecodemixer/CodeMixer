@@ -27,9 +27,9 @@ enum MarkdownHTMLRenderer {
         )
         let blocks = MarkdownBlock.parse(rewritten)
         var html: [String] = []
-        var usedAnchors = Set<String>()
+        var anchors = AnchorAllocator()
         for block in blocks {
-            html.append(render(block, usedAnchors: &usedAnchors))
+            html.append(render(block, anchors: &anchors))
         }
         return html.joined(separator: "\n")
     }
@@ -40,11 +40,11 @@ enum MarkdownHTMLRenderer {
     }
 
     static func tocItems(_ markdown: String) -> [TOCItem] {
-        var usedAnchors = Set<String>()
+        var anchors = AnchorAllocator()
         var items: [TOCItem] = []
         for block in MarkdownBlock.parse(markdown) {
             if case .heading(let level, let text) = block {
-                let anchor = uniqueAnchor(for: text, used: &usedAnchors)
+                let anchor = anchors.anchor(for: text)
                 items.append(TOCItem(level: level, title: text, anchor: anchor))
             }
         }
@@ -146,11 +146,11 @@ enum MarkdownHTMLRenderer {
         return result
     }
 
-    private static func render(_ block: MarkdownBlock, usedAnchors: inout Set<String>) -> String {
+    private static func render(_ block: MarkdownBlock, anchors: inout AnchorAllocator) -> String {
         switch block {
         case .heading(let level, let text):
             let clamped = min(max(level, 1), 6)
-            let anchor = uniqueAnchor(for: text, used: &usedAnchors)
+            let anchor = anchors.anchor(for: text)
             return "<h\(clamped) id=\"\(escapeAttribute(anchor))\">\(inline(text))</h\(clamped)>"
         case .paragraph(let text):
             // Already-rewritten <img>/<a> tags must pass through; escape the rest.
@@ -245,18 +245,30 @@ enum MarkdownHTMLRenderer {
         }
     }
 
-    private static func uniqueAnchor(for title: String, used: inout Set<String>) -> String {
-        let base = title
-            .lowercased()
-            .replacingOccurrences(of: " ", with: "-")
-            .filter { $0.isLetter || $0.isNumber || $0 == "-" }
-        var candidate = base.isEmpty ? "section" : base
-        var suffix = 2
-        while used.contains(candidate) {
-            candidate = "\(base)-\(suffix)"
-            suffix += 1
+    /// Allocates unique heading anchors in document order.
+    ///
+    /// Remembers the next free suffix per base instead of probing upward from 2
+    /// on every collision: a document that repeats a heading (a changelog with
+    /// one "Fixed" per release) otherwise costs O(headings²).
+    struct AnchorAllocator {
+        private var used: Set<String> = []
+        private var nextSuffix: [String: Int] = [:]
+
+        init() {}
+
+        mutating func anchor(for title: String) -> String {
+            let base = title
+                .lowercased()
+                .replacingOccurrences(of: " ", with: "-")
+                .filter { $0.isLetter || $0.isNumber || $0 == "-" }
+            let candidate = base.isEmpty ? "section" : base
+            if used.insert(candidate).inserted { return candidate }
+            var suffix = nextSuffix[candidate] ?? 2
+            while !used.insert("\(candidate)-\(suffix)").inserted {
+                suffix += 1
+            }
+            nextSuffix[candidate] = suffix + 1
+            return "\(candidate)-\(suffix)"
         }
-        used.insert(candidate)
-        return candidate
     }
 }

@@ -18,10 +18,9 @@ extension FolderTreeViewModel {
         let fileSystem = fileSystem
         scanTask = Task { [weak self] in
             do {
-                let result = try FolderScanner.scanDetailed(
-                    root: root,
-                    fileSystem: fileSystem
-                )
+                let result = try await FolderFileSupport.offMainActor {
+                    try FolderScanner.scanDetailed(root: root, fileSystem: fileSystem)
+                }
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
                     guard let self else { return }
@@ -86,11 +85,13 @@ extension FolderTreeViewModel {
         let fileSystem = fileSystem
         scanTask = Task { [weak self] in
             do {
-                let entry = try FolderFileSupport.makeEntry(
-                    relativePath: relativePath,
-                    root: root,
-                    fileSystem: fileSystem
-                )
+                let entry = try await FolderFileSupport.offMainActor {
+                    try FolderFileSupport.makeEntry(
+                        relativePath: relativePath,
+                        root: root,
+                        fileSystem: fileSystem
+                    )
+                }
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
                     guard let self else { return }

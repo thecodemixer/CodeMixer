@@ -6,7 +6,7 @@ extension FolderTreeView {
         List(selection: Binding(
             get: { treeModel.selectedRelativePath },
             set: { path in
-                treeModel.select(path)
+                treeModel.selectFromOutline(path)
                 if let path {
                     treeModel.revealPath(path)
                 }

@@ -224,6 +224,14 @@ struct FolderSourcePreview: View {
     let language: String?
     let lineWrap: Bool
 
+    /// Identity for the highlight job: recompute when either input changes.
+    private struct HighlightRequest: Equatable {
+        let text: String
+        let language: String?
+    }
+
+    @State private var highlighted: AttributedString?
+
     private var isHighlightable: Bool {
         language != nil && text.utf8.count <= FolderBrowserLimits.syntaxHighlightMaxBytes
     }
@@ -238,15 +246,34 @@ struct FolderSourcePreview: View {
                 .padding(Theme.spacing.s16)
         }
         .accessibilityLabel(language.map { "Source preview, \($0)" } ?? "Text preview")
+        .task(id: HighlightRequest(text: text, language: language)) {
+            await highlight()
+        }
     }
 
     @ViewBuilder
     private var content: some View {
-        if isHighlightable {
-            Text(CodeSyntaxHighlighter.highlight(text, language: language))
+        // Plain text shows immediately and is replaced once tinting lands, so a
+        // large file never holds up the first frame.
+        if let highlighted {
+            Text(highlighted)
         } else {
             Text(text)
         }
+    }
+
+    private func highlight() async {
+        highlighted = nil
+        guard isHighlightable else { return }
+        let source = text
+        let language = language
+        // The tokenizer walks every character; on the main thread that is felt
+        // as a stutter when stepping quickly through files.
+        let result = await Task.detached(priority: .userInitiated) {
+            CodeSyntaxHighlighter.highlight(source, language: language)
+        }.value
+        guard source == text else { return }
+        highlighted = result
     }
 }
 

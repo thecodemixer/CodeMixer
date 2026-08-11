@@ -243,6 +243,7 @@ struct ProjectTypeTests {
         #expect(FolderViewState.normalized(["a", "a", "/abs", "", "b", "c", "d", "e", "f"]).count == 5)
         #expect(FolderBrowserLimits.filePreviewMaxBytes == FolderBrowserLimits.markdownPreviewMaxBytes)
         #expect(FolderBrowserLimits.syntaxHighlightMaxBytes < FolderBrowserLimits.filePreviewMaxBytes)
+        #expect(FolderBrowserLimits.previewSelectionDebounce > .zero)
         // Must cover a real double click; the macOS default interval is 0.5s.
         #expect(FolderBrowserLimits.rowActivationCoalesceWindow >= 0.5)
     }

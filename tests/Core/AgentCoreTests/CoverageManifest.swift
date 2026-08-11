@@ -1624,6 +1624,7 @@ private func _a2uiPropsMembers() {
 // primaryKeyboardModifiers
 // primaryKeyboardShortcut
 // privatePrefix
+// previewSelectionDebounce
 // probablyStuckThreshold
 // probeTimeout
 // processEnvironment

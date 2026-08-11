@@ -13,8 +13,29 @@ final class FolderTreeViewModel {
 
     var entries: [FolderFileEntry] = []
     var truncated = false
-    var searchText = ""
-    var extensionFilter: String?
+    /// Filtering is cached rather than recomputed per access: the outline asks
+    /// each directory row whether it is expanded, and recomputing the pruned
+    /// tree per row made a single click cost seconds on a large project.
+    var searchText: String {
+        get { searchTextStorage }
+        set {
+            guard newValue != searchTextStorage else { return }
+            searchTextStorage = newValue
+            rebuildVisibleTree()
+        }
+    }
+
+    var extensionFilter: String? {
+        get { extensionFilterStorage }
+        set {
+            guard newValue != extensionFilterStorage else { return }
+            extensionFilterStorage = newValue
+            rebuildVisibleTree()
+        }
+    }
+
+    private var searchTextStorage = ""
+    private var extensionFilterStorage: String?
     var showFilters = false
     var selectedRelativePath: String?
     /// Paths currently pinned in the sidebar.
@@ -35,6 +56,12 @@ final class FolderTreeViewModel {
     private(set) var isPreviewOnlyListing = false
 
     var treeRoots: [FolderTreeNode] = []
+
+    /// Derived from `treeRoots` + the filter by `rebuildVisibleTree()`; never
+    /// assigned anywhere else.
+    var visibleTreeRoots: [FolderTreeNode] = []
+    /// Directories the active filter forces open, without touching `expandedPaths`.
+    var filterExpandedPaths: Set<String> = []
 
     /// Last row activation, used to absorb the second click of a double click.
     var lastActivatedPath: String?

@@ -276,6 +276,268 @@ struct FolderPreviewTypingTests {
     }
 }
 
+/// Forwards to an in-memory filesystem while recording which thread each read
+/// ran on, so the folder browsers can prove they never block the UI.
+final class ThreadRecordingFileSystem: FileSystem, @unchecked Sendable {
+    // Safe: every access to `sawMainThreadRead` is taken under `lock`, and the
+    // wrapped in-memory filesystem is itself Sendable.
+    private let wrapped: InMemoryFileSystem
+    private let lock = NSLock()
+    private var sawMainThreadRead = false
+    private var recordedReadCount = 0
+
+    init(_ wrapped: InMemoryFileSystem) {
+        self.wrapped = wrapped
+    }
+
+    var readOnMainThread: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return sawMainThreadRead
+    }
+
+    var readCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return recordedReadCount
+    }
+
+    private func recordRead() {
+        lock.lock()
+        recordedReadCount += 1
+        if Thread.isMainThread {
+            sawMainThreadRead = true
+        }
+        lock.unlock()
+    }
+
+    func readData(at url: URL) throws -> Data {
+        recordRead()
+        return try wrapped.readData(at: url)
+    }
+
+    func readData(at url: URL, fromOffset offset: Int) throws -> Data {
+        recordRead()
+        return try wrapped.readData(at: url, fromOffset: offset)
+    }
+
+    func contentsOfDirectory(at url: URL) throws -> [URL] {
+        recordRead()
+        return try wrapped.contentsOfDirectory(at: url)
+    }
+
+    func fileExists(at url: URL) -> Bool { wrapped.fileExists(at: url) }
+    func isDirectory(at url: URL) -> Bool { wrapped.isDirectory(at: url) }
+    func createDirectory(at url: URL, withIntermediates: Bool) throws {
+        try wrapped.createDirectory(at: url, withIntermediates: withIntermediates)
+    }
+    func byteCount(at url: URL) throws -> Int { try wrapped.byteCount(at: url) }
+    func append(_ data: Data, to url: URL) throws { try wrapped.append(data, to: url) }
+    func createExclusively(_ data: Data, at url: URL) throws { try wrapped.createExclusively(data, at: url) }
+    func writeAtomically(_ data: Data, to url: URL) throws { try wrapped.writeAtomically(data, to: url) }
+    func move(from source: URL, to destination: URL) throws { try wrapped.move(from: source, to: destination) }
+    func remove(at url: URL) throws { try wrapped.remove(at: url) }
+    func modificationDate(at url: URL) throws -> Date { try wrapped.modificationDate(at: url) }
+}
+
+@Suite("Folder browsers never read files on the main thread")
+@MainActor
+struct FolderPreviewOffMainThreadTests {
+    @Test("Rapid unfiltered clicks coalesce to one read and blank row space preserves selection")
+    func rapidUnfilteredSelectionLoadsOnlyTheLastFile() async throws {
+        let backing = InMemoryFileSystem()
+        let root = TestPaths.workspace("unfiltered-selection-root")
+        try backing.createDirectory(at: root, withIntermediates: true)
+        for index in 0..<20 {
+            try backing.writeAtomically(
+                Data("let selected = \(index)\n".utf8),
+                to: root.appendingPathComponent("file\(index).swift")
+            )
+        }
+        let fs = ThreadRecordingFileSystem(backing)
+        let model = FolderTreeViewModel(root: root, fileSystem: fs)
+        model.entries = try FolderScanner.scan(root: root, fileSystem: backing)
+        model.rebuildTree()
+        #expect(!model.hasActiveFilter)
+
+        for index in 0..<20 {
+            model.selectFromOutline("file\(index).swift")
+            // AppKit emits nil when the pointer lands in row whitespace.
+            model.selectFromOutline(nil)
+        }
+
+        #expect(model.selectedRelativePath == "file19.swift")
+        #expect(model.previewMode == .none, "the stale renderer must clear while selection settles")
+        try await waitUntil { model.previewMode == .text }
+        #expect(model.previewText.contains("selected = 19"))
+        #expect(fs.readCount == 1, "obsolete selections started \(fs.readCount) reads")
+    }
+
+    @Test("Rapid table clicks also coalesce, including clicks between file rows")
+    func rapidUnfilteredTableSelectionLoadsOnlyTheLastFile() async throws {
+        let backing = InMemoryFileSystem()
+        let root = TestPaths.workspace("unfiltered-table-selection-root")
+        try backing.createDirectory(at: root, withIntermediates: true)
+        for index in 0..<20 {
+            try backing.writeAtomically(
+                Data("table selection \(index)\n".utf8),
+                to: root.appendingPathComponent("file\(index).txt")
+            )
+        }
+        let fs = ThreadRecordingFileSystem(backing)
+        let model = FolderViewModel(root: root, kind: .files, fileSystem: fs)
+        model.entries = try FolderScanner.scan(root: root, fileSystem: backing)
+
+        for index in 0..<20 {
+            model.selectManyFromTable(["file\(index).txt"])
+            model.selectManyFromTable([])
+        }
+
+        #expect(model.selectedRelativePath == "file19.txt")
+        #expect(model.previewMode == .none)
+        try await waitUntil { model.previewMode == .text }
+        #expect(model.previewText.contains("table selection 19"))
+        #expect(fs.readCount == 1, "obsolete table selections started \(fs.readCount) reads")
+    }
+
+    @Test("Changing file type clears the old renderer before the new URL is classified")
+    func changingFileTypeClearsStaleRenderer() throws {
+        let fs = InMemoryFileSystem()
+        let root = TestPaths.workspace("stale-renderer-root")
+        try fs.createDirectory(at: root, withIntermediates: true)
+        try fs.writeAtomically(Data("text".utf8), to: root.appendingPathComponent("notes.txt"))
+
+        let model = FolderTreeViewModel(root: root, fileSystem: fs)
+        model.entries = try FolderScanner.scan(root: root, fileSystem: fs)
+        model.rebuildTree()
+        model.previewMode = .image
+        model.previewText = "old"
+
+        model.selectFromOutline("notes.txt")
+
+        #expect(model.previewMode == .none)
+        #expect(model.previewText.isEmpty)
+    }
+
+    @Test("Preview and scan reads run off the main thread so rapid clicks cannot freeze the UI")
+    func previewReadsLeaveTheMainThread() async throws {
+        let backing = InMemoryFileSystem()
+        let root = TestPaths.workspace("off-main-root")
+        try backing.createDirectory(at: root, withIntermediates: true)
+        for index in 0..<5 {
+            try backing.writeAtomically(Data("let value = \(index)\n".utf8),
+                                        to: root.appendingPathComponent("file\(index).swift"))
+        }
+        try backing.writeAtomically(Data("# Doc\n".utf8), to: root.appendingPathComponent("guide.md"))
+        let fs = ThreadRecordingFileSystem(backing)
+
+        let tree = FolderTreeViewModel(root: root, fileSystem: fs)
+        tree.refresh()
+        try await waitUntil { !tree.entries.isEmpty }
+
+        // Step through files faster than they load: the regression queued each
+        // read on the main actor, and the window stopped drawing.
+        for index in 0..<5 {
+            tree.select("file\(index).swift")
+        }
+        tree.select("guide.md")
+        try await waitUntil { tree.previewMode == .markdown }
+
+        let table = FolderViewModel(root: root, kind: .files, fileSystem: fs)
+        table.refresh()
+        try await waitUntil { !table.entries.isEmpty }
+        table.select("file0.swift")
+        try await waitUntil { table.previewMode == .text }
+
+        #expect(!fs.readOnMainThread, "folder reads must not run on the main thread")
+    }
+
+    private func waitUntil(_ condition: @MainActor () -> Bool) async throws {
+        for _ in 0..<200 {
+            if condition() { return }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        Issue.record("condition never became true")
+    }
+}
+
+@Suite("Folder outline stays cheap to draw")
+@MainActor
+struct FolderTreeFilterCostTests {
+    /// Generous enough not to flake on a loaded machine, tight enough to catch
+    /// the regression it guards: this took ~2.7 seconds when every row
+    /// recomputed the pruned tree.
+    private static let rowQueryBudget: TimeInterval = 0.5
+
+    @Test("Asking every row whether it is expanded does not re-filter the tree")
+    func isExpandedIsCheapUnderAnActiveFilter() {
+        var entries: [FolderFileEntry] = []
+        for directory in 0..<200 {
+            entries.append(FolderFileEntry(relativePath: "dir\(directory)",
+                                           name: "dir\(directory)",
+                                           fileExtension: "",
+                                           byteCount: 0,
+                                           modifiedAt: Date(timeIntervalSince1970: 0),
+                                           isDirectory: true))
+            for file in 0..<25 {
+                entries.append(FolderFileEntry(relativePath: "dir\(directory)/file\(file).swift",
+                                               name: "file\(file).swift",
+                                               fileExtension: "swift",
+                                               byteCount: 10,
+                                               modifiedAt: Date(timeIntervalSince1970: 0),
+                                               isDirectory: false))
+            }
+        }
+
+        let model = FolderTreeViewModel(root: TestPaths.workspace("filter-cost-root"),
+                                        fileSystem: InMemoryFileSystem())
+        model.entries = entries
+        model.rebuildTree()
+        model.searchText = "file1"
+
+        let start = Date()
+        for directory in 0..<200 {
+            _ = model.isExpanded("dir\(directory)")
+        }
+        let elapsed = Date().timeIntervalSince(start)
+        #expect(elapsed < Self.rowQueryBudget,
+                "drawing rows re-filtered the tree: \(elapsed)s")
+
+        // The cache must still answer correctly, not just quickly.
+        #expect(model.isExpanded("dir7"))
+        #expect(model.expandedPaths.isEmpty)
+        #expect(!model.visibleTreeRoots.isEmpty)
+    }
+
+    @Test("Clearing the filter restores the unfiltered outline")
+    func clearingFilterRestoresFullTree() throws {
+        let fs = InMemoryFileSystem()
+        let root = TestPaths.workspace("filter-clear-root")
+        try fs.createDirectory(at: root, withIntermediates: true)
+        try fs.createDirectory(at: root.appendingPathComponent("src"), withIntermediates: true)
+        try fs.writeAtomically(Data("a".utf8), to: root.appendingPathComponent("src/a.swift"))
+        try fs.writeAtomically(Data("b".utf8), to: root.appendingPathComponent("notes.txt"))
+
+        let model = FolderTreeViewModel(root: root, fileSystem: fs)
+        model.entries = try FolderScanner.scan(root: root, fileSystem: fs)
+        model.rebuildTree()
+        #expect(model.visibleTreeRoots.count == 2)
+
+        model.searchText = "a.swift"
+        #expect(model.visibleTreeRoots.map(\.entry.relativePath) == ["src"])
+        #expect(model.isExpanded("src"))
+
+        model.searchText = ""
+        #expect(model.visibleTreeRoots.count == 2)
+        #expect(!model.isExpanded("src"), "filter expansion must not leak into user expansion")
+
+        model.extensionFilter = "txt"
+        #expect(model.visibleTreeRoots.map(\.entry.relativePath) == ["notes.txt"])
+        model.extensionFilter = nil
+        #expect(model.visibleTreeRoots.count == 2)
+    }
+}
+
 @Suite("Folder tree view model — expansion, filter, preview")
 @MainActor
 struct FolderTreeViewModelTests {

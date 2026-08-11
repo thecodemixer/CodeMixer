@@ -14,9 +14,35 @@ struct LocalMarkdownPreviewView: View {
     let fileSystem: any FileSystem
     var scrollToAnchor: String?
 
+    /// Identity for the render job: recompute when the document changes.
+    private struct RenderRequest: Equatable {
+        let markdown: String
+        let documentDirectory: URL
+    }
+
+    @State private var htmlBody = ""
+
     var body: some View {
         LocalMarkdownWebViewRepresentable(
-            htmlBody: MarkdownHTMLRenderer.render(
+            htmlBody: htmlBody,
+            projectRoot: projectRoot,
+            scrollToAnchor: scrollToAnchor
+        )
+        .task(id: RenderRequest(markdown: markdown, documentDirectory: documentDirectory)) {
+            await renderHTML()
+        }
+    }
+
+    /// Rendering is linear in document size but still hundreds of milliseconds
+    /// for a large document, and it reads every inline image from disk. On the
+    /// main thread that froze the window each time a document was selected.
+    private func renderHTML() async {
+        let markdown = markdown
+        let projectRoot = projectRoot
+        let documentDirectory = documentDirectory
+        let fileSystem = fileSystem
+        let rendered = await Task.detached(priority: .userInitiated) {
+            MarkdownHTMLRenderer.render(
                 markdown,
                 projectRoot: projectRoot,
                 documentDirectory: documentDirectory,
@@ -24,10 +50,10 @@ struct LocalMarkdownPreviewView: View {
                     let url = projectRoot.appendingPathComponent(relative)
                     return try? fileSystem.readData(at: url)
                 }
-            ),
-            projectRoot: projectRoot,
-            scrollToAnchor: scrollToAnchor
-        )
+            )
+        }.value
+        guard markdown == self.markdown else { return }
+        htmlBody = rendered
     }
 }
 

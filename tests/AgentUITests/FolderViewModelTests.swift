@@ -14,6 +14,23 @@ struct MarkdownHTMLRendererTests {
         #expect(!html.contains("<script>"))
     }
 
+    @Test("Repeated headings get distinct anchors without quadratic probing")
+    func repeatedHeadingsStayLinear() {
+        let repeated = String(repeating: "# Fixed\n\nbody\n\n", count: 2_000)
+        let start = Date()
+        let html = MarkdownHTMLRenderer.render(repeated)
+        let elapsed = Date().timeIntervalSince(start)
+        // Probing upward from 2 on every collision made this ~1.7s at this size.
+        #expect(elapsed < 1.0, "duplicate headings re-probed every suffix: \(elapsed)s")
+        #expect(html.contains("id=\"fixed\""))
+        #expect(html.contains("id=\"fixed-2\""))
+        #expect(html.contains("id=\"fixed-2000\""))
+
+        let items = MarkdownHTMLRenderer.tocItems("# A\n\n# A\n\n# A\n")
+        #expect(items.map(\.anchor) == ["a", "a-2", "a-3"])
+        #expect(Set(items.map(\.anchor)).count == items.count)
+    }
+
     @Test("Renders headings with stable anchors for TOC")
     func headingsAndTOC() {
         let md = """

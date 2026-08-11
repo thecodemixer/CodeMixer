@@ -27,11 +27,18 @@ extension FolderTreeViewModel {
             return
         }
         previewTitle = entry.name
+        // Do not pair the new URL with the previous file's renderer while the
+        // debounced load settles (for example, treating a PDF as an image).
+        previewMode = .none
+        previewText = ""
+        previewCapped = false
         let url = absoluteURL(for: relativePath)
         let showSource = docsShowSource
         previewTask = Task { [weak self] in
             guard let self else { return }
             do {
+                try await Task.sleep(for: FolderBrowserLimits.previewSelectionDebounce)
+                try Task.checkCancellation()
                 try await self.loadFilePreview(
                     at: url,
                     entry: entry,
@@ -84,12 +91,16 @@ extension FolderTreeViewModel {
             return
         }
 
+        let fileSystem = fileSystem
         if contentKind == .markdown {
-            let document = try FolderFileSupport.loadMarkdownDocument(
-                at: url,
-                fileSystem: fileSystem,
-                includeTOC: false
-            )
+            let document = try await FolderFileSupport.offMainActor {
+                try FolderFileSupport.loadMarkdownDocument(
+                    at: url,
+                    fileSystem: fileSystem,
+                    includeTOC: false
+                )
+            }
+            try Task.checkCancellation()
             await MainActor.run {
                 guard generation == self.previewGeneration else { return }
                 if document.oversize {
@@ -111,7 +122,10 @@ extension FolderTreeViewModel {
             return
         }
 
-        let preview = try FolderFileSupport.loadTextPreview(at: url, fileSystem: fileSystem)
+        let preview = try await FolderFileSupport.offMainActor {
+            try FolderFileSupport.loadTextPreview(at: url, fileSystem: fileSystem)
+        }
+        try Task.checkCancellation()
         await MainActor.run {
             guard generation == self.previewGeneration else { return }
             if preview.oversize {

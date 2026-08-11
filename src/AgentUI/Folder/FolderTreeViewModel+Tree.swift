@@ -2,30 +2,10 @@ import Foundation
 import AgentCore
 
 extension FolderTreeViewModel {
-    /// Filtered tree shown in the outline. When a filter is active, matching
-    /// files keep their ancestor directories and those ancestors appear expanded
-    /// without mutating `expandedPaths`.
-    var visibleTreeRoots: [FolderTreeNode] {
-        guard hasActiveFilter else { return treeRoots }
-        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let ext = extensionFilter
-        return FolderTreeBuilder.pruned(treeRoots) { entry in
-            if let ext, entry.fileExtension != ext { return false }
-            guard !query.isEmpty else { return true }
-            return entry.name.localizedCaseInsensitiveContains(query)
-                || entry.relativePath.localizedCaseInsensitiveContains(query)
-                || entry.fileExtension.localizedCaseInsensitiveContains(query)
-        }
-    }
-
     /// Paths that should render as expanded in the outline.
     var effectiveExpandedPaths: Set<String> {
         guard hasActiveFilter else { return expandedPaths }
-        var paths = expandedPaths
-        for root in visibleTreeRoots {
-            collectDirectoryPaths(in: root, into: &paths)
-        }
-        return paths
+        return expandedPaths.union(filterExpandedPaths)
     }
 
     var filterMatchCount: Int {
@@ -35,10 +15,38 @@ extension FolderTreeViewModel {
 
     func rebuildTree() {
         treeRoots = FolderTreeBuilder.build(entries: entries)
+        rebuildVisibleTree()
     }
 
+    /// Recomputes the filtered outline. Called when the tree or the filter
+    /// changes — never from a view body, which is what made this expensive.
+    func rebuildVisibleTree() {
+        guard hasActiveFilter else {
+            visibleTreeRoots = treeRoots
+            filterExpandedPaths = []
+            return
+        }
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let ext = extensionFilter
+        let pruned = FolderTreeBuilder.pruned(treeRoots) { entry in
+            if let ext, entry.fileExtension != ext { return false }
+            guard !query.isEmpty else { return true }
+            return entry.name.localizedCaseInsensitiveContains(query)
+                || entry.relativePath.localizedCaseInsensitiveContains(query)
+                || entry.fileExtension.localizedCaseInsensitiveContains(query)
+        }
+        var forced = Set<String>()
+        for root in pruned {
+            collectDirectoryPaths(in: root, into: &forced)
+        }
+        visibleTreeRoots = pruned
+        filterExpandedPaths = forced
+    }
+
+    /// Hot path: the outline calls this for every directory row it draws.
     func isExpanded(_ relativePath: String) -> Bool {
-        effectiveExpandedPaths.contains(relativePath)
+        if expandedPaths.contains(relativePath) { return true }
+        return hasActiveFilter && filterExpandedPaths.contains(relativePath)
     }
 
     func setExpanded(_ relativePath: String, expanded: Bool) {
@@ -66,8 +74,17 @@ extension FolderTreeViewModel {
     }
 
     func select(_ relativePath: String?) {
+        guard selectedRelativePath != relativePath else { return }
         selectedRelativePath = relativePath
         updatePreviewForSelection()
+    }
+
+    /// Applies selection emitted by the outline. AppKit reports `nil` when the
+    /// user clicks row whitespace; preserving the current row avoids tearing
+    /// down and rebuilding the preview for a click that selected no other item.
+    func selectFromOutline(_ relativePath: String?) {
+        guard let relativePath else { return }
+        select(relativePath)
     }
 
     /// A click on a row. Selecting a folder is not what the user is asking for —
