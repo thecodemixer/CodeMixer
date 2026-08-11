@@ -196,7 +196,7 @@ extension EngineViewModel {
     private func reloadAutomaticLogShortcuts(for project: WorkspaceProjectsStore.ProjectRef) async {
         let root = URL(fileURLWithPath: project.path)
         let fs = SystemFileSystem()
-        let entries = (try? FolderProjectScanner.scan(
+        let entries = (try? FolderScanner.scan(
             root: root,
             fileSystem: fs,
             maxEntries: FolderBrowserLimits.maxScanEntries

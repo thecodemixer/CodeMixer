@@ -776,7 +776,7 @@ private func _a2uiPropsMembers() {
 // FolderBrowserLimits
 // FolderFileEntry
 // FolderProjectKind
-// FolderProjectScanner
+// FolderScanner
 // FolderSidebarShortcut
 // FolderViewState
 // FontFamily
@@ -1280,6 +1280,7 @@ private func _a2uiPropsMembers() {
 // fileSystem
 // fileSystemEvents
 // filename
+// filePreviewMaxBytes
 // filesChanged
 // filterable
 // finished
@@ -1754,6 +1755,7 @@ private func _a2uiPropsMembers() {
 // rotate
 // round
 // row
+// rowActivationCoalesceWindow
 // rows
 // run
 // runACPTwinStdioLoop
@@ -2018,6 +2020,7 @@ private func _a2uiPropsMembers() {
 // userPromptText
 // userTurnEchoWindow
 // usesMarkdownPreview
+// usesTreeNavigation
 // usrBinAndBinPath
 // usrBinPath
 // usrLocalBin

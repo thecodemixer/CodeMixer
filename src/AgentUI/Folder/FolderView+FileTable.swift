@@ -3,12 +3,12 @@ import AgentCore
 
 /// The file-listing `Table` variants (compact name-only beside a preview,
 /// full plain, full with a Pin column) plus their shared row/cell/context-menu
-/// helpers. Split out of `FolderProjectBrowserView.swift` because the table
+/// helpers. Split out of `FolderView.swift` because the table
 /// itself — three near-identical column sets, a sort comparator, and the
 /// per-row context menu — is the largest self-contained concern in that view.
-extension FolderProjectBrowserView {
+extension FolderView {
     @ViewBuilder
-    func fileTable(_ browser: FolderProjectBrowserModel, compact: Bool) -> some View {
+    func fileTable(_ browser: FolderViewModel, compact: Bool) -> some View {
         // Beside preview, keep a name-only list — Pin column is full-list only.
         if compact {
             compactPlainFileTable(browser)
@@ -19,7 +19,7 @@ extension FolderProjectBrowserView {
         }
     }
 
-    func compactPlainFileTable(_ browser: FolderProjectBrowserModel) -> some View {
+    func compactPlainFileTable(_ browser: FolderViewModel) -> some View {
         Table(of: FolderFileEntry.self, selection: Binding(
             get: { browser.selectedPaths },
             set: { browser.selectMany($0) }
@@ -51,7 +51,7 @@ extension FolderProjectBrowserView {
         .layoutPriority(0)
     }
 
-    func fullPlainFileTable(_ browser: FolderProjectBrowserModel) -> some View {
+    func fullPlainFileTable(_ browser: FolderViewModel) -> some View {
         Table(
             sortedTableRows(browser),
             selection: Binding(
@@ -101,7 +101,7 @@ extension FolderProjectBrowserView {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    func fullPinnedFileTable(_ browser: FolderProjectBrowserModel) -> some View {
+    func fullPinnedFileTable(_ browser: FolderViewModel) -> some View {
         Table(
             sortedTableRows(browser),
             selection: Binding(
@@ -156,7 +156,7 @@ extension FolderProjectBrowserView {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func tableRows(_ browser: FolderProjectBrowserModel) -> [FolderBrowserRow] {
+    private func tableRows(_ browser: FolderViewModel) -> [FolderBrowserRow] {
         browser.filteredEntries.map { entry in
             FolderBrowserRow(
                 entry: entry,
@@ -167,12 +167,12 @@ extension FolderProjectBrowserView {
 
     /// Table does not reliably re-order custom-cell rows from `sortOrder` alone —
     /// sort explicitly so header clicks always regroup the listing.
-    private func sortedTableRows(_ browser: FolderProjectBrowserModel) -> [FolderBrowserRow] {
+    private func sortedTableRows(_ browser: FolderViewModel) -> [FolderBrowserRow] {
         tableRows(browser).sorted(using: fileTableSortOrder)
     }
 
     private func syncSortOrder(_ order: [FolderTableSort],
-                               into browser: FolderProjectBrowserModel) {
+                               into browser: FolderViewModel) {
         guard let first = order.first else { return }
         browser.sortAscending = first.order == .forward
         switch first.field {
@@ -186,7 +186,7 @@ extension FolderProjectBrowserView {
 
     private func fileNameCell(_ entry: FolderFileEntry) -> some View {
         HStack(spacing: Theme.spacing.s8) {
-            Image(systemName: entry.isDirectory ? "folder" : "doc")
+            Image(systemName: FolderFileIcon.systemImage(for: entry))
                 .foregroundStyle(Theme.text.tertiary)
                 .accessibilityHidden(true)
             Text(entry.relativePath)
@@ -226,7 +226,7 @@ extension FolderProjectBrowserView {
     }
 
     @ViewBuilder
-    private func rowContextMenu(paths: Set<String>, browser: FolderProjectBrowserModel) -> some View {
+    private func rowContextMenu(paths: Set<String>, browser: FolderViewModel) -> some View {
         if paths.count > 1 {
             Button("Copy Paths") {
                 let joined = paths.sorted().map { browser.absoluteURL(for: $0).path }.joined(separator: "\n")
@@ -300,7 +300,7 @@ struct FolderBrowserRow: Identifiable {
 }
 
 /// Explicit comparator so column-header clicks update a typed field (not opaque key paths).
-/// Non-private: `FolderProjectBrowserView` stores `[FolderTableSort]` as its sort-order state.
+/// Non-private: `FolderView` stores `[FolderTableSort]` as its sort-order state.
 struct FolderTableSort: SortComparator, Hashable {
     enum Field: Hashable {
         case name

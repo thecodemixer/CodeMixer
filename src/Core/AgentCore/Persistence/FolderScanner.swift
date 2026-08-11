@@ -33,7 +33,7 @@ public struct FolderFileEntry: Sendable, Hashable, Identifiable {
 
 /// Recursively enumerates files under a folder project, skipping hidden and
 /// tooling directories. Caps at `maxEntries` and reports truncation separately.
-public enum FolderProjectScanner {
+public enum FolderScanner {
     public static let ignoredDirectoryNames: Set<String> = [
         ".codemixer", ".git", ".build", "DerivedData", "node_modules", ".swiftpm",
     ]

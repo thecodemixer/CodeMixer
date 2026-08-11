@@ -230,9 +230,17 @@ struct ProjectTypeTests {
         #expect(FolderProjectKind.files.supportsPinnedSidebarEntries)
         #expect(FolderProjectKind.docs.supportsPinnedSidebarEntries)
         #expect(FolderProjectKind.modelhike.supportsPinnedSidebarEntries)
+        #expect(FolderProjectKind.folderTree.supportsPinnedSidebarEntries)
+        #expect(FolderProjectKind.folderTree.showsPreviewOnSelection)
+        #expect(FolderProjectKind.folderTree.usesTreeNavigation)
+        #expect(!FolderProjectKind.folderTree.usesMarkdownPreview)
+        #expect(!FolderProjectKind.folderTree.showsAutomaticSidebarShortcuts)
         #expect(!FolderProjectKind.logs.supportsPinnedSidebarEntries)
         #expect(FolderProjectKind.logs.showsAutomaticSidebarShortcuts)
         #expect(FolderViewState.normalized(["a", "a", "/abs", "", "b", "c", "d", "e", "f"]).count == 5)
+        #expect(FolderBrowserLimits.filePreviewMaxBytes == FolderBrowserLimits.markdownPreviewMaxBytes)
+        // Must cover a real double click; the macOS default interval is 0.5s.
+        #expect(FolderBrowserLimits.rowActivationCoalesceWindow >= 0.5)
     }
 }
 

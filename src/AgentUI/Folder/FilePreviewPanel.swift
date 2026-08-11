@@ -5,7 +5,7 @@ import AgentCore
 /// Shared file preview chrome for folder projects (docs / logs / modelhike).
 /// Used beside the folder file list and as the standalone sidebar-pin surface.
 struct FilePreviewPanel: View {
-    @Bindable var browser: FolderProjectBrowserModel
+    @Bindable var browser: FolderViewModel
     let kind: FolderProjectKind
     var onClose: () -> Void
     /// Optional trailing action (e.g. “Show files” when opened from a sidebar pin).
@@ -310,7 +310,7 @@ struct FilePreviewPanelHost: View {
     let kind: FolderProjectKind
     let relativePath: String
 
-    @State private var browser: FolderProjectBrowserModel?
+    @State private var browser: FolderViewModel?
 
     var body: some View {
         Group {
@@ -350,7 +350,7 @@ struct FilePreviewPanelHost: View {
 
     private func recreateBrowser() {
         browser?.stop()
-        let created = FolderProjectBrowserModel(
+        let created = FolderViewModel(
             root: URL(fileURLWithPath: project.path),
             kind: kind,
             initialRelativePath: relativePath

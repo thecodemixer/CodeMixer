@@ -79,7 +79,7 @@ struct MarkdownHTMLRendererTests {
 
 @Suite("Folder browser model — listing and preview caps")
 @MainActor
-struct FolderProjectBrowserModelTests {
+struct FolderViewModelTests {
     @Test("Search filters by name and relative path")
     func searchFilters() throws {
         let fs = InMemoryFileSystem()
@@ -89,8 +89,8 @@ struct FolderProjectBrowserModelTests {
         try fs.createDirectory(at: root.appendingPathComponent("nested"), withIntermediates: true)
         try fs.writeAtomically(Data("b".utf8), to: root.appendingPathComponent("nested/beta.txt"))
 
-        let model = FolderProjectBrowserModel(root: root, kind: .files, fileSystem: fs)
-        model.entries = try FolderProjectScanner.scan(root: root, fileSystem: fs)
+        let model = FolderViewModel(root: root, kind: .files, fileSystem: fs)
+        model.entries = try FolderScanner.scan(root: root, fileSystem: fs)
         model.searchText = "beta"
         #expect(model.visibleEntries.map(\.relativePath) == ["nested/beta.txt"])
     }
@@ -104,8 +104,8 @@ struct FolderProjectBrowserModelTests {
         try fs.writeAtomically(Data("b".utf8), to: root.appendingPathComponent("b.txt"))
         try fs.writeAtomically(Data("c".utf8), to: root.appendingPathComponent("c.md"))
 
-        let model = FolderProjectBrowserModel(root: root, kind: .docs, fileSystem: fs)
-        model.entries = try FolderProjectScanner.scan(root: root, fileSystem: fs)
+        let model = FolderViewModel(root: root, kind: .docs, fileSystem: fs)
+        model.entries = try FolderScanner.scan(root: root, fileSystem: fs)
         #expect(Set(model.availableExtensions) == Set(["log", "txt", "md"]))
         model.extensionFilter = "md"
         #expect(model.visibleEntries.map(\.relativePath) == ["c.md"])
@@ -118,8 +118,8 @@ struct FolderProjectBrowserModelTests {
         try fs.createDirectory(at: root, withIntermediates: true)
         try fs.writeAtomically(Data("x".utf8), to: root.appendingPathComponent("a.log"))
 
-        let model = FolderProjectBrowserModel(root: root, kind: .logs, fileSystem: fs)
-        model.entries = try FolderProjectScanner.scan(root: root, fileSystem: fs)
+        let model = FolderViewModel(root: root, kind: .logs, fileSystem: fs)
+        model.entries = try FolderScanner.scan(root: root, fileSystem: fs)
         model.searchText = "a"
         model.extensionFilter = "log"
         model.showFilters = true
@@ -147,8 +147,8 @@ struct FolderProjectBrowserModelTests {
         try fs.createDirectory(at: root, withIntermediates: true)
         try fs.writeAtomically(Data("x".utf8), to: root.appendingPathComponent("a.txt"))
 
-        let model = FolderProjectBrowserModel(root: root, kind: .files, fileSystem: fs)
-        model.entries = try FolderProjectScanner.scan(root: root, fileSystem: fs)
+        let model = FolderViewModel(root: root, kind: .files, fileSystem: fs)
+        model.entries = try FolderScanner.scan(root: root, fileSystem: fs)
         model.searchText = "a"
         model.select("a.txt")
         model.closePreview()
@@ -164,8 +164,8 @@ struct FolderProjectBrowserModelTests {
         try fs.writeAtomically(Data("a".utf8), to: root.appendingPathComponent("a.txt"))
         try fs.writeAtomically(Data("b".utf8), to: root.appendingPathComponent("b.txt"))
 
-        let model = FolderProjectBrowserModel(root: root, kind: .files, fileSystem: fs)
-        model.entries = try FolderProjectScanner.scan(root: root, fileSystem: fs)
+        let model = FolderViewModel(root: root, kind: .files, fileSystem: fs)
+        model.entries = try FolderScanner.scan(root: root, fileSystem: fs)
         model.selectMany(["b.txt", "a.txt"])
         #expect(model.selectedPaths == Set(["a.txt", "b.txt"]))
         #expect(model.selectedRelativePath == "a.txt")
@@ -184,8 +184,8 @@ struct FolderProjectBrowserModelTests {
         try fs.writeAtomically(Data(md.utf8), to: root.appendingPathComponent("guide.md"))
         try fs.writeAtomically(Data("line\n".utf8), to: root.appendingPathComponent("app.log"))
 
-        let docs = FolderProjectBrowserModel(root: root, kind: .docs, fileSystem: fs)
-        docs.entries = try FolderProjectScanner.scan(root: root, fileSystem: fs)
+        let docs = FolderViewModel(root: root, kind: .docs, fileSystem: fs)
+        docs.entries = try FolderScanner.scan(root: root, fileSystem: fs)
         docs.select("guide.md")
         try? await Task.sleep(for: .milliseconds(40))
         #expect(docs.previewMode == .markdown)
@@ -193,8 +193,8 @@ struct FolderProjectBrowserModelTests {
         docs.scrollToTOC("section")
         #expect(docs.pendingTOCAnchor == "section")
 
-        let logs = FolderProjectBrowserModel(root: root, kind: .logs, fileSystem: fs)
-        logs.entries = try FolderProjectScanner.scan(root: root, fileSystem: fs)
+        let logs = FolderViewModel(root: root, kind: .logs, fileSystem: fs)
+        logs.entries = try FolderScanner.scan(root: root, fileSystem: fs)
         logs.select("app.log")
         try? await Task.sleep(for: .milliseconds(40))
         #expect(logs.followLogs)
@@ -210,8 +210,8 @@ struct FolderProjectBrowserModelTests {
         let big = String(repeating: "x", count: FolderBrowserLimits.logPreviewTailBytes + 64)
         try fs.writeAtomically(Data(big.utf8), to: root.appendingPathComponent("app.log"))
 
-        let model = FolderProjectBrowserModel(root: root, kind: .logs, fileSystem: fs)
-        model.entries = try FolderProjectScanner.scan(root: root, fileSystem: fs)
+        let model = FolderViewModel(root: root, kind: .logs, fileSystem: fs)
+        model.entries = try FolderScanner.scan(root: root, fileSystem: fs)
         model.select("app.log")
         try? await Task.sleep(for: .milliseconds(40))
         #expect(model.previewMode == .text)
@@ -224,7 +224,7 @@ struct FolderProjectBrowserModelTests {
         let fs = InMemoryFileSystem()
         let root = TestPaths.workspace("empty-root")
         try fs.createDirectory(at: root, withIntermediates: true)
-        let model = FolderProjectBrowserModel(root: root, kind: .files, fileSystem: fs)
+        let model = FolderViewModel(root: root, kind: .files, fileSystem: fs)
         model.entries = []
         model.isLoading = false
         #expect(model.isEmptyListing)
@@ -240,8 +240,8 @@ struct FolderProjectBrowserModelTests {
         try fs.writeAtomically(Data("b".utf8), to: root.appendingPathComponent("b.txt"))
         try fs.writeAtomically(Data("c".utf8), to: root.appendingPathComponent("c.txt"))
 
-        let model = FolderProjectBrowserModel(root: root, kind: .docs, fileSystem: fs)
-        model.entries = try FolderProjectScanner.scan(root: root, fileSystem: fs)
+        let model = FolderViewModel(root: root, kind: .docs, fileSystem: fs)
+        model.entries = try FolderScanner.scan(root: root, fileSystem: fs)
         model.pinnedRelativePaths = ["b.txt"]
         model.toggleSort(.pinned)
         #expect(model.sortColumn == .pinned)
@@ -262,7 +262,7 @@ struct FolderProjectBrowserModelTests {
             )
         }
 
-        let model = FolderProjectBrowserModel(
+        let model = FolderViewModel(
             root: root,
             kind: .docs,
             fileSystem: fs,

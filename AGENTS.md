@@ -164,6 +164,10 @@ Codemixer/
 | Appearance at root | `AgentUI/Theme/AppearanceModifiers.swift`, applied from `CodemixerApp/RootView.swift` |
 | Bootstrap (Mode B probe, notifications) | `CodemixerApp/Bootstrap.swift`, `Bootstrap+Remote.swift` |
 | Diff panel | `AgentUI/Diff/DiffPanelView.swift` |
+| Folder table browser (`files`/`logs`/`docs`/`modelhike`) | `AgentUI/Folder/FolderView.swift`, `FolderView+FileTable.swift`, `FolderViewModel.swift` |
+| Folder tree browser (`folderTree`) | `AgentUI/Folder/FolderTreeView.swift`, `FolderTreeView+TreeColumn.swift`, `FolderTreeViewModel.swift` (+Tree/+Preview/+Watching) |
+| Folder scan + shared preview helpers / icons | `Core/AgentCore/Persistence/FolderScanner.swift`, `AgentUI/Folder/{FolderFileSupport,FolderFileIcon,FolderTreeBuilder,FolderTreeNode}.swift` |
+| Folder preview panels | `AgentUI/Folder/FilePreviewPanel.swift` (table kinds), `FolderTreePreviewPanel.swift` + `FolderTreePreviewPanelHost.swift` (tree) |
 | Settings pane | `AgentUI/Settings/SettingsView.swift` |
 | Project picker | `AgentUI/Pickers/ProjectPickerView.swift` |
 | Conversation search | `AgentUI/Search/ConversationSearchBar.swift` |
@@ -283,6 +287,9 @@ tests/
 | Workspace create/open model-catalog warm | `AgentUITests/WorkspaceLifecycleTests.swift` |
 | Interaction coverage (every command/event surfaced) | `AgentUITests/InteractionCoverageTests.swift` |
 | Session export | `AgentUITests/SessionExporterTests.swift` |
+| Folder table model | `AgentUITests/FolderViewModelTests.swift` |
+| Folder tree builder / icons / model | `AgentUITests/FolderTreeViewModelTests.swift` |
+| Folder tree live filesystem + FSEvents + on-disk project state (opt-in) | `AgentUITests/LiveFolderTreeHarness.swift` — `CODEMIXER_LIVE_FOLDER_TREE=1` |
 | Voice + TTS + speech wrappers | `AgentUITests/{VoiceInputServiceTests,TTSStripMarkdownTests,SpeechCaptureTests,SpeechSynthesisTests}.swift` |
 | QR + system notifications | `AgentUITests/{QRCodeRendererTests,SystemNotificationsTests}.swift` |
 

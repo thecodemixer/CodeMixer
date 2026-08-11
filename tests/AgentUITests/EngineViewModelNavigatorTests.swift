@@ -1159,6 +1159,58 @@ struct EngineViewModelNavigatorTests {
         await bus.shutdown()
     }
 
+    @Test("selectProject for folderTree opens the folder browser surface")
+    func selectFolderTreeProject() async throws {
+        let port = RecordingPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
+        let fileSystem = InMemoryFileSystem()
+        let environment = FakeEnvironment(home: TestPaths.fakeHome)
+        let store = WorkspaceProjectsStore(environment: environment, fileSystem: fileSystem)
+        vm.workspaceProjects = store
+
+        let workspace = TestPaths.workspace("ws-folder-tree-select")
+        await vm.adoptEmptyWorkspace(workspace)
+        let ref = try await store.createProject(name: "tree", projectType: .folder(.folderTree), in: workspace)
+        await vm.applyProjectList(await store.projects(for: workspace))
+        vm.selectProject(path: ref.path)
+
+        #expect(vm.showsFolderBrowser)
+        #expect(vm.activeFolderProjectKind == .folderTree)
+        #expect(FolderProjectKind.folderTree.usesTreeNavigation)
+        #expect(port.commands.isEmpty)
+
+        await bus.shutdown()
+    }
+
+    @Test("openFolderShortcut for folderTree enters preview-only mode")
+    func openFolderTreeShortcutFocusesPreview() async throws {
+        let port = RecordingPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
+        let fileSystem = InMemoryFileSystem()
+        let environment = FakeEnvironment(home: TestPaths.fakeHome)
+        let store = WorkspaceProjectsStore(environment: environment, fileSystem: fileSystem)
+        vm.workspaceProjects = store
+
+        let workspace = TestPaths.workspace("ws-folder-tree-pin")
+        await vm.adoptEmptyWorkspace(workspace)
+        let ref = try await store.createProject(name: "tree", projectType: .folder(.folderTree), in: workspace)
+        await vm.applyProjectList(await store.projects(for: workspace))
+
+        vm.openFolderShortcut(projectPath: ref.path, relativePath: "readme.md")
+        #expect(vm.showsFolderBrowser)
+        #expect(vm.showsPreviewOnly)
+        #expect(vm.activeFolderSelectionRelativePath == "readme.md")
+        #expect(vm.activeFolderProjectKind == .folderTree)
+
+        vm.exitFolderPreviewOnly()
+        #expect(!vm.showsPreviewOnly)
+        #expect(vm.activeFolderSelectionRelativePath == "readme.md")
+
+        await bus.shutdown()
+    }
+
     @Test("openFolderShortcut for files does not enter preview-only mode")
     func openFolderShortcutFilesKeepsList() async throws {
         let port = RecordingPort()

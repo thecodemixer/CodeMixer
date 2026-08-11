@@ -12,7 +12,8 @@ import OSLog
 public struct WorkspaceLocalState: Sendable, Codable, Hashable {
     /// Bumped when `ProjectType` gained `.folder(...)` so older builds refuse
     /// newer catalogs rather than mis-decode them.
-    public static let currentSchemaVersion = 4
+    /// Schema v5 adds `FolderProjectKind.folderTree`.
+    public static let currentSchemaVersion = 5
 
     public var schemaVersion: Int
     public var projects: [WorkspaceProjectsStore.ProjectRef]

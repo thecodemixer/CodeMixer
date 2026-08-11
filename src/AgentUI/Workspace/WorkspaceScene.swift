@@ -49,9 +49,18 @@ public struct WorkspaceScene: View {
                        == URL(fileURLWithPath: path).standardizedFileURL.path
                }),
                let kind = project.projectType.folderKind {
-                if model.showsPreviewOnly,
-                   kind.showsPreviewOnSelection,
+                if kind.usesTreeNavigation, model.showsPreviewOnly,
                    let relativePath = model.activeFolderSelectionRelativePath {
+                    FolderTreePreviewPanelHost(
+                        model: model,
+                        project: project,
+                        relativePath: relativePath
+                    )
+                } else if kind.usesTreeNavigation {
+                    FolderTreeView(model: model, project: project)
+                } else if model.showsPreviewOnly,
+                          kind.showsPreviewOnSelection,
+                          let relativePath = model.activeFolderSelectionRelativePath {
                     FilePreviewPanelHost(
                         model: model,
                         project: project,
@@ -59,7 +68,7 @@ public struct WorkspaceScene: View {
                         relativePath: relativePath
                     )
                 } else {
-                    FolderProjectBrowserView(model: model, project: project, kind: kind)
+                    FolderView(model: model, project: project, kind: kind)
                 }
             } else {
                 conversationColumn

@@ -5,7 +5,7 @@ import SwiftUI
 
 extension View {
     /// The padded, panel-tinted background shared by every panel's top
-    /// header row (`DiffPanelView`, `FolderProjectBrowserView`,
+    /// header row (`DiffPanelView`, `FolderView`,
     /// `FilePreviewPanel`) and the folder browser's search/filter bars.
     /// `verticalPadding` defaults to the horizontal inset for a square header;
     /// pass a tighter value for a single-line bar.
@@ -83,7 +83,7 @@ final class QuickLookBridge: NSObject, QLPreviewPanelDataSource, @unchecked Send
 
 /// Presents `url` in the shared system Quick Look panel and returns the
 /// data-source bridge for the caller to retain. Shared by `DiffPanelView`,
-/// `FolderProjectBrowserView`, and `FilePreviewPanel`'s Quick Look actions.
+/// `FolderView`, and `FilePreviewPanel`'s Quick Look actions.
 @MainActor
 @discardableResult
 func presentQuickLook(url: URL) -> QuickLookBridge {

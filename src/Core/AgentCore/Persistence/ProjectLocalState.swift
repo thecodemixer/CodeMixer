@@ -10,9 +10,10 @@ import OSLog
 ///
 /// On disk the field is still keyed `agentMode` (schema v1+) for compatibility.
 /// Schema v2 adds optional `folderView` for pinned sidebar paths on folder
-/// projects (`files` / `docs` / `modelhike`).
+/// projects (`files` / `docs` / `modelhike` / `folderTree`).
+/// Schema v4 adds `FolderProjectKind.folderTree`.
 public struct ProjectLocalState: Sendable, Codable, Hashable {
-    public static let currentSchemaVersion = 3
+    public static let currentSchemaVersion = 4
 
     public var schemaVersion: Int
     public var displayName: String

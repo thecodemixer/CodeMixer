@@ -87,6 +87,7 @@ public enum FolderProjectKind: String, Sendable, Codable, Hashable, CaseIterable
     case logs
     case docs
     case modelhike
+    case folderTree
 
     public var id: String { rawValue }
 
@@ -96,6 +97,7 @@ public enum FolderProjectKind: String, Sendable, Codable, Hashable, CaseIterable
         case .logs: return "Logs"
         case .docs: return "Docs"
         case .modelhike: return "Modelhike"
+        case .folderTree: return "Folder Tree"
         }
     }
 
@@ -107,6 +109,7 @@ public enum FolderProjectKind: String, Sendable, Codable, Hashable, CaseIterable
         case .logs: return "doc.text"
         case .docs: return "book"
         case .modelhike: return "point.3.connected.trianglepath.dotted"
+        case .folderTree: return "list.bullet.indent"
         }
     }
 
@@ -114,7 +117,7 @@ public enum FolderProjectKind: String, Sendable, Codable, Hashable, CaseIterable
     public var showsPreviewOnSelection: Bool {
         switch self {
         case .files: return false
-        case .logs, .docs, .modelhike: return true
+        case .logs, .docs, .modelhike, .folderTree: return true
         }
     }
 
@@ -122,14 +125,14 @@ public enum FolderProjectKind: String, Sendable, Codable, Hashable, CaseIterable
     public var usesMarkdownPreview: Bool {
         switch self {
         case .docs, .modelhike: return true
-        case .files, .logs: return false
+        case .files, .logs, .folderTree: return false
         }
     }
 
     /// User-pinned sidebar shortcuts are supported for these kinds.
     public var supportsPinnedSidebarEntries: Bool {
         switch self {
-        case .files, .docs, .modelhike: return true
+        case .files, .docs, .modelhike, .folderTree: return true
         case .logs: return false
         }
     }
@@ -137,6 +140,11 @@ public enum FolderProjectKind: String, Sendable, Codable, Hashable, CaseIterable
     /// Automatic newest-file shortcuts (never persisted).
     public var showsAutomaticSidebarShortcuts: Bool {
         self == .logs
+    }
+
+    /// Whether the project uses the dedicated tree outline surface (`FolderTreeView`).
+    public var usesTreeNavigation: Bool {
+        self == .folderTree
     }
 }
 
@@ -165,7 +173,7 @@ public struct CustomAgentRef: Sendable, Codable, Hashable {
 /// `<project>/.codemixer/project.json`. Browser preferences (search, sort,
 /// scroll, follow) are intentionally *not* stored here.
 public struct FolderViewState: Sendable, Codable, Hashable {
-    /// Maximum pinned sidebar shortcuts for files / docs / modelhike.
+    /// Maximum pinned sidebar shortcuts for files / docs / modelhike / folderTree.
     public static let maxPinnedPaths = 5
 
     /// Project-relative paths in user-defined order.
@@ -195,8 +203,15 @@ public enum FolderBrowserLimits {
     public static let maxScanEntries = 5_000
     public static let logPreviewTailBytes = 1_048_576
     public static let markdownPreviewMaxBytes = 2_097_152
+    /// Cap for generic text/source previews in folder-tree (and similar) surfaces.
+    public static let filePreviewMaxBytes = 2_097_152
     public static let automaticLogShortcuts = 5
     public static let scanDebounce: Duration = .milliseconds(250)
+    /// Window in which a second click on the same tree row counts as the tail of
+    /// a double click rather than a fresh toggle. Matches the macOS default
+    /// double-click interval so a double click opens a folder instead of
+    /// expanding and immediately collapsing it.
+    public static let rowActivationCoalesceWindow: TimeInterval = 0.5
 }
 
 /// One sidebar shortcut under a folder project title.

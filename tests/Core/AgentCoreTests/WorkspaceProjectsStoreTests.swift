@@ -522,6 +522,35 @@ struct WorkspaceProjectsStoreTests {
         #expect(projects.contains { $0.path == ref.path && $0.projectType == .folder(.docs) })
     }
 
+    @Test("Folder tree project types round-trip through local project state")
+    func folderTreeProjectRoundTrip() async throws {
+        let fs = InMemoryFileSystem()
+        let store = makeStore(fs: fs)
+        let ref = try await store.createProject(name: "tree", projectType: .folder(.folderTree), in: workspace)
+        #expect(ref.projectType == .folder(.folderTree))
+        let local = ProjectLocalStateStore.load(from: URL(fileURLWithPath: ref.path), fileSystem: fs)
+        #expect(local?.projectType == .folder(.folderTree))
+        #expect(local?.schemaVersion == ProjectLocalState.currentSchemaVersion)
+
+        let fresh = makeStore(fs: fs)
+        await fresh.load()
+        let projects = await fresh.projects(for: workspace)
+        #expect(projects.contains { $0.path == ref.path && $0.projectType == .folder(.folderTree) })
+    }
+
+    @Test("Project local state ignores a newer schema rather than decoding it")
+    func projectLocalStateRefusesNewerSchema() throws {
+        let fs = InMemoryFileSystem()
+        let root = workspace.appendingPathComponent("future-project")
+        try fs.createDirectory(at: root, withIntermediates: true)
+        let url = ProjectPaths.projectStateURL(in: root)
+        let future = """
+        {"schemaVersion":999,"displayName":"future","agentMode":{"folder":{"folderTree":{}}}}
+        """
+        try fs.writeAtomically(Data(future.utf8), to: url)
+        #expect(ProjectLocalStateStore.load(from: root, fileSystem: fs) == nil)
+    }
+
     @Test("Pinned folder paths persist and reject absolute paths")
     func folderPinsPersistAndRejectAbsolute() async throws {
         let fs = InMemoryFileSystem()
@@ -565,7 +594,7 @@ struct WorkspaceProjectsStoreTests {
         try fs.createDirectory(at: root.appendingPathComponent(".codemixer"), withIntermediates: true)
         try fs.writeAtomically(Data("{}".utf8), to: root.appendingPathComponent(".codemixer/project.json"))
 
-        let result = try FolderProjectScanner.scanDetailed(root: root, fileSystem: fs, maxEntries: 1)
+        let result = try FolderScanner.scanDetailed(root: root, fileSystem: fs, maxEntries: 1)
         #expect(result.entries.count == 1)
         #expect(result.truncated)
         #expect(!result.entries.contains { $0.relativePath.contains(".git") })

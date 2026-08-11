@@ -3,23 +3,19 @@ import AppKit
 import Quartz
 import AgentCore
 
-/// Main-area folder browser for non-agent `ProjectType.folder` projects.
-struct FolderProjectBrowserView: View {
+/// Main-area tree browser for `FolderProjectKind.folderTree` projects.
+struct FolderTreeView: View {
     @Bindable var model: EngineViewModel
     let project: WorkspaceProjectsStore.ProjectRef
-    let kind: FolderProjectKind
 
-    @State private var browser: FolderProjectBrowserModel?
+    @State private var treeModel: FolderTreeViewModel?
     @State private var qlBridge: QuickLookBridge?
-    /// Non-private: the file-table builders in `+FileTable.swift` read and
-    /// write this via `$fileTableSortOrder`.
-    @State var fileTableSortOrder = [FolderTableSort(field: .name)]
     @FocusState private var searchFocused: Bool
 
     var body: some View {
         Group {
-            if let browser {
-                content(browser)
+            if let treeModel {
+                content(treeModel)
             } else {
                 ProgressView("Scanning folder…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -27,58 +23,48 @@ struct FolderProjectBrowserView: View {
             }
         }
         .background(Theme.surface.canvas)
-        .onAppear { ensureBrowser() }
-        .onChange(of: project.path) { _, _ in recreateBrowser() }
-        .onChange(of: kind) { _, _ in recreateBrowser() }
+        .onAppear { ensureModel() }
+        .onChange(of: project.path) { _, _ in recreateModel() }
         .onChange(of: model.pendingFolderSelectionRelativePath) { _, path in
             guard !model.showsPreviewOnly else { return }
-            if let path, let browser {
-                browser.consumePendingSelection(path)
+            if let path, let treeModel {
+                treeModel.consumePendingSelection(path)
+                treeModel.revealPath(path)
                 model.pendingFolderSelectionRelativePath = nil
                 model.setActiveFolderSelection(path)
             }
         }
         .onDisappear {
-            browser?.stop()
+            treeModel?.stop()
         }
     }
 
     @ViewBuilder
-    private func content(_ browser: FolderProjectBrowserModel) -> some View {
+    private func content(_ treeModel: FolderTreeViewModel) -> some View {
         VStack(spacing: 0) {
-            header(browser)
+            header(treeModel)
             Divider()
-            searchBar(browser)
-            if browser.showFilters {
-                filterBar(browser)
+            searchBar(treeModel)
+            if treeModel.showFilters {
+                filterBar(treeModel)
             }
-            if browser.truncated {
+            if treeModel.truncated {
                 truncationBanner
             }
-            if let notice = browser.logRotationNotice {
-                Text(notice)
-                    .font(Theme.typography.caption)
-                    .foregroundStyle(Theme.signal.warning)
-                    .padding(.horizontal, Theme.spacing.s16)
-                    .padding(.vertical, Theme.spacing.s8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Theme.surface.panel)
-                    .accessibilityLabel(notice)
-            }
-            if let error = browser.lastError {
+            if let error = treeModel.lastError {
                 recoveryBanner(
                     title: "Could not scan folder",
                     detail: error,
                     actionTitle: "Retry",
-                    action: { browser.refresh() }
+                    action: { treeModel.refresh() }
                 )
             }
             Group {
-                if browser.isLoading && browser.entries.isEmpty {
+                if treeModel.isLoading && treeModel.entries.isEmpty {
                     ProgressView("Scanning folder…")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .accessibilityLabel("Scanning folder")
-                } else if browser.isEmptyListing {
+                } else if treeModel.isEmptyListing {
                     VStack(spacing: Theme.spacing.s16) {
                         ContentUnavailableView(
                             "Empty folder",
@@ -86,22 +72,28 @@ struct FolderProjectBrowserView: View {
                             description: Text("Add files to this project folder, then refresh.")
                         )
                         Button("Refresh") {
-                            browser.refresh()
+                            treeModel.refresh()
                             model.refreshFolderSidebarShortcuts(for: project)
                         }
                         .accessibilityLabel("Refresh empty folder")
                     }
+                } else if treeModel.hasActiveFilter && treeModel.visibleTreeRoots.isEmpty {
+                    ContentUnavailableView(
+                        "No matching files",
+                        systemImage: "magnifyingglass",
+                        description: Text("Try a different search or clear filters.")
+                    )
                 } else {
-                    let showsPreview = kind.showsPreviewOnSelection
-                        && browser.selectedRelativePath != nil
                     HStack(spacing: 0) {
-                        fileTable(browser, compact: showsPreview)
-                        if showsPreview {
-                            Divider()
-                            FilePreviewPanel(
-                                browser: browser,
-                                kind: kind,
-                                onClose: { browser.closePreview() }
+                        treeColumn(treeModel)
+                        Divider()
+                        if treeModel.selectedRelativePath == nil
+                            || treeModel.selectedEntry?.isDirectory == true {
+                            selectAFilePlaceholder
+                        } else {
+                            FolderTreePreviewPanel(
+                                model: treeModel,
+                                onClose: { treeModel.closePreview() }
                             )
                         }
                     }
@@ -112,21 +104,27 @@ struct FolderProjectBrowserView: View {
             Button("Focus Search") { searchFocused = true }
                 .keyboardShortcut("f", modifiers: .command)
                 .hidden()
-            Button("Copy Path") { copySelectedPaths(browser) }
+            Button("Copy Path") { copySelectedPath(treeModel) }
                 .keyboardShortcut("c", modifiers: [.command, .shift])
                 .hidden()
-            Button("Open Selected") { openSelected(browser) }
+            Button("Open Selected") { openSelected(treeModel) }
                 .keyboardShortcut(.defaultAction)
                 .hidden()
-            Button("Quick Look Selected") { quickLookSelected(browser) }
+            Button("Quick Look Selected") { quickLookSelected(treeModel) }
                 .keyboardShortcut(.space)
+                .hidden()
+            Button("Expand All") { treeModel.expandAll() }
+                .keyboardShortcut(.rightArrow, modifiers: .option)
+                .hidden()
+            Button("Collapse All") { treeModel.collapseAll() }
+                .keyboardShortcut(.leftArrow, modifiers: .option)
                 .hidden()
             Button("Dismiss Overlay") {
                 if qlBridge != nil, QLPreviewPanel.shared()?.isVisible == true {
                     QLPreviewPanel.shared()?.orderOut(nil)
                     qlBridge = nil
                 } else {
-                    _ = browser.handleEscape()
+                    _ = treeModel.handleEscape()
                 }
             }
             .keyboardShortcut(.escape, modifiers: [])
@@ -134,28 +132,39 @@ struct FolderProjectBrowserView: View {
         }
         .onAppear {
             searchFocused = false
-            syncPinnedPaths(into: browser)
-            model.setActiveFolderSelection(browser.selectedRelativePath)
+            syncPinnedPaths(into: treeModel)
+            model.setActiveFolderSelection(treeModel.selectedRelativePath)
         }
-        .onChange(of: browser.selectedRelativePath) { _, path in
+        .onChange(of: treeModel.selectedRelativePath) { _, path in
             model.setActiveFolderSelection(path)
         }
         .onChange(of: model.folderPinnedPathsByProject[project.path] ?? []) { _, _ in
-            syncPinnedPaths(into: browser)
+            syncPinnedPaths(into: treeModel)
         }
     }
 
-    private func syncPinnedPaths(into browser: FolderProjectBrowserModel) {
-        browser.pinnedRelativePaths = Set(model.folderPinnedPathsByProject[project.path] ?? [])
+    private var selectAFilePlaceholder: some View {
+        ContentUnavailableView(
+            "Select a file",
+            systemImage: "doc.text.magnifyingglass",
+            description: Text("Choose a file in the tree to preview its contents.")
+        )
+        .frame(minWidth: Theme.layout.folderPreviewMinWidth)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .layoutPriority(1)
     }
 
-    private func header(_ browser: FolderProjectBrowserModel) -> some View {
+    private func syncPinnedPaths(into treeModel: FolderTreeViewModel) {
+        treeModel.pinnedRelativePaths = Set(model.folderPinnedPathsByProject[project.path] ?? [])
+    }
+
+    private func header(_ treeModel: FolderTreeViewModel) -> some View {
         HStack(spacing: Theme.spacing.s12) {
-            Image(systemName: kind.systemImage)
+            Image(systemName: FolderProjectKind.folderTree.systemImage)
                 .foregroundStyle(Theme.text.secondary)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: Theme.spacing.s4) {
-                Text(kind.displayLabel)
+                Text(FolderProjectKind.folderTree.displayLabel)
                     .font(Theme.typography.label)
                     .foregroundStyle(Theme.text.primary)
                 Text(project.path)
@@ -165,22 +174,40 @@ struct FolderProjectBrowserView: View {
                     .truncationMode(.middle)
             }
             Spacer(minLength: 0)
-            if browser.isLoading {
+            if treeModel.isLoading {
                 ProgressView()
                     .controlSize(.small)
                     .accessibilityLabel("Refreshing")
             }
-            if let refreshed = browser.lastRefreshedAt {
+            if let refreshed = treeModel.lastRefreshedAt {
                 Text("Updated \(refreshed.formatted(date: .omitted, time: .shortened))")
                     .font(Theme.typography.caption)
                     .foregroundStyle(Theme.text.tertiary)
             }
-            Text("\(browser.visibleEntries.count) of \(browser.fileCount)")
+            Text("\(treeModel.filterMatchCount) of \(treeModel.fileCount)")
                 .font(Theme.typography.caption)
                 .foregroundStyle(Theme.text.tertiary)
-                .accessibilityLabel("\(browser.visibleEntries.count) visible of \(browser.fileCount) files")
+                .accessibilityLabel(
+                    "\(treeModel.filterMatchCount) visible of \(treeModel.fileCount) files"
+                )
             Button {
-                browser.showFilters.toggle()
+                treeModel.expandAll()
+            } label: {
+                Image(systemName: "arrow.up.left.and.arrow.down.right")
+            }
+            .buttonStyle(.plain)
+            .help("Expand all folders")
+            .accessibilityLabel("Expand all folders")
+            Button {
+                treeModel.collapseAll()
+            } label: {
+                Image(systemName: "arrow.down.right.and.arrow.up.left")
+            }
+            .buttonStyle(.plain)
+            .help("Collapse all folders")
+            .accessibilityLabel("Collapse all folders")
+            Button {
+                treeModel.showFilters.toggle()
             } label: {
                 Image(systemName: "line.3.horizontal.decrease.circle")
             }
@@ -188,7 +215,7 @@ struct FolderProjectBrowserView: View {
             .help("Filter by extension")
             .accessibilityLabel("Toggle extension filters")
             Button {
-                browser.refresh()
+                treeModel.refresh()
                 model.refreshFolderSidebarShortcuts(for: project)
             } label: {
                 Image(systemName: "arrow.clockwise")
@@ -200,33 +227,27 @@ struct FolderProjectBrowserView: View {
         .panelHeaderChrome()
     }
 
-    private func searchBar(_ browser: FolderProjectBrowserModel) -> some View {
+    private func searchBar(_ treeModel: FolderTreeViewModel) -> some View {
         SearchFieldBar(
             systemImage: "magnifyingglass",
-            placeholder: "Search files",
-            text: Binding(get: { browser.searchText }, set: { browser.searchText = $0 }),
+            placeholder: "Filter files",
+            text: Binding(get: { treeModel.searchText }, set: { treeModel.searchText = $0 }),
             focus: $searchFocused,
-            showsClear: !browser.searchText.isEmpty || browser.extensionFilter != nil,
-            clearAccessibilityLabel: "Clear search and filters",
-            onClear: { browser.clearSearchAndFilters() }
+            showsClear: !treeModel.searchText.isEmpty,
+            clearAccessibilityLabel: "Clear file filter",
+            onClear: { treeModel.searchText = "" }
         )
     }
 
-    private func filterBar(_ browser: FolderProjectBrowserModel) -> some View {
+    private func filterBar(_ treeModel: FolderTreeViewModel) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: Theme.spacing.s8) {
-                filterChip(
-                    title: "All",
-                    selected: browser.extensionFilter == nil
-                ) {
-                    browser.extensionFilter = nil
+                filterChip(title: "All", selected: treeModel.extensionFilter == nil) {
+                    treeModel.extensionFilter = nil
                 }
-                ForEach(browser.availableExtensions, id: \.self) { ext in
-                    filterChip(
-                        title: ".\(ext)",
-                        selected: browser.extensionFilter == ext
-                    ) {
-                        browser.extensionFilter = ext
+                ForEach(treeModel.availableExtensions, id: \.self) { ext in
+                    filterChip(title: ".\(ext)", selected: treeModel.extensionFilter == ext) {
+                        treeModel.extensionFilter = ext
                     }
                 }
             }
@@ -234,8 +255,6 @@ struct FolderProjectBrowserView: View {
             .padding(.vertical, Theme.spacing.s8)
         }
         .background(Theme.surface.panel)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Extension filters")
     }
 
     private func filterChip(title: String, selected: Bool, action: @escaping () -> Void) -> some View {
@@ -271,7 +290,6 @@ struct FolderProjectBrowserView: View {
             VStack(alignment: .leading, spacing: Theme.spacing.s4) {
                 Text(title)
                     .font(Theme.typography.label)
-                    .foregroundStyle(Theme.signal.danger)
                 Text(detail)
                     .font(Theme.typography.caption)
                     .foregroundStyle(Theme.text.secondary)
@@ -284,50 +302,58 @@ struct FolderProjectBrowserView: View {
         .background(Theme.surface.panel)
     }
 
-    // MARK: - Helpers
-
-    private func ensureBrowser() {
-        guard browser == nil else { return }
-        recreateBrowser()
+    private func ensureModel() {
+        guard treeModel == nil else { return }
+        recreateModel()
     }
 
-    private func recreateBrowser() {
-        browser?.stop()
-        let created = FolderProjectBrowserModel(
+    private func recreateModel() {
+        treeModel?.stop()
+        let created = FolderTreeViewModel(
             root: URL(fileURLWithPath: project.path),
-            kind: kind,
             initialRelativePath: model.pendingFolderSelectionRelativePath
         )
-        browser = created
+        treeModel = created
         model.pendingFolderSelectionRelativePath = nil
         created.start()
     }
 
-    private func openSelected(_ browser: FolderProjectBrowserModel) {
-        let paths = browser.selectedPaths.isEmpty
-            ? Set([browser.selectedRelativePath].compactMap { $0 })
-            : browser.selectedPaths
-        for path in paths {
-            DesktopActions.openURL(browser.absoluteURL(for: path))
+    private func openSelected(_ treeModel: FolderTreeViewModel) {
+        guard let path = treeModel.selectedRelativePath else { return }
+        let entry = treeModel.selectedEntry
+        if entry?.isDirectory == true {
+            treeModel.toggleExpanded(path)
+            return
         }
+        DesktopActions.openURL(treeModel.absoluteURL(for: path))
     }
 
-    private func copySelectedPaths(_ browser: FolderProjectBrowserModel) {
-        let paths = browser.selectedPaths.isEmpty
-            ? Set([browser.selectedRelativePath].compactMap { $0 })
-            : browser.selectedPaths
-        guard !paths.isEmpty else { return }
-        let joined = paths.sorted().map { browser.absoluteURL(for: $0).path }.joined(separator: "\n")
-        DesktopActions.copyToPasteboard(joined)
+    private func copySelectedPath(_ treeModel: FolderTreeViewModel) {
+        guard let path = treeModel.selectedRelativePath else { return }
+        DesktopActions.copyToPasteboard(treeModel.absoluteURL(for: path).path)
     }
 
-    private func quickLookSelected(_ browser: FolderProjectBrowserModel) {
-        guard let path = browser.selectedRelativePath ?? browser.selectedPaths.sorted().first else { return }
-        quickLook(url: browser.absoluteURL(for: path))
+    private func quickLookSelected(_ treeModel: FolderTreeViewModel) {
+        guard let path = treeModel.selectedRelativePath,
+              treeModel.selectedEntry?.isDirectory != true else { return }
+        quickLook(url: treeModel.absoluteURL(for: path))
     }
 
-    /// Non-private: `+FileTable.swift`'s row context menu also opens Quick Look.
     func quickLook(url: URL) {
         qlBridge = presentQuickLook(url: url)
     }
 }
+
+#if DEBUG
+#Preview("Folder Tree") {
+    FolderTreeView(
+        model: .preview,
+        project: WorkspaceProjectsStore.ProjectRef(
+            path: PreviewFixtures.workspace.path,
+            displayName: PreviewFixtures.ProjectNames.sample,
+            projectType: .folder(.folderTree)
+        )
+    )
+    .frame(width: 960, height: 640)
+}
+#endif

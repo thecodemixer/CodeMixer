@@ -6,7 +6,7 @@ import AgentCore
 /// persisted — only folder kind + pins live in `.codemixer/project.json`.
 @MainActor
 @Observable
-final class FolderProjectBrowserModel {
+final class FolderViewModel {
     enum SortColumn: String, CaseIterable, Identifiable {
         case name
         case pinned
@@ -84,6 +84,7 @@ final class FolderProjectBrowserModel {
          fileSystem: any FileSystem = SystemFileSystem(),
          clock: any AgentClock = SystemClock(),
          initialRelativePath: String? = nil) {
+        precondition(!kind.usesTreeNavigation, "FolderViewModel does not host folderTree; use FolderTreeViewModel")
         self.root = root.standardizedFileURL
         self.kind = kind
         self.fileSystem = fileSystem
@@ -203,7 +204,7 @@ final class FolderProjectBrowserModel {
         let fileSystem = fileSystem
         scanTask = Task { [weak self] in
             do {
-                let result = try FolderProjectScanner.scanDetailed(
+                let result = try FolderScanner.scanDetailed(
                     root: root,
                     fileSystem: fileSystem
                 )
@@ -264,7 +265,7 @@ final class FolderProjectBrowserModel {
         let fileSystem = fileSystem
         scanTask = Task { [weak self] in
             do {
-                let entry = try Self.makeEntry(
+                let entry = try FolderFileSupport.makeEntry(
                     relativePath: relativePath,
                     root: root,
                     fileSystem: fileSystem
@@ -306,32 +307,6 @@ final class FolderProjectBrowserModel {
                 }
             }
         }
-    }
-
-    private static func makeEntry(relativePath: String,
-                                  root: URL,
-                                  fileSystem: any FileSystem) throws -> FolderFileEntry {
-        let url = root.appendingPathComponent(relativePath).standardizedFileURL
-        let rootPath = root.standardizedFileURL.path
-        let prefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
-        let urlPath = url.path
-        guard urlPath == rootPath || urlPath.hasPrefix(prefix) else {
-            throw CocoaError(.fileReadNoSuchFile)
-        }
-        guard fileSystem.fileExists(at: url) else {
-            throw CocoaError(.fileReadNoSuchFile)
-        }
-        let isDir = fileSystem.isDirectory(at: url)
-        let modified = (try? fileSystem.modificationDate(at: url)) ?? Date(timeIntervalSince1970: 0)
-        let size = isDir ? 0 : ((try? fileSystem.byteCount(at: url)) ?? 0)
-        return FolderFileEntry(
-            relativePath: relativePath,
-            name: url.lastPathComponent,
-            fileExtension: isDir ? "" : url.pathExtension.lowercased(),
-            byteCount: size,
-            modifiedAt: modified,
-            isDirectory: isDir
-        )
     }
 
     func select(_ relativePath: String?) {
@@ -477,6 +452,8 @@ final class FolderProjectBrowserModel {
                                                    entry: entry,
                                                    showSource: docsShowSource,
                                                    generation: generation)
+                case .folderTree:
+                    preconditionFailure("FolderViewModel does not preview folderTree; use FolderTreeViewModel")
                 }
             } catch {
                 guard !Task.isCancelled else { return }
@@ -498,31 +475,22 @@ final class FolderProjectBrowserModel {
     private func loadLogPreview(at url: URL,
                                 entry: FolderFileEntry,
                                 generation: Int) async throws {
-        let size = try fileSystem.byteCount(at: url)
-        let offset = max(0, size - FolderBrowserLimits.logPreviewTailBytes)
-        let data = try fileSystem.readData(at: url, fromOffset: offset)
-        if FolderProjectScanner.isLikelyBinary(data) {
-            await MainActor.run {
-                guard generation == self.previewGeneration else { return }
+        let preview = try FolderFileSupport.loadLogTail(at: url, fileSystem: fileSystem)
+        await MainActor.run {
+            guard generation == self.previewGeneration else { return }
+            if preview.isBinary {
                 self.previewMode = .binary
                 self.previewText = ""
                 self.previewCapped = false
-                self.logReadOffset = size
-                self.tocItems = []
+            } else {
+                self.previewMode = .text
+                self.previewText = preview.text
+                self.previewCapped = preview.capped
             }
-            return
-        }
-        let text = String(data: data, encoding: .utf8)
-            ?? String(decoding: data, as: UTF8.self)
-        await MainActor.run {
-            guard generation == self.previewGeneration else { return }
-            self.previewMode = .text
-            self.previewText = text
-            self.previewCapped = offset > 0
-            self.logReadOffset = size
+            self.logReadOffset = preview.readOffset
             self.tocItems = []
         }
-        if followLogs {
+        if followLogs, !preview.isBinary {
             startLogFollow(at: url, generation: generation)
         }
         _ = entry
@@ -532,40 +500,35 @@ final class FolderProjectBrowserModel {
                                  entry: FolderFileEntry,
                                  showSource: Bool,
                                  generation: Int) async throws {
-        let size = try fileSystem.byteCount(at: url)
-        if size > FolderBrowserLimits.markdownPreviewMaxBytes {
-            await MainActor.run {
-                guard generation == self.previewGeneration else { return }
+        let document = try FolderFileSupport.loadMarkdownDocument(
+            at: url,
+            fileSystem: fileSystem,
+            includeTOC: true
+        )
+        await MainActor.run {
+            guard generation == self.previewGeneration else { return }
+            if document.oversize {
                 self.previewMode = .error
-                self.previewText = "File is larger than the markdown preview limit (\(ByteCountFormatter.string(fromByteCount: Int64(FolderBrowserLimits.markdownPreviewMaxBytes), countStyle: .file)))."
+                self.previewText = FolderFileSupport.oversizeMessage(
+                    limit: FolderBrowserLimits.markdownPreviewMaxBytes
+                )
                 self.tocItems = []
+                return
             }
-            return
-        }
-        let data = try fileSystem.readData(at: url)
-        if FolderProjectScanner.isLikelyBinary(data) {
-            await MainActor.run {
-                guard generation == self.previewGeneration else { return }
+            if document.isBinary {
                 self.previewMode = .binary
                 self.previewText = ""
                 self.tocItems = []
+                return
             }
-            return
-        }
-        let text = String(data: data, encoding: .utf8)
-            ?? String(decoding: data, as: UTF8.self)
-        let toc = MarkdownHTMLRenderer.tableOfContents(text)
-        await MainActor.run {
-            guard generation == self.previewGeneration else { return }
-            self.previewText = text
+            self.previewText = document.text
             self.previewCapped = false
-            self.tocItems = toc
             if showSource {
                 self.previewMode = .source
-            } else if entry.fileExtension == "md"
-                        || entry.fileExtension == "markdown"
-                        || kind.usesMarkdownPreview {
+                self.tocItems = document.tocItems
+            } else if FolderFileSupport.isMarkdownFile(entry) || kind.usesMarkdownPreview {
                 self.previewMode = .markdown
+                self.tocItems = document.tocItems
             } else {
                 self.previewMode = .text
                 self.tocItems = []

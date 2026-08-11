@@ -116,7 +116,8 @@ public actor WorkspaceProjectsStore {
     /// - v3: adds `activeWorkspacePath` (nil = closed / show picker on launch)
     /// - v4: `ProjectType.folder(...)` non-agent folder browser types
     /// - v5: `preferFreshAgentProcess` + `agentInstanceIdentity` on projects
-    public static let currentSchemaVersion = 5
+    /// - v6: `FolderProjectKind.folderTree`
+    public static let currentSchemaVersion = 6
 
     struct WorkspaceEntry: Codable, Hashable {
         var workspacePath: String

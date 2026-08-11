@@ -419,7 +419,7 @@ public struct NewProjectSheet: View {
     private var sheetSubtitle: String {
         switch category {
         case .folder:
-            return "Browse files, logs, docs, or modelhike. Create an empty folder in this workspace or point at an existing directory."
+            return "Browse files, logs, docs, modelhike, or a folder tree. Create an empty folder in this workspace or point at an existing directory."
         case .singleAgent, .mixed, .custom:
             return "Creates a subfolder in the current workspace and writes project type to `.codemixer/project.json`."
         }
