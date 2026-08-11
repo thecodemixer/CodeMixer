@@ -2,9 +2,9 @@ import SwiftUI
 import AppKit
 import AgentCore
 
-/// Shared file preview chrome for folder projects (docs / logs / modelhike).
+/// Table-browser preview chrome for folder projects (docs / logs / modelhike).
 /// Used beside the folder file list and as the standalone sidebar-pin surface.
-struct FilePreviewPanel: View {
+struct FolderViewPreviewPanel: View {
     @Bindable var browser: FolderViewModel
     let kind: FolderProjectKind
     var onClose: () -> Void
@@ -12,7 +12,6 @@ struct FilePreviewPanel: View {
     var trailingActionTitle: String? = nil
     var onTrailingAction: (() -> Void)? = nil
 
-    @State private var qlBridge: QuickLookBridge?
     @FocusState private var logFindFocused: Bool
 
     var body: some View {
@@ -65,8 +64,7 @@ struct FilePreviewPanel: View {
                 .controlSize(.mini)
                 .accessibilityLabel("Wrap lines")
             }
-            if kind.usesMarkdownPreview,
-               browser.previewMode == .markdown || browser.previewMode == .source {
+            if showsSourceToggle {
                 Picker(selection: Binding(
                     get: { browser.docsShowSource },
                     set: { browser.setDocsShowSource($0) }
@@ -84,7 +82,7 @@ struct FilePreviewPanel: View {
                 .pickerStyle(.segmented)
                 .controlSize(.mini)
                 .frame(maxWidth: 120)
-                .accessibilityLabel("Docs preview mode")
+                .accessibilityLabel("Document preview mode")
             }
             if browser.previewCapped {
                 Text("Showing last \(byteCountString(FolderBrowserLimits.logPreviewTailBytes))")
@@ -115,6 +113,18 @@ struct FilePreviewPanel: View {
             .onHover { DesktopActions.setPointingHandCursor($0) }
         }
         .panelHeaderChrome(verticalPadding: Theme.spacing.s8)
+    }
+
+    /// The toggle is offered whenever the panel is showing a rendered document
+    /// that also has a source form — markdown anywhere, markup files, and every
+    /// file in a docs-style project.
+    private var showsSourceToggle: Bool {
+        let rendersDocument = browser.previewMode == .markdown
+            || browser.previewMode == .source
+            || browser.previewMode == .web
+        guard rendersDocument else { return false }
+        guard let entry = browser.selectedEntry else { return false }
+        return kind.usesMarkdownPreview || FolderFileSupport.hasRenderedAndSourceViews(entry)
     }
 
     private var logFindBar: some View {
@@ -159,146 +169,33 @@ struct FilePreviewPanel: View {
         .accessibilityLabel("Table of contents")
     }
 
-    @ViewBuilder
     private var previewBody: some View {
-        switch browser.previewMode {
-        case .none:
-            // Preview panel is only mounted with a selection; `.none` means loading.
-            ProgressView("Loading preview…")
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .accessibilityLabel("Loading preview")
-        case .empty:
-            ContentUnavailableView(
-                "No files yet",
-                systemImage: "folder",
-                description: Text("This folder has no files to show.")
-            )
-        case .permissionDenied:
-            VStack(spacing: Theme.spacing.s16) {
-                ContentUnavailableView(
-                    "Permission denied",
-                    systemImage: "lock",
-                    description: Text(browser.previewText.isEmpty
-                                       ? "Codemixer cannot read this file or folder."
-                                       : browser.previewText)
-                )
-                Button("Reveal in Finder") {
-                    DesktopActions.revealInFinder(browser.root)
-                }
-                .accessibilityLabel("Reveal project in Finder")
-                Button("Retry") { browser.refresh() }
-                    .accessibilityLabel("Retry folder scan")
-            }
-        case .binary:
-            VStack(spacing: Theme.spacing.s16) {
-                ContentUnavailableView(
-                    "Binary file",
-                    systemImage: "doc.zipper",
-                    description: Text("Open in the default app or use Quick Look.")
-                )
-                if let path = browser.selectedRelativePath {
-                    HStack(spacing: Theme.spacing.s12) {
-                        Button("Open") { DesktopActions.openURL(browser.absoluteURL(for: path)) }
-                            .accessibilityLabel("Open selected file")
-                        Button("Quick Look") { quickLook(url: browser.absoluteURL(for: path)) }
-                            .accessibilityLabel("Quick Look selected file")
-                    }
-                }
-            }
-        case .error:
-            VStack(spacing: Theme.spacing.s16) {
-                ContentUnavailableView(
-                    "Preview unavailable",
-                    systemImage: "exclamationmark.triangle",
-                    description: Text(browser.previewText)
-                )
-                if let path = browser.selectedRelativePath {
-                    Button("Open in Default App") {
-                        DesktopActions.openURL(browser.absoluteURL(for: path))
-                    }
-                    .accessibilityLabel("Open unreadable file in default app")
-                }
-            }
-        case .text:
-            ZStack {
-                ScrollView {
-                    Text(highlightedLogText(browser.previewText, find: browser.logFindText))
-                        .font(Theme.typography.monoSmall)
-                        .fontDesign(.monospaced)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: browser.lineWrap ? .infinity : nil, alignment: .leading)
-                        .padding(Theme.spacing.s16)
-                }
-                FolderLogScrollObserver {
-                    browser.pauseFollowFromUserScroll()
-                }
-                .frame(width: 0, height: 0)
-            }
-        case .source:
-            ScrollView {
-                Text(browser.previewText)
-                    .font(Theme.typography.monoSmall)
-                    .fontDesign(.monospaced)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(Theme.spacing.s16)
-            }
-        case .markdown:
-            LocalMarkdownPreviewView(
-                markdown: browser.previewText,
-                projectRoot: browser.root,
-                documentDirectory: browser.selectedRelativePath.map {
-                    browser.absoluteURL(for: $0).deletingLastPathComponent()
-                } ?? browser.root,
-                fileSystem: browser.fileSystem,
-                scrollToAnchor: browser.pendingTOCAnchor
-            )
-            .onChange(of: browser.pendingTOCAnchor) { _, anchor in
-                if anchor != nil {
-                    DispatchQueue.main.async {
-                        browser.pendingTOCAnchor = nil
-                    }
-                }
-            }
-        }
+        FilePreviewPanel(
+            mode: browser.previewMode,
+            text: browser.previewText,
+            entry: browser.selectedEntry,
+            fileURL: browser.selectedRelativePath.map(browser.absoluteURL(for:)),
+            projectRoot: browser.root,
+            fileSystem: browser.fileSystem,
+            textPresentation: textPresentation,
+            markdownAnchor: browser.pendingTOCAnchor,
+            onMarkdownAnchorHandled: { browser.pendingTOCAnchor = nil },
+            onRetry: { browser.refresh() }
+        )
     }
 
-    private func quickLook(url: URL) {
-        qlBridge = presentQuickLook(url: url)
-    }
-
-    private func highlightedLogText(_ text: String, find: String) -> AttributedString {
-        var attributed = AttributedString(text)
-        let lower = text.lowercased()
-        for token in ["error", "warning", "info", "debug"] {
-            var searchStart = lower.startIndex
-            while let range = lower.range(of: token, range: searchStart..<lower.endIndex) {
-                if let attrRange = Range(range, in: attributed) {
-                    switch token {
-                    case "error":
-                        attributed[attrRange].foregroundColor = Theme.signal.danger
-                    case "warning":
-                        attributed[attrRange].foregroundColor = Theme.signal.warning
-                    case "info":
-                        attributed[attrRange].foregroundColor = Theme.signal.info
-                    default:
-                        attributed[attrRange].foregroundColor = Theme.text.secondary
-                    }
-                }
-                searchStart = range.upperBound
-            }
+    private var textPresentation: FilePreviewPanel.TextPresentation {
+        if kind == .logs {
+            return .log(
+                find: browser.logFindText,
+                lineWrap: browser.lineWrap,
+                onUserScroll: { browser.pauseFollowFromUserScroll() }
+            )
         }
-        if !find.isEmpty {
-            var searchStart = lower.startIndex
-            let needle = find.lowercased()
-            while let range = lower.range(of: needle, range: searchStart..<lower.endIndex) {
-                if let attrRange = Range(range, in: attributed) {
-                    attributed[attrRange].backgroundColor = .yellow.opacity(0.35)
-                }
-                searchStart = range.upperBound
-            }
-        }
-        return attributed
+        return .source(
+            language: browser.selectedEntry.flatMap(FolderFileSupport.syntaxLanguage(for:)),
+            lineWrap: browser.lineWrap
+        )
     }
 }
 
@@ -315,7 +212,7 @@ struct FilePreviewPanelHost: View {
     var body: some View {
         Group {
             if let browser {
-                FilePreviewPanel(
+                FolderViewPreviewPanel(
                     browser: browser,
                     kind: kind,
                     onClose: {

@@ -27,17 +27,6 @@ final class FolderViewModel {
         }
     }
 
-    enum PreviewMode: String {
-        case none
-        case empty
-        case text
-        case markdown
-        case source
-        case binary
-        case error
-        case permissionDenied
-    }
-
     let root: URL
     let kind: FolderProjectKind
     let fileSystem: any FileSystem
@@ -56,7 +45,7 @@ final class FolderViewModel {
     var sortAscending = true
     var isLoading = false
     var lastError: String?
-    var previewMode: PreviewMode = .none
+    var previewMode: FilePreviewMode = .none
     var previewText = ""
     var previewCapped = false
     var previewTitle = ""
@@ -439,22 +428,11 @@ final class FolderViewModel {
         previewTask = Task { [weak self] in
             guard let self else { return }
             do {
-                switch kind {
-                case .files:
-                    await MainActor.run {
-                        guard generation == self.previewGeneration else { return }
-                        self.previewMode = .none
-                    }
-                case .logs:
-                    try await self.loadLogPreview(at: url, entry: entry, generation: generation)
-                case .docs, .modelhike:
-                    try await self.loadDocsPreview(at: url,
-                                                   entry: entry,
-                                                   showSource: docsShowSource,
-                                                   generation: generation)
-                case .folderTree:
-                    preconditionFailure("FolderViewModel does not preview folderTree; use FolderTreeViewModel")
-                }
+                try await self.loadPreviewContent(at: url,
+                                                  entry: entry,
+                                                  kind: kind,
+                                                  showSource: docsShowSource,
+                                                  generation: generation)
             } catch {
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
@@ -469,6 +447,37 @@ final class FolderViewModel {
                     self.previewText = message
                 }
             }
+        }
+    }
+
+    private func loadPreviewContent(at url: URL,
+                                    entry: FolderFileEntry,
+                                    kind: FolderProjectKind,
+                                    showSource: Bool,
+                                    generation: Int) async throws {
+        // Images, PDFs, markup, and media render from the URL; reading the bytes
+        // here would only classify them as binary and discard the document.
+        let contentKind = FolderFileSupport.previewContentKind(for: entry)
+        if let renderedMode = FolderFileSupport.urlRenderedMode(for: contentKind, showSource: showSource) {
+            await MainActor.run {
+                guard generation == self.previewGeneration else { return }
+                self.previewMode = renderedMode
+                self.previewText = ""
+                self.previewCapped = false
+                self.tocItems = []
+            }
+            return
+        }
+        switch kind {
+        case .logs:
+            try await loadLogPreview(at: url, entry: entry, generation: generation)
+        case .files, .docs, .modelhike:
+            try await loadDocsPreview(at: url,
+                                      entry: entry,
+                                      showSource: showSource,
+                                      generation: generation)
+        case .folderTree:
+            preconditionFailure("FolderViewModel does not preview folderTree; use FolderTreeViewModel")
         }
     }
 

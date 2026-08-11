@@ -243,7 +243,7 @@ struct LiveFolderTreeIntegrationTests {
         #expect(model.previewText.contains("struct FolderTreeView"))
 
         model.select("assets/logo.png")
-        #expect(await liveFolderTreePoll { model.previewMode == .binary })
+        #expect(await liveFolderTreePoll { model.previewMode == .image })
         #expect(model.previewText.isEmpty)
 
         model.select("src")

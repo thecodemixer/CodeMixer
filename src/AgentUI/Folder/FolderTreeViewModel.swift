@@ -7,17 +7,6 @@ import AgentCore
 @MainActor
 @Observable
 final class FolderTreeViewModel {
-    enum PreviewMode: String {
-        case none
-        case empty
-        case text
-        case markdown
-        case source
-        case binary
-        case error
-        case permissionDenied
-    }
-
     let root: URL
     let fileSystem: any FileSystem
     let clock: any AgentClock
@@ -34,7 +23,7 @@ final class FolderTreeViewModel {
     var expandedPaths: Set<String> = []
     var isLoading = false
     var lastError: String?
-    var previewMode: PreviewMode = .none
+    var previewMode: FilePreviewMode = .none
     var previewText = ""
     var previewCapped = false
     var previewTitle = ""

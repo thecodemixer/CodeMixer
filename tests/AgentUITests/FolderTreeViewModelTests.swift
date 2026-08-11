@@ -158,6 +158,124 @@ struct FolderFileIconTests {
     }
 }
 
+@Suite("Folder preview typing — language and image detection")
+struct FolderPreviewTypingTests {
+
+    @Test("Maps source extensions to highlighter languages and prose to none")
+    func mapsSyntaxLanguages() {
+        #expect(FolderFileSupport.syntaxLanguage(for: entry("App.swift")) == "swift")
+        #expect(FolderFileSupport.syntaxLanguage(for: entry("main.py")) == "python")
+        #expect(FolderFileSupport.syntaxLanguage(for: entry("index.tsx")) == "typescript")
+        #expect(FolderFileSupport.syntaxLanguage(for: entry("util.h")) == "c")
+        #expect(FolderFileSupport.syntaxLanguage(for: entry("query.sql")) == "sql")
+        #expect(FolderFileSupport.syntaxLanguage(for: entry("Dockerfile")) == "shell")
+        #expect(FolderFileSupport.syntaxLanguage(for: entry("Makefile")) == "makefile")
+        // Prose and unknown types must stay nil so nothing is mislabelled.
+        #expect(FolderFileSupport.syntaxLanguage(for: entry("README.md")) == nil)
+        #expect(FolderFileSupport.syntaxLanguage(for: entry("notes.txt")) == nil)
+        #expect(FolderFileSupport.syntaxLanguage(for: entry("mystery.xyz")) == nil)
+        #expect(FolderFileSupport.syntaxLanguage(for: entry("src", directory: true)) == nil)
+    }
+
+    @Test("Detects renderable images and excludes markup and directories")
+    func detectsImages() {
+        for name in ["a.png", "b.jpg", "c.jpeg", "d.gif", "e.heic", "f.tiff", "g.webp"] {
+            #expect(FolderFileSupport.isImageFile(entry(name)), "\(name) should preview as an image")
+        }
+        // SVG is markup NSImage will not rasterise; a folder is never an image.
+        #expect(!FolderFileSupport.isImageFile(entry("logo.svg")))
+        #expect(!FolderFileSupport.isImageFile(entry("notes.txt")))
+        #expect(!FolderFileSupport.isImageFile(entry("assets", directory: true)))
+    }
+
+    @Test("Comment prefixes follow the language so directives are not greyed out")
+    func commentPrefixesPerLanguage() {
+        #expect(CodeSyntaxHighlighter.commentPrefixes(for: "python") == ["#"])
+        #expect(CodeSyntaxHighlighter.commentPrefixes(for: "shell") == ["#"])
+        #expect(CodeSyntaxHighlighter.commentPrefixes(for: "sql") == ["--"])
+        #expect(CodeSyntaxHighlighter.commentPrefixes(for: "swift") == ["//"])
+        #expect(CodeSyntaxHighlighter.commentPrefixes(for: "c") == ["//"])
+        #expect(CodeSyntaxHighlighter.commentPrefixes(for: nil) == ["//"])
+        // The regression this guards: `#Preview` in Swift and `#include` in C are
+        // directives, not comments.
+        #expect(!CodeSyntaxHighlighter.commentPrefixes(for: "swift").contains("#"))
+        #expect(!CodeSyntaxHighlighter.commentPrefixes(for: "c").contains("#"))
+    }
+
+    @Test("Highlighting produces attributed runs for code and leaves prose alone")
+    func highlightProducesRuns() {
+        let swift = CodeSyntaxHighlighter.highlight("let x = 42", language: "swift")
+        #expect(String(swift.characters) == "let x = 42")
+        #expect(swift.runs.count > 1, "keywords and numbers should be tinted separately")
+
+        let comment = CodeSyntaxHighlighter.highlight("# not a comment in swift", language: "swift")
+        #expect(String(comment.characters) == "# not a comment in swift")
+    }
+
+    @Test("Every file type routes to exactly one preview presentation")
+    func classifiesPreviewContent() {
+        #expect(FolderFileSupport.previewContentKind(for: entry("logo.png")) == .image)
+        #expect(FolderFileSupport.previewContentKind(for: entry("report.pdf")) == .pdf)
+        #expect(FolderFileSupport.previewContentKind(for: entry("page.html")) == .web)
+        #expect(FolderFileSupport.previewContentKind(for: entry("icon.svg")) == .web)
+        #expect(FolderFileSupport.previewContentKind(for: entry("clip.mp4")) == .media)
+        #expect(FolderFileSupport.previewContentKind(for: entry("theme.mp3")) == .media)
+        #expect(FolderFileSupport.previewContentKind(for: entry("README.md")) == .markdown)
+        #expect(FolderFileSupport.previewContentKind(for: entry("App.swift")) == .source(language: "swift"))
+        #expect(FolderFileSupport.previewContentKind(for: entry("notes.txt")) == .text)
+        #expect(FolderFileSupport.previewContentKind(for: entry("mystery.xyz")) == .text)
+    }
+
+    @Test("Only files with both a rendered and a source form offer the toggle")
+    func rememberedSourceToggleEligibility() {
+        #expect(FolderFileSupport.hasRenderedAndSourceViews(entry("README.md")))
+        #expect(FolderFileSupport.hasRenderedAndSourceViews(entry("page.html")))
+        #expect(FolderFileSupport.hasRenderedAndSourceViews(entry("icon.svg")))
+        #expect(!FolderFileSupport.hasRenderedAndSourceViews(entry("App.swift")))
+        #expect(!FolderFileSupport.hasRenderedAndSourceViews(entry("logo.png")))
+    }
+
+    @Test("URL-rendered types skip the byte read; markup defers to the source toggle")
+    func urlRenderedModes() {
+        #expect(FolderFileSupport.urlRenderedMode(for: .image, showSource: false) == .image)
+        #expect(FolderFileSupport.urlRenderedMode(for: .pdf, showSource: false) == .pdf)
+        #expect(FolderFileSupport.urlRenderedMode(for: .media, showSource: false) == .media)
+        #expect(FolderFileSupport.urlRenderedMode(for: .web, showSource: false) == .web)
+        // Showing markup source needs the bytes, so the loader must not short-circuit.
+        #expect(FolderFileSupport.urlRenderedMode(for: .web, showSource: true) == nil)
+        #expect(FolderFileSupport.urlRenderedMode(for: .markdown, showSource: false) == nil)
+        #expect(FolderFileSupport.urlRenderedMode(for: .text, showSource: false) == nil)
+        #expect(FolderFileSupport.urlRenderedMode(for: .source(language: "swift"), showSource: false) == nil)
+    }
+
+    @Test("Previewed markup cannot navigate outside the project root")
+    func localPreviewNavigationIsContained() {
+        let root = URL(fileURLWithPath: "/tmp/codemixer-preview-root")
+        let allows = { (url: URL?) in
+            LocalFilePreviewNavigationPolicy.allowsNavigation(to: url, projectRoot: root)
+        }
+        #expect(allows(root.appendingPathComponent("docs/page.html")))
+        #expect(allows(root))
+        #expect(allows(URL(string: "about:blank")))
+        #expect(!allows(nil))
+        #expect(!allows(URL(fileURLWithPath: "/tmp/codemixer-preview-root-sibling/leak.html")))
+        #expect(!allows(URL(fileURLWithPath: "/etc/passwd")))
+        #expect(!allows(root.appendingPathComponent("../outside.html")))
+        #expect(!allows(URL(string: "https://example.com")))
+    }
+
+    private func entry(_ path: String, directory: Bool = false) -> FolderFileEntry {
+        FolderFileEntry(
+            relativePath: path,
+            name: URL(fileURLWithPath: path).lastPathComponent,
+            fileExtension: directory ? "" : URL(fileURLWithPath: path).pathExtension.lowercased(),
+            byteCount: directory ? 0 : 1,
+            modifiedAt: Date(timeIntervalSince1970: 0),
+            isDirectory: directory
+        )
+    }
+}
+
 @Suite("Folder tree view model — expansion, filter, preview")
 @MainActor
 struct FolderTreeViewModelTests {
@@ -246,6 +364,63 @@ struct FolderTreeViewModelTests {
         model.select("vanishes.txt")
         try? await Task.sleep(for: .milliseconds(40))
         #expect(model.previewMode == .error)
+    }
+
+    @Test("Selecting an image previews it as an image, not as binary")
+    func imageSelectionUsesImageMode() async throws {
+        let fs = InMemoryFileSystem()
+        let root = TestPaths.workspace("tree-image-root")
+        try fs.createDirectory(at: root, withIntermediates: true)
+        // Real PNG magic bytes: contains NUL, so the old path classified it binary.
+        let png = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00])
+        try fs.writeAtomically(png, to: root.appendingPathComponent("logo.png"))
+        try fs.writeAtomically(Data([0x00, 0x01]), to: root.appendingPathComponent("blob.bin"))
+
+        let model = FolderTreeViewModel(root: root, fileSystem: fs)
+        model.entries = try FolderScanner.scan(root: root, fileSystem: fs)
+        model.rebuildTree()
+
+        model.select("logo.png")
+        try? await Task.sleep(for: .milliseconds(40))
+        #expect(model.previewMode == .image)
+        #expect(model.previewText.isEmpty)
+
+        model.select("blob.bin")
+        try? await Task.sleep(for: .milliseconds(40))
+        #expect(model.previewMode == .binary)
+    }
+
+    @Test("Documents and media preview from the URL instead of as binary")
+    func documentSelectionUsesRenderedModes() async throws {
+        let fs = InMemoryFileSystem()
+        let root = TestPaths.workspace("tree-document-root")
+        try fs.createDirectory(at: root, withIntermediates: true)
+        try fs.writeAtomically(Data("%PDF-1.7\n\u{0}".utf8), to: root.appendingPathComponent("spec.pdf"))
+        try fs.writeAtomically(Data("<svg/>".utf8), to: root.appendingPathComponent("icon.svg"))
+        try fs.writeAtomically(Data([0x00, 0x01]), to: root.appendingPathComponent("clip.mp4"))
+
+        let model = FolderTreeViewModel(root: root, fileSystem: fs)
+        model.entries = try FolderScanner.scan(root: root, fileSystem: fs)
+        model.rebuildTree()
+
+        model.select("spec.pdf")
+        try? await Task.sleep(for: .milliseconds(40))
+        #expect(model.previewMode == .pdf)
+        #expect(model.previewText.isEmpty)
+
+        model.select("clip.mp4")
+        try? await Task.sleep(for: .milliseconds(40))
+        #expect(model.previewMode == .media)
+
+        model.select("icon.svg")
+        try? await Task.sleep(for: .milliseconds(40))
+        #expect(model.previewMode == .web)
+
+        // The Source toggle reads the markup back as text.
+        model.setDocsShowSource(true)
+        try? await Task.sleep(for: .milliseconds(40))
+        #expect(model.previewMode == .source)
+        #expect(model.previewText.contains("<svg/>"))
     }
 
     @Test("Oversize markdown reports the markdown limit, not the text limit")

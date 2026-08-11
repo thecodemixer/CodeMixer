@@ -103,13 +103,71 @@ enum FolderFileSupport {
 
     /// Images the preview renders inline rather than treating as opaque binary.
     /// Limited to what AppKit decodes natively; SVG is excluded because it is
-    /// markup that `NSImage` will not rasterise.
+    /// markup that `NSImage` will not rasterise — it routes to `.web` instead.
     static let previewableImageExtensions: Set<String> = [
         "png", "jpg", "jpeg", "gif", "heic", "heif", "tiff", "tif", "bmp", "webp", "ico",
     ]
 
+    /// Markup rendered by a web view rather than shown as source by default.
+    static let webRenderableExtensions: Set<String> = ["html", "htm", "xhtml", "svg"]
+
+    /// Audio/video handed to Quick Look. Inline playback is deliberately out of
+    /// scope: the preview pane is for reading, and Quick Look already plays
+    /// every format the system knows.
+    static let mediaExtensions: Set<String> = [
+        "mp4", "mov", "m4v", "avi", "mkv", "webm",
+        "mp3", "m4a", "wav", "aiff", "aac", "flac",
+    ]
+
     static func isImageFile(_ entry: FolderFileEntry) -> Bool {
         !entry.isDirectory && previewableImageExtensions.contains(entry.fileExtension)
+    }
+
+    /// How a file should be presented, decided from its type alone.
+    ///
+    /// Byte-level facts (binary sniffing, oversize) stay with the loader; this
+    /// is the routing decision, kept pure so it can be tested without a preview
+    /// surface or a filesystem.
+    enum PreviewContentKind: Equatable {
+        case image
+        case pdf
+        case web
+        case media
+        case markdown
+        case source(language: String)
+        case text
+    }
+
+    static func previewContentKind(for entry: FolderFileEntry) -> PreviewContentKind {
+        if isImageFile(entry) { return .image }
+        if entry.fileExtension == "pdf" { return .pdf }
+        // Checked before `source`: HTML and SVG have a language mapping, but the
+        // useful default for markup is the rendered document.
+        if webRenderableExtensions.contains(entry.fileExtension) { return .web }
+        if mediaExtensions.contains(entry.fileExtension) { return .media }
+        if isMarkdownFile(entry) { return .markdown }
+        if let language = syntaxLanguage(for: entry) { return .source(language: language) }
+        return .text
+    }
+
+    /// The preview mode for content the view renders straight from the file URL,
+    /// or `nil` when the loader still has to read the bytes. Markup returns `nil`
+    /// while the Source toggle is on so it loads as text instead.
+    static func urlRenderedMode(for contentKind: PreviewContentKind,
+                                showSource: Bool) -> FilePreviewMode? {
+        switch contentKind {
+        case .image: return .image
+        case .pdf: return .pdf
+        case .media: return .media
+        case .web: return showSource ? nil : .web
+        case .markdown, .source, .text: return nil
+        }
+    }
+
+    /// True when the file renders as a document and has a meaningful source view
+    /// behind it — drives the Preview/Source toggle in the panel header.
+    static func hasRenderedAndSourceViews(_ entry: FolderFileEntry) -> Bool {
+        isMarkdownFile(entry) || webRenderableExtensions.contains(entry.fileExtension)
     }
 
     /// Language id for the syntax highlighter, or `nil` for prose/plain text.

@@ -116,8 +116,7 @@ public enum FolderProjectKind: String, Sendable, Codable, Hashable, CaseIterable
     /// Whether selecting a file opens a right-side preview.
     public var showsPreviewOnSelection: Bool {
         switch self {
-        case .files: return false
-        case .logs, .docs, .modelhike, .folderTree: return true
+        case .files, .logs, .docs, .modelhike, .folderTree: return true
         }
     }
 
@@ -207,6 +206,10 @@ public enum FolderBrowserLimits {
     public static let filePreviewMaxBytes = 2_097_152
     public static let automaticLogShortcuts = 5
     public static let scanDebounce: Duration = .milliseconds(250)
+    /// Ceiling for syntax highlighting. The highlighter walks every character,
+    /// so a multi-megabyte file would stall the main thread; past this size the
+    /// preview still renders, just as plain monospaced text.
+    public static let syntaxHighlightMaxBytes = 262_144
     /// Window in which a second click on the same tree row counts as the tail of
     /// a double click rather than a fresh toggle. Matches the macOS default
     /// double-click interval so a double click opens a folder instead of

@@ -171,6 +171,54 @@ struct FolderViewModelTests {
         #expect(model.selectedRelativePath == "a.txt")
     }
 
+    @Test("Docs folders preview images inline instead of as binary")
+    func docsImagePreview() async throws {
+        let fs = InMemoryFileSystem()
+        let root = TestPaths.workspace("docs-image-root")
+        try fs.createDirectory(at: root, withIntermediates: true)
+        let png = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00])
+        try fs.writeAtomically(png, to: root.appendingPathComponent("diagram.png"))
+
+        let docs = FolderViewModel(root: root, kind: .docs, fileSystem: fs)
+        docs.entries = try FolderScanner.scan(root: root, fileSystem: fs)
+        docs.select("diagram.png")
+        try? await Task.sleep(for: .milliseconds(40))
+        #expect(docs.previewMode == .image)
+        #expect(docs.previewText.isEmpty)
+        #expect(docs.tocItems.isEmpty)
+    }
+
+    @Test("Files projects preview the selected row like every other folder kind")
+    func filesKindPreviewsSelection() async throws {
+        #expect(FolderProjectKind.files.showsPreviewOnSelection)
+
+        let fs = InMemoryFileSystem()
+        let root = TestPaths.workspace("files-preview-root")
+        try fs.createDirectory(at: root, withIntermediates: true)
+        try fs.writeAtomically(Data("let x = 1\n".utf8), to: root.appendingPathComponent("App.swift"))
+        try fs.writeAtomically(Data("# Title\n".utf8), to: root.appendingPathComponent("README.md"))
+        let png = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00])
+        try fs.writeAtomically(png, to: root.appendingPathComponent("logo.png"))
+
+        let model = FolderViewModel(root: root, kind: .files, fileSystem: fs)
+        model.entries = try FolderScanner.scan(root: root, fileSystem: fs)
+
+        model.select("App.swift")
+        try? await Task.sleep(for: .milliseconds(40))
+        #expect(model.previewMode == .text)
+        #expect(model.previewText.contains("let x = 1"))
+        // A files project is not a docs project: no TOC rail for source.
+        #expect(model.tocItems.isEmpty)
+
+        model.select("README.md")
+        try? await Task.sleep(for: .milliseconds(40))
+        #expect(model.previewMode == .markdown)
+
+        model.select("logo.png")
+        try? await Task.sleep(for: .milliseconds(40))
+        #expect(model.previewMode == .image)
+    }
+
     @Test("Docs preview builds a TOC and pause stops follow")
     func docsTOCAndPauseFollow() async throws {
         let fs = InMemoryFileSystem()

@@ -1211,8 +1211,8 @@ struct EngineViewModelNavigatorTests {
         await bus.shutdown()
     }
 
-    @Test("openFolderShortcut for files does not enter preview-only mode")
-    func openFolderShortcutFilesKeepsList() async throws {
+    @Test("openFolderShortcut for files opens the pinned file, and Show files returns to the list")
+    func openFolderShortcutFilesOpensPreview() async throws {
         let port = RecordingPort()
         let bus = MulticastEventBus()
         let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
@@ -1228,9 +1228,12 @@ struct EngineViewModelNavigatorTests {
 
         vm.openFolderShortcut(projectPath: ref.path, relativePath: "notes.txt")
         #expect(vm.showsFolderBrowser)
+        #expect(vm.showsPreviewOnly)
+        #expect(vm.activeFolderSelectionRelativePath == "notes.txt")
+
+        vm.exitFolderPreviewOnly()
         #expect(!vm.showsPreviewOnly)
         #expect(vm.activeFolderSelectionRelativePath == "notes.txt")
-        #expect(vm.pendingFolderSelectionRelativePath == "notes.txt")
 
         await bus.shutdown()
     }

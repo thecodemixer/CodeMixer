@@ -98,7 +98,7 @@ struct FolderView: View {
                         fileTable(browser, compact: showsPreview)
                         if showsPreview {
                             Divider()
-                            FilePreviewPanel(
+                            FolderViewPreviewPanel(
                                 browser: browser,
                                 kind: kind,
                                 onClose: { browser.closePreview() }

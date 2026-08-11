@@ -30,10 +30,11 @@ enum CodeSyntaxHighlighter {
     ]
 
     static func highlight(_ code: String, language: String?) -> AttributedString {
+        let prefixes = commentPrefixes(for: language)
         var result = AttributedString()
         let lines = code.components(separatedBy: "\n")
         for (idx, line) in lines.enumerated() {
-            result.append(highlightLine(line))
+            result.append(highlightLine(line, commentPrefixes: prefixes))
             if idx < lines.count - 1 {
                 result.append(AttributedString("\n"))
             }
@@ -41,10 +42,29 @@ enum CodeSyntaxHighlighter {
         return result
     }
 
-    private static func highlightLine(_ line: String) -> AttributedString {
-        // Whole-line comment shortcut (covers //, #, --).
+    /// Comment markers per language. Getting this wrong is visible: treating `#`
+    /// as a comment in Swift greys out every `#Preview` and `#if`, and in C every
+    /// `#include`. When the language is unknown we accept only `//`, which no
+    /// mainstream language uses for anything else.
+    static func commentPrefixes(for language: String?) -> [String] {
+        switch language?.lowercased() {
+        case "python", "ruby", "shell", "yaml", "toml", "ini", "perl", "r", "makefile":
+            return ["#"]
+        case "sql", "lua":
+            return ["--"]
+        case "swift", "objc", "c", "cpp", "javascript", "typescript", "go", "rust",
+             "java", "kotlin", "csharp", "scala", "php", "css", "groovy", "json":
+            return ["//"]
+        case "html", "xml":
+            return ["<!--"]
+        default:
+            return ["//"]
+        }
+    }
+
+    private static func highlightLine(_ line: String, commentPrefixes: [String]) -> AttributedString {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
-        if trimmed.hasPrefix("//") || trimmed.hasPrefix("#") || trimmed.hasPrefix("--") {
+        if commentPrefixes.contains(where: { trimmed.hasPrefix($0) }) {
             var s = AttributedString(line)
             s.foregroundColor = Theme.text.tertiary
             return s

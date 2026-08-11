@@ -1932,6 +1932,7 @@ private func _a2uiPropsMembers() {
 // surfaces
 // syncAutoApprovalRules
 // synthesizedReplayMessages
+// syntaxHighlightMaxBytes
 // system
 // systemImage
 // tabs

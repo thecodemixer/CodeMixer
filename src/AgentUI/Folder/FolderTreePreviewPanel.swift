@@ -9,8 +9,6 @@ struct FolderTreePreviewPanel: View {
     var trailingActionTitle: String? = nil
     var onTrailingAction: (() -> Void)? = nil
 
-    @State private var qlBridge: QuickLookBridge?
-
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -34,8 +32,7 @@ struct FolderTreePreviewPanel: View {
                 .font(Theme.typography.label)
                 .lineLimit(1)
             Spacer(minLength: 0)
-            if let entry = model.selectedEntry, FolderFileSupport.isMarkdownFile(entry),
-               model.previewMode == .markdown || model.previewMode == .source {
+            if showsSourceToggle {
                 Picker(selection: Binding(
                     get: { model.docsShowSource },
                     set: { model.setDocsShowSource($0) }
@@ -53,7 +50,7 @@ struct FolderTreePreviewPanel: View {
                 .pickerStyle(.segmented)
                 .controlSize(.mini)
                 .frame(maxWidth: 120)
-                .accessibilityLabel("Markdown preview mode")
+                .accessibilityLabel("Document preview mode")
             }
             Toggle("Wrap", isOn: Binding(
                 get: { model.lineWrap },
@@ -79,89 +76,32 @@ struct FolderTreePreviewPanel: View {
         .panelHeaderChrome(verticalPadding: Theme.spacing.s8)
     }
 
-    @ViewBuilder
-    private var previewBody: some View {
-        switch model.previewMode {
-        case .none:
-            ProgressView("Loading preview…")
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .accessibilityLabel("Loading preview")
-        case .empty:
-            ContentUnavailableView(
-                "No files yet",
-                systemImage: "folder",
-                description: Text("This folder has no files to show.")
-            )
-        case .permissionDenied:
-            VStack(spacing: Theme.spacing.s16) {
-                ContentUnavailableView(
-                    "Permission denied",
-                    systemImage: "lock",
-                    description: Text(model.previewText.isEmpty
-                                       ? "Codemixer cannot read this file or folder."
-                                       : model.previewText)
-                )
-                Button("Reveal in Finder") {
-                    DesktopActions.revealInFinder(model.root)
-                }
-                .accessibilityLabel("Reveal project in Finder")
-                Button("Retry") { model.refresh() }
-                    .accessibilityLabel("Retry folder scan")
-            }
-        case .binary:
-            VStack(spacing: Theme.spacing.s16) {
-                ContentUnavailableView(
-                    "Binary file",
-                    systemImage: "doc.zipper",
-                    description: Text("Open in the default app or use Quick Look.")
-                )
-                if let path = model.selectedRelativePath {
-                    HStack(spacing: Theme.spacing.s12) {
-                        Button("Open") { DesktopActions.openURL(model.absoluteURL(for: path)) }
-                            .accessibilityLabel("Open selected file")
-                        Button("Quick Look") { quickLook(url: model.absoluteURL(for: path)) }
-                            .accessibilityLabel("Quick Look selected file")
-                    }
-                }
-            }
-        case .error:
-            VStack(spacing: Theme.spacing.s16) {
-                ContentUnavailableView(
-                    "Preview unavailable",
-                    systemImage: "exclamationmark.triangle",
-                    description: Text(model.previewText)
-                )
-                if let path = model.selectedRelativePath {
-                    Button("Open in Default App") {
-                        DesktopActions.openURL(model.absoluteURL(for: path))
-                    }
-                    .accessibilityLabel("Open unreadable file in default app")
-                }
-            }
-        case .text, .source:
-            ScrollView {
-                Text(model.previewText)
-                    .font(Theme.typography.monoSmall)
-                    .fontDesign(.monospaced)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: model.lineWrap ? .infinity : nil, alignment: .leading)
-                    .padding(Theme.spacing.s16)
-            }
-        case .markdown:
-            LocalMarkdownPreviewView(
-                markdown: model.previewText,
-                projectRoot: model.root,
-                documentDirectory: model.selectedRelativePath.map {
-                    model.absoluteURL(for: $0).deletingLastPathComponent()
-                } ?? model.root,
-                fileSystem: model.fileSystem,
-                scrollToAnchor: nil
-            )
-        }
+    /// Offered only for files that have both a rendered and a source form
+    /// (markdown, HTML, SVG) — plain source files have nothing to toggle to.
+    private var showsSourceToggle: Bool {
+        guard let entry = model.selectedEntry,
+              FolderFileSupport.hasRenderedAndSourceViews(entry) else { return false }
+        return model.previewMode == .markdown
+            || model.previewMode == .source
+            || model.previewMode == .web
     }
 
-    private func quickLook(url: URL) {
-        qlBridge = presentQuickLook(url: url)
+    private var previewBody: some View {
+        FilePreviewPanel(
+            mode: model.previewMode,
+            text: model.previewText,
+            entry: model.selectedEntry,
+            fileURL: model.selectedRelativePath.map(model.absoluteURL(for:)),
+            projectRoot: model.root,
+            fileSystem: model.fileSystem,
+            textPresentation: .source(
+                language: model.selectedEntry.flatMap(FolderFileSupport.syntaxLanguage(for:)),
+                lineWrap: model.lineWrap
+            ),
+            markdownAnchor: nil,
+            onMarkdownAnchorHandled: {},
+            onRetry: { model.refresh() }
+        )
     }
 }
 

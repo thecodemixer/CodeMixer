@@ -59,7 +59,7 @@ extension FolderTreeViewModel {
         docsShowSource = showSource
         if let selectedRelativePath,
            let entry = selectedEntry,
-           FolderFileSupport.isMarkdownFile(entry) {
+           FolderFileSupport.hasRenderedAndSourceViews(entry) {
             loadPreview(for: selectedRelativePath)
         }
     }
@@ -68,7 +68,23 @@ extension FolderTreeViewModel {
                                  entry: FolderFileEntry,
                                  showSource: Bool,
                                  generation: Int) async throws {
-        if FolderFileSupport.isMarkdownFile(entry) {
+        let contentKind = FolderFileSupport.previewContentKind(for: entry)
+        // These render from the URL. Reading the bytes here would only classify
+        // them as binary and throw the document away.
+        if let renderedMode = FolderFileSupport.urlRenderedMode(
+            for: contentKind,
+            showSource: showSource
+        ) {
+            await MainActor.run {
+                guard generation == self.previewGeneration else { return }
+                self.previewMode = renderedMode
+                self.previewText = ""
+                self.previewCapped = false
+            }
+            return
+        }
+
+        if contentKind == .markdown {
             let document = try FolderFileSupport.loadMarkdownDocument(
                 at: url,
                 fileSystem: fileSystem,
@@ -112,7 +128,7 @@ extension FolderTreeViewModel {
             }
             self.previewText = preview.text
             self.previewCapped = false
-            self.previewMode = .text
+            self.previewMode = contentKind == .web ? .source : .text
         }
     }
 }

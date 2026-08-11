@@ -167,7 +167,8 @@ Codemixer/
 | Folder table browser (`files`/`logs`/`docs`/`modelhike`) | `AgentUI/Folder/FolderView.swift`, `FolderView+FileTable.swift`, `FolderViewModel.swift` |
 | Folder tree browser (`folderTree`) | `AgentUI/Folder/FolderTreeView.swift`, `FolderTreeView+TreeColumn.swift`, `FolderTreeViewModel.swift` (+Tree/+Preview/+Watching) |
 | Folder scan + shared preview helpers / icons | `Core/AgentCore/Persistence/FolderScanner.swift`, `AgentUI/Folder/{FolderFileSupport,FolderFileIcon,FolderTreeBuilder,FolderTreeNode}.swift` |
-| Folder preview panels | `AgentUI/Folder/FilePreviewPanel.swift` (table kinds), `FolderTreePreviewPanel.swift` + `FolderTreePreviewPanelHost.swift` (tree) |
+| Shared folder file-content renderer + table/tree chrome | `AgentUI/Folder/FolderPreviewViews.swift` (`FilePreviewPanel`), `FilePreviewPanel.swift` (`FolderViewPreviewPanel` + host), `FolderTreePreviewPanel.swift` + `FolderTreePreviewPanelHost.swift`. File-type routing (`previewContentKind`, `urlRenderedMode`) lives in `FolderFileSupport`; every folder kind previews the selected file |
+| PDF / local-markup preview wrappers | `AgentUI/External/FilePreviewRepresentables.swift` — `FolderPDFPreview`, `FolderLocalFileWebView`, `LocalFilePreviewNavigationPolicy` (previewed HTML/SVG is confined to the project root, scripts disabled) |
 | Settings pane | `AgentUI/Settings/SettingsView.swift` |
 | Project picker | `AgentUI/Pickers/ProjectPickerView.swift` |
 | Conversation search | `AgentUI/Search/ConversationSearchBar.swift` |
