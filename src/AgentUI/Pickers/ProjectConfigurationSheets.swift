@@ -17,6 +17,9 @@ struct ProjectTypeForm: View {
     @Binding var customTransport: AgentTransportKind
     @Binding var folderKind: FolderProjectKind
     @Binding var secondaryFolderURL: URL?
+    @Binding var workingDirectoryURL: URL?
+    /// Shown when no override is chosen (New Project: upcoming subfolder path).
+    var workingDirectoryFallbackCaption: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.spacing.s16) {
@@ -37,6 +40,7 @@ struct ProjectTypeForm: View {
                 }
                 .pickerStyle(.menu)
                 .accessibilityLabel("Agent CLI")
+                workingDirectoryChooser
             case .mixed:
                 Picker("Default agent for new chats", selection: $mixedDefault) {
                     ForEach(SupportedBuiltInAgent.shipping) { agent in
@@ -44,6 +48,7 @@ struct ProjectTypeForm: View {
                     }
                 }
                 .accessibilityLabel("Default agent for mixed project type")
+                workingDirectoryChooser
             case .folder:
                 Picker("Folder view", selection: $folderKind) {
                     ForEach(FolderProjectKind.allCases) { kind in
@@ -62,8 +67,55 @@ struct ProjectTypeForm: View {
                 }
             case .custom:
                 customFields
+                workingDirectoryChooser
             }
         }
+    }
+
+    private var workingDirectoryChooser: some View {
+        VStack(alignment: .leading, spacing: Theme.spacing.s8) {
+            Text("Working directory")
+                .font(Theme.typography.caption)
+                .foregroundStyle(Theme.text.secondary)
+            HStack(spacing: Theme.spacing.s8) {
+                Text(workingDirectoryDisplayPath)
+                    .font(Theme.typography.caption)
+                    .foregroundStyle(workingDirectoryURL == nil
+                                     ? Theme.text.tertiary
+                                     : Theme.text.secondary)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityLabel("Selected working directory")
+                Button("Choose Folder…") {
+                    guard let url = DesktopActions.chooseDirectoryPanel(
+                        prompt: "Choose Working Directory"
+                    ) else { return }
+                    workingDirectoryURL = url
+                }
+                .accessibilityLabel("Choose working directory")
+                if workingDirectoryURL != nil {
+                    Button("Use project folder") {
+                        workingDirectoryURL = nil
+                    }
+                    .accessibilityLabel("Use project folder as working directory")
+                }
+            }
+            Text("Folder the agent CLI uses as its current working directory. Defaults to the project folder.")
+                .font(Theme.typography.caption)
+                .foregroundStyle(Theme.text.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var workingDirectoryDisplayPath: String {
+        if let workingDirectoryURL {
+            return workingDirectoryURL.path
+        }
+        if let workingDirectoryFallbackCaption, !workingDirectoryFallbackCaption.isEmpty {
+            return workingDirectoryFallbackCaption
+        }
+        return "Project folder (default)"
     }
 
     private var dualSecondaryFolderChooser: some View {
@@ -396,6 +448,7 @@ public struct NewProjectSheet: View {
     @State private var folderLocationMode: FolderLocationMode = .createInWorkspace
     @State private var folderLocation: URL?
     @State private var secondaryFolderURL: URL?
+    @State private var workingDirectoryURL: URL?
     @State private var customExecutable: String = ""
     @State private var customArguments: String = ""
     @State private var customTransport: AgentTransportKind = .agentClientProtocol
@@ -463,10 +516,18 @@ public struct NewProjectSheet: View {
                 return false
             }
         }
+        if category != .folder, let cwd = workingDirectoryURL {
+            guard fileSystem.isDirectory(at: cwd.standardizedFileURL) else { return false }
+        }
         if category == .folder, folderLocationMode == .chooseExisting {
             return true
         }
         return nameCollisionMessage == nil
+    }
+
+    private var workingDirectoryFallbackCaption: String? {
+        guard category != .folder, !trimmedName.isEmpty else { return nil }
+        return workspaceURL.appendingPathComponent(trimmedName, isDirectory: true).path
     }
 
     private var sheetSubtitle: String {
@@ -493,7 +554,9 @@ public struct NewProjectSheet: View {
                 customArguments: $customArguments,
                 customTransport: $customTransport,
                 folderKind: $folderKind,
-                secondaryFolderURL: $secondaryFolderURL
+                secondaryFolderURL: $secondaryFolderURL,
+                workingDirectoryURL: $workingDirectoryURL,
+                workingDirectoryFallbackCaption: workingDirectoryFallbackCaption
             )
             .disabled(isCreating)
             .onChange(of: category) { _, newCategory in
@@ -501,6 +564,8 @@ public struct NewProjectSheet: View {
                     folderLocation = nil
                     folderLocationMode = .createInWorkspace
                     secondaryFolderURL = nil
+                } else {
+                    workingDirectoryURL = nil
                 }
                 createError = nil
             }
@@ -564,12 +629,18 @@ public struct NewProjectSheet: View {
                         return
                     }
                 }
+                if category != .folder, let cwd = workingDirectoryURL,
+                   !fileSystem.isDirectory(at: cwd.standardizedFileURL) {
+                    createError = "Working directory \(cwd.path) is missing or not a folder."
+                    return
+                }
                 let createdError = await onCreate(ProjectDraft(
                     name: trimmedName,
                     projectType: projectType,
                     preferFreshAgentProcess: preferFreshAgentProcess,
                     existingFolderURL: folderURL,
-                    secondaryFolderURL: folderKind.usesDualTreeNavigation ? secondaryFolderURL : nil
+                    secondaryFolderURL: folderKind.usesDualTreeNavigation ? secondaryFolderURL : nil,
+                    workingDirectoryURL: category == .folder ? nil : workingDirectoryURL
                 ))
                 if let createdError {
                     createError = createdError
@@ -644,6 +715,7 @@ public struct ConfigureProjectSheet: View {
     @State private var mixedDefault: AgentID = .claudeCode
     @State private var folderKind: FolderProjectKind = .files
     @State private var secondaryFolderURL: URL?
+    @State private var workingDirectoryURL: URL?
     @State private var customExecutable: String = ""
     @State private var customArguments: String = ""
     @State private var customTransport: AgentTransportKind = .agentClientProtocol
@@ -658,6 +730,9 @@ public struct ConfigureProjectSheet: View {
         self.random = random
         self.onCancel = onCancel
         self.onConfirm = onConfirm
+        // Selected folder is the default working directory (stored as nil when
+        // equal to the project path after normalize).
+        _workingDirectoryURL = State(initialValue: projectURL)
     }
 
     private var resolvedProjectType: ProjectType? {
@@ -678,6 +753,9 @@ public struct ConfigureProjectSheet: View {
             guard let secondary = secondaryFolderURL else { return false }
             return secondary.standardizedFileURL.path != projectURL.standardizedFileURL.path
         }
+        if category != .folder, let cwd = workingDirectoryURL {
+            return SystemFileSystem().isDirectory(at: cwd.standardizedFileURL)
+        }
         return true
     }
 
@@ -696,8 +774,17 @@ public struct ConfigureProjectSheet: View {
                 customArguments: $customArguments,
                 customTransport: $customTransport,
                 folderKind: $folderKind,
-                secondaryFolderURL: $secondaryFolderURL
+                secondaryFolderURL: $secondaryFolderURL,
+                workingDirectoryURL: $workingDirectoryURL,
+                workingDirectoryFallbackCaption: projectURL.path
             )
+            .onChange(of: category) { _, newCategory in
+                if newCategory == .folder {
+                    workingDirectoryURL = nil
+                } else if workingDirectoryURL == nil {
+                    workingDirectoryURL = projectURL
+                }
+            }
 
             if category != .folder {
                 ProjectAdvancedOptions(preferFreshAgentProcess: $preferFreshAgentProcess)
@@ -723,12 +810,18 @@ public struct ConfigureProjectSheet: View {
                         return
                     }
                 }
+                if category != .folder, let cwd = workingDirectoryURL,
+                   !SystemFileSystem().isDirectory(at: cwd.standardizedFileURL) {
+                    configureError = "Working directory \(cwd.path) is missing or not a folder."
+                    return
+                }
                 onConfirm(ProjectDraft(
                     name: projectURL.lastPathComponent,
                     projectType: projectType,
                     preferFreshAgentProcess: preferFreshAgentProcess,
                     existingFolderURL: projectURL,
-                    secondaryFolderURL: folderKind.usesDualTreeNavigation ? secondaryFolderURL : nil
+                    secondaryFolderURL: folderKind.usesDualTreeNavigation ? secondaryFolderURL : nil,
+                    workingDirectoryURL: category == .folder ? nil : workingDirectoryURL
                 ))
             }
         }

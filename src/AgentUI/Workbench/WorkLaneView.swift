@@ -49,7 +49,7 @@ struct WorkLaneView: View {
                 }
             }
             if !model.changedFiles.isEmpty {
-                DiffPanelView(model: model, workspace: model.workspace)
+                DiffPanelView(model: model, workspace: model.activeWorkingDirectory ?? model.workspace)
             }
         }
         .frame(minWidth: Theme.layout.workLaneMinWidth, idealWidth: Theme.layout.workLaneIdealWidth)

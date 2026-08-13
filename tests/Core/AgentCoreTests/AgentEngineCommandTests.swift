@@ -105,6 +105,97 @@ struct AgentEngineCommandTests {
         await h.shutdown()
     }
 
+    @Test("openProject with working-directory override launches in the source folder")
+    func openProjectUsesWorkingDirectoryOverride() async throws {
+        let capture = CapturingTransportFactory()
+        let h = try await EngineHarness.make(transportFactory: capture.makeTransport)
+        let codex = RoutingTestAdapter(id: .codex, descriptor: .stdioJSONRPC)
+        await AdapterRegistry.shared.register(codex)
+
+        let source = h.workspace.appendingPathComponent("source-tree", isDirectory: true)
+        try h.fileSystem.createDirectory(at: source, withIntermediates: true)
+        let store = WorkspaceProjectsStore(environment: h.environment,
+                                           fileSystem: h.fileSystem)
+        let ref = try await store.createProject(
+            name: "api",
+            projectType: .codex,
+            workingDirectory: source,
+            in: h.workspace
+        )
+        try await h.engine.send(.openProject(path: ref.path, resumeSessionID: nil))
+        try await Task.sleep(for: .milliseconds(40))
+
+        guard let spec = capture.lastSpec else {
+            Issue.record("expected launch spec after openProject")
+            await h.shutdown()
+            return
+        }
+        #expect(spec.workingDirectory?.path == source.path)
+        #expect(spec.environment["PWD"] == source.path)
+        // Protocol adapters put LaunchContext.workspace into `session/new` /
+        // `startThread` `cwd`, so the CLI's own notion of cwd follows the override.
+        #expect(codex.launchContextWorkspaces.map(\.path) == [source.path])
+        let livePaths = await h.engine.liveProjectPaths()
+        #expect(livePaths.contains(ref.path))
+        await h.shutdown()
+    }
+
+    @Test("editing the working directory cold-starts instead of reusing the pooled agent")
+    func workingDirectoryChangeDropsStalePooledRuntime() async throws {
+        let capture = CapturingTransportFactory()
+        let h = try await EngineHarness.make(transportFactory: capture.makeTransport)
+        let codex = RoutingTestAdapter(id: .codex, descriptor: .stdioJSONRPC)
+        await AdapterRegistry.shared.register(codex)
+
+        let first = h.workspace.appendingPathComponent("source-a", isDirectory: true)
+        let second = h.workspace.appendingPathComponent("source-b", isDirectory: true)
+        try h.fileSystem.createDirectory(at: first, withIntermediates: true)
+        try h.fileSystem.createDirectory(at: second, withIntermediates: true)
+        let store = WorkspaceProjectsStore(environment: h.environment,
+                                           fileSystem: h.fileSystem)
+        let ref = try await store.createProject(
+            name: "api",
+            projectType: .codex,
+            workingDirectory: first,
+            in: h.workspace
+        )
+        try await h.engine.send(.openProject(path: ref.path, resumeSessionID: nil))
+        try await Task.sleep(for: .milliseconds(40))
+        #expect(capture.lastSpec?.workingDirectory?.path == first.path)
+
+        _ = try await store.setWorkingDirectory(path: ref.path, to: second, in: h.workspace)
+        try await h.engine.send(.openProject(path: ref.path, resumeSessionID: nil))
+        try await Task.sleep(for: .milliseconds(40))
+
+        // A warm New Chat on the pooled child would have kept the old cwd.
+        #expect(capture.lastSpec?.workingDirectory?.path == second.path)
+        #expect(capture.lastSpec?.environment["PWD"] == second.path)
+        await h.shutdown()
+    }
+
+    @Test("openProject fails when the working-directory override is missing")
+    func openProjectMissingWorkingDirectoryFails() async throws {
+        let h = try await EngineHarness.make()
+        let codex = RoutingTestAdapter(id: .codex, descriptor: .stdioJSONRPC)
+        await AdapterRegistry.shared.register(codex)
+
+        let missing = h.workspace.appendingPathComponent("missing-source", isDirectory: true)
+        let store = WorkspaceProjectsStore(environment: h.environment,
+                                           fileSystem: h.fileSystem)
+        try h.fileSystem.createDirectory(at: missing, withIntermediates: true)
+        let ref = try await store.createProject(
+            name: "api",
+            projectType: .codex,
+            workingDirectory: missing,
+            in: h.workspace
+        )
+        try h.fileSystem.remove(at: missing)
+        await #expect(throws: AgentError.self) {
+            try await h.engine.send(.openProject(path: ref.path, resumeSessionID: nil))
+        }
+        await h.shutdown()
+    }
+
     @Test("openProject in mixed mode resumes with the session's agent")
     func openProjectMixedResumeUsesSessionAgent() async throws {
         let capture = CapturingTransportFactory()
@@ -1250,6 +1341,10 @@ final class RoutingTestAdapter: AgentAdapter, @unchecked Sendable {
     let capabilities: AgentCapabilities = [.resumableSessions]
     let transportDescriptor: AgentTransportDescriptor
     let slashCommandCatalog: [SlashCommand] = []
+    private let lock = NSLock()
+    /// `LaunchContext.workspace` is the cwd every protocol adapter puts in
+    /// `session/new` / `startThread`, so recording it here proves what the CLI sees.
+    private(set) var launchContextWorkspaces: [URL] = []
 
     init(id: AgentID, descriptor: AgentTransportDescriptor) {
         self.id = id
@@ -1263,7 +1358,12 @@ final class RoutingTestAdapter: AgentAdapter, @unchecked Sendable {
 
     func defaultEnvOverrides() -> [String: String] { [:] }
 
-    func buildLaunchArgv(context: LaunchContext) -> [String] { ["cat"] }
+    func buildLaunchArgv(context: LaunchContext) -> [String] {
+        lock.lock()
+        launchContextWorkspaces.append(context.workspace)
+        lock.unlock()
+        return ["cat"]
+    }
 
     func authStatus(env: ResolvedEnvironment) async -> AuthStatus {
         .authenticated(account: nil)

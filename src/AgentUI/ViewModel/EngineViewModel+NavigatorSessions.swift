@@ -152,7 +152,7 @@ extension EngineViewModel {
             return
         }
         let target = URL(fileURLWithPath: projectPath).standardizedFileURL
-        workspace = target
+        bindActiveProject(path: projectPath)
         sessionID = nil
         clearConversationState()
         clearAllPendingPermissions()

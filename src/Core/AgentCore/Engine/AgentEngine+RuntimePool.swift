@@ -35,6 +35,7 @@ extension AgentEngine {
         hookServer = nil
         adapter = nil
         workspace = nil
+        workingDirectory = nil
         currentSessionID = nil
         activeKey = nil
         // Engine stays conceptually "running" while any runtime is parked.
@@ -61,6 +62,7 @@ extension AgentEngine {
         transport = runtime.transport
         hookServer = runtime.hookServer
         workspace = runtime.workspace
+        workingDirectory = runtime.workingDirectory
         sessionIDContinuation = runtime.sessionIDContinuation
         eventForwardingTask = runtime.forwardingTask
         bellTask = runtime.bellTask
@@ -80,7 +82,7 @@ extension AgentEngine {
         runtime.lastActivatedAt = seams.clock.now()
         runtimes[key] = runtime
 
-        await startFSWatcher(workspace: runtime.workspace)
+        await startFSWatcher(workspace: runtime.workingDirectory)
 
         if let targetSession {
             await restoreHistory(for: SessionTranscriptKey(
@@ -236,6 +238,7 @@ extension AgentEngine {
             hookServer = nil
             adapter = nil
             workspace = nil
+            workingDirectory = nil
             currentSessionID = nil
             currentTurnID = nil
             await stopFSWatcher()
@@ -273,6 +276,7 @@ extension AgentEngine {
         hookServer = nil
         adapter = nil
         workspace = nil
+        workingDirectory = nil
         currentSessionID = nil
         activeKey = nil
         await stopFSWatcher()

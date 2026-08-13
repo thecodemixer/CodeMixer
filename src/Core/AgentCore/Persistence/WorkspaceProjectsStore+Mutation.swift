@@ -10,6 +10,7 @@ extension WorkspaceProjectsStore {
                               projectType: ProjectType,
                               preferFreshAgentProcess: Bool = false,
                               folderView: FolderViewState? = nil,
+                              workingDirectory: URL? = nil,
                               in workspace: URL) async throws -> ProjectRef {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard Self.isValidProjectName(trimmed) else {
@@ -25,6 +26,12 @@ extension WorkspaceProjectsStore {
                                                                    primaryRoot: folder,
                                                                    fileSystem: fileSystem)
         }
+        let cwdPath = try ProjectLocalStateStore.validateWorkingDirectory(
+            workingDirectory,
+            projectRoot: folder,
+            projectType: projectType,
+            fileSystem: fileSystem
+        )
 
         if fileSystem.isDirectory(at: folder) {
             if let existing = workspaces[key]?.first(where: { $0.path == folder.path }) {
@@ -41,7 +48,8 @@ extension WorkspaceProjectsStore {
                              displayName: trimmed,
                              projectType: projectType,
                              preferFreshAgentProcess: preferFreshAgentProcess,
-                             agentInstanceIdentity: identity)
+                             agentInstanceIdentity: identity,
+                             workingDirectoryPath: cwdPath)
         try await register(ref, in: workspace, rootProjectType: projectType)
         try ProjectLocalStateStore.save(ref: ref, fileSystem: fileSystem, folderView: folderView)
         return ref
@@ -54,6 +62,7 @@ extension WorkspaceProjectsStore {
                                    displayName: String? = nil,
                                    preferFreshAgentProcess: Bool = false,
                                    folderView: FolderViewState? = nil,
+                                   workingDirectory: URL? = nil,
                                    in workspace: URL) async throws -> ProjectRef {
         let key = Self.key(for: workspace)
         if projectType.folderKind?.usesDualTreeNavigation == true {
@@ -71,20 +80,39 @@ extension WorkspaceProjectsStore {
             ? .dedicated(UUID())
             : .shared
         if let existing = workspaces[key]?.first(where: { $0.path == projectURL.path }) {
+            let cwdPath: String?
+            if workingDirectory != nil {
+                cwdPath = try ProjectLocalStateStore.validateWorkingDirectory(
+                    workingDirectory,
+                    projectRoot: projectURL,
+                    projectType: projectType,
+                    fileSystem: fileSystem
+                )
+            } else {
+                cwdPath = existing.workingDirectoryPath
+            }
             let updated = ProjectRef(path: existing.path,
                                      displayName: resolvedName,
                                      projectType: projectType,
                                      preferFreshAgentProcess: preferFreshAgentProcess,
-                                     agentInstanceIdentity: identity)
+                                     agentInstanceIdentity: identity,
+                                     workingDirectoryPath: cwdPath)
             try await register(updated, in: workspace, rootProjectType: projectType)
             try ProjectLocalStateStore.save(ref: updated, fileSystem: fileSystem, folderView: folderView)
             return updated
         }
+        let cwdPath = try ProjectLocalStateStore.validateWorkingDirectory(
+            workingDirectory,
+            projectRoot: projectURL,
+            projectType: projectType,
+            fileSystem: fileSystem
+        )
         let ref = ProjectRef(path: projectURL.path,
                              displayName: resolvedName,
                              projectType: projectType,
                              preferFreshAgentProcess: preferFreshAgentProcess,
-                             agentInstanceIdentity: identity)
+                             agentInstanceIdentity: identity,
+                             workingDirectoryPath: cwdPath)
         try await register(ref, in: workspace, rootProjectType: projectType)
         try ProjectLocalStateStore.save(ref: ref, fileSystem: fileSystem, folderView: folderView)
         return ref
@@ -98,7 +126,15 @@ extension WorkspaceProjectsStore {
         let key = Self.key(for: workspace)
         var list = await projects(for: workspace, rootProjectType: projectType)
         if let idx = list.firstIndex(where: { $0.path == path }) {
-            list[idx].projectType = projectType
+            let previous = list[idx]
+            list[idx] = ProjectRef(
+                path: previous.path,
+                displayName: previous.displayName,
+                projectType: projectType,
+                preferFreshAgentProcess: previous.preferFreshAgentProcess,
+                agentInstanceIdentity: previous.agentInstanceIdentity,
+                workingDirectoryPath: previous.workingDirectoryPath
+            )
             workspaces[key] = list
             try await persist()
             try ProjectLocalStateStore.save(ref: list[idx], fileSystem: fileSystem)
@@ -145,8 +181,56 @@ extension WorkspaceProjectsStore {
         } else {
             identity = .shared
         }
-        list[idx].preferFreshAgentProcess = preferFreshAgentProcess
-        list[idx].agentInstanceIdentity = identity
+        let previous = list[idx]
+        list[idx] = ProjectRef(
+            path: previous.path,
+            displayName: previous.displayName,
+            projectType: previous.projectType,
+            preferFreshAgentProcess: preferFreshAgentProcess,
+            agentInstanceIdentity: identity,
+            workingDirectoryPath: previous.workingDirectoryPath
+        )
+        workspaces[key] = list
+        try await persist()
+        try ProjectLocalStateStore.save(ref: list[idx], fileSystem: fileSystem)
+        try await persistWorkspaceLocal(projects: list, for: workspace)
+        return list[idx]
+    }
+
+    /// Persist an optional agent working-directory override for an existing project.
+    ///
+    /// Takes effect the next time that project's agent starts. Pass `nil` (or
+    /// the project folder itself) to clear the override.
+    @discardableResult
+    public func setWorkingDirectory(path: String,
+                                    to workingDirectory: URL?,
+                                    in workspace: URL) async throws -> ProjectRef {
+        let key = Self.key(for: workspace)
+        var list: [ProjectRef]
+        if let existing = workspaces[key] {
+            list = existing
+        } else {
+            list = await projects(for: workspace)
+        }
+        guard let idx = list.firstIndex(where: { $0.path == path }) else {
+            throw StoreError.undecodableProject(path: path, detail: "project not in workspace index")
+        }
+        let previous = list[idx]
+        let projectRoot = URL(fileURLWithPath: previous.path, isDirectory: true)
+        let cwdPath = try ProjectLocalStateStore.validateWorkingDirectory(
+            workingDirectory,
+            projectRoot: projectRoot,
+            projectType: previous.projectType,
+            fileSystem: fileSystem
+        )
+        list[idx] = ProjectRef(
+            path: previous.path,
+            displayName: previous.displayName,
+            projectType: previous.projectType,
+            preferFreshAgentProcess: previous.preferFreshAgentProcess,
+            agentInstanceIdentity: previous.agentInstanceIdentity,
+            workingDirectoryPath: cwdPath
+        )
         workspaces[key] = list
         try await persist()
         try ProjectLocalStateStore.save(ref: list[idx], fileSystem: fileSystem)
@@ -186,7 +270,8 @@ extension WorkspaceProjectsStore {
             displayName: trimmed,
             projectType: projectType,
             preferFreshAgentProcess: previous.preferFreshAgentProcess,
-            agentInstanceIdentity: previous.agentInstanceIdentity
+            agentInstanceIdentity: previous.agentInstanceIdentity,
+            workingDirectoryPath: previous.workingDirectoryPath
         )
         list[idx] = renamed
         workspaces[key] = list

@@ -29,7 +29,11 @@ struct AgentRuntime {
     let adapter: any AgentAdapter
     let transport: any AgentTransport
     var hookServer: HookServer?
+    /// Project identity folder (`ProjectRef.path`) — transcripts and pool key.
     var workspace: URL
+    /// Process cwd / protocol cwd / git + FSEvents root. Equals `workspace`
+    /// unless the project has a working-directory override.
+    var workingDirectory: URL
     /// Session/thread id this process is currently bound to (Claude `/resume`,
     /// Codex thread, ACP session).
     var boundSessionID: String?

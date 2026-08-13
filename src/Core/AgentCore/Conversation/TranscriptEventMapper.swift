@@ -4,16 +4,18 @@ import AgentProtocol
 import Foundation
 
 enum TranscriptEventMapper {
+    /// `changedFileRoot` is the agent cwd — the directory touched-file URLs are
+    /// relative to — which is the project root unless the project overrides it.
     static func mutations(for event: AgentEvent,
                           recordedAt: Date,
-                          projectRoot: URL) -> [TranscriptMutation] {
+                          changedFileRoot: URL) -> [TranscriptMutation] {
         if let mutation = conversationMutation(for: event, recordedAt: recordedAt) {
             return [mutation]
         }
         if let mutation = workMutation(
             for: event,
             recordedAt: recordedAt,
-            projectRoot: projectRoot
+            changedFileRoot: changedFileRoot
         ) {
             return [mutation]
         }
@@ -55,7 +57,7 @@ enum TranscriptEventMapper {
 
     private static func workMutation(for event: AgentEvent,
                                      recordedAt: Date,
-                                     projectRoot: URL) -> TranscriptMutation? {
+                                     changedFileRoot: URL) -> TranscriptMutation? {
         switch event {
         case .toolStart(let id, let name, let input, let startedAt):
             return .startTool(id: id, name: name, input: input, startedAt: startedAt)
@@ -68,7 +70,7 @@ enum TranscriptEventMapper {
                                durationMS: durationMS,
                                recordedAt: recordedAt)
         case .fileTouched(let url, let kind):
-            return .touchFile(file: .init(url: url, workspace: projectRoot),
+            return .touchFile(file: .init(url: url, workspace: changedFileRoot),
                               kind: kind,
                               recordedAt: recordedAt)
         case .fileReverted(let file):

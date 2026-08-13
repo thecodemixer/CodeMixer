@@ -13,13 +13,18 @@ extension EngineViewModel {
             let selectedPath = workspace.map {
                 URL(fileURLWithPath: $0.path).standardizedFileURL
             }
+            let expectedCwd = (activeWorkingDirectory ?? workspace).map {
+                URL(fileURLWithPath: $0.path).standardizedFileURL
+            }
             let eventURL = cwd.standardizedFileURL
             // Project selection is owned by the navigator (`newChat` /
             // `openSession`). A late SessionStart from a project the user
             // already left must never yank the sidebar / composer back.
-            if let selectedPath,
-               selectedPath.path != eventURL.path,
-               selectedPath.resolvingSymlinksInPath().path != eventURL.resolvingSymlinksInPath().path {
+            // Compare against the agent working directory (may differ from
+            // `ProjectRef.path` when a cwd override is set).
+            if let expectedCwd,
+               expectedCwd.path != eventURL.path,
+               expectedCwd.resolvingSymlinksInPath().path != eventURL.resolvingSymlinksInPath().path {
                 return
             }
             let projectChanged = selectedPath == nil
@@ -49,7 +54,18 @@ extension EngineViewModel {
                 workspaceRoot = cwd
             }
             if projectChanged {
-                workspace = cwd
+                // Prefer a known project whose working directory matches the
+                // event cwd so identity stays on `ProjectRef.path`.
+                if let match = projects.first(where: {
+                    $0.workingDirectoryURL.standardizedFileURL.path == eventURL.path
+                        || $0.workingDirectoryURL.resolvingSymlinksInPath().path
+                        == eventURL.resolvingSymlinksInPath().path
+                }) {
+                    bindActiveProject(match)
+                } else {
+                    workspace = cwd
+                    activeWorkingDirectory = cwd
+                }
             }
             // `beginSessionSwitch` already cleared the pane and may have applied
             // `session/load` history before this SessionStart. Do not wipe that
@@ -62,7 +78,7 @@ extension EngineViewModel {
                 clearConversationState()
             }
             if bindChatSession, !id.isEmpty {
-                promotePendingPhases(for: id, projectPath: cwd.path)
+                promotePendingPhases(for: id, projectPath: (workspace ?? cwd).path)
             }
             if projectChanged {
                 onActiveProjectChanged()
@@ -72,8 +88,8 @@ extension EngineViewModel {
                 // bootstrap `sessionStarted`. Refresh so New Chat / first open
                 // appear in the sidebar. ACP agents (Cursor) publish their model
                 // catalog on the same live session-open response.
-                loadSessions(for: cwd.path)
-                applyAdapterCapabilities(forProjectPath: cwd.path)
+                loadSessions(for: (workspace ?? cwd).path)
+                applyAdapterCapabilities(forProjectPath: (workspace ?? cwd).path)
             }
         case .userTurn(let id, let text):
             applyUserTurn(id: id, text: text)
@@ -187,7 +203,7 @@ extension EngineViewModel {
                 }
             }
         case .fileTouched(let url, _):
-            let file = ChangedFile(url: url, workspace: workspace)
+            let file = ChangedFile(url: url, workspace: activeWorkingDirectory ?? workspace)
             if !changedFiles.contains(file) { changedFiles.append(file) }
         case .stopped:
             settleTurnIdle()
@@ -440,7 +456,7 @@ extension EngineViewModel {
     }
 
     func displayPath(forTouchedFile url: URL) -> String {
-        ChangedFile.relativePath(for: url, workspace: workspace)
+        ChangedFile.relativePath(for: url, workspace: activeWorkingDirectory ?? workspace)
     }
 
     func noteAgentReplyObserved() {

@@ -159,9 +159,9 @@ public struct PromptComposerView: View {
             model.editDraft = nil
             focused = true
         }
-        .onChange(of: model.workspace) { _, workspace in
-            guard let workspace else { return }
-            fileIndex.refresh(workspace: workspace)
+        .onChange(of: model.activeWorkingDirectory) { _, cwd in
+            guard let cwd else { return }
+            fileIndex.refresh(workspace: cwd)
         }
         .onChange(of: voice?.latestTranscript) { _, transcript in
             guard let transcript, !transcript.isEmpty else { return }
@@ -172,7 +172,9 @@ public struct PromptComposerView: View {
             if selectedModelID.isEmpty, let first = model.availableModels.first {
                 selectedModelID = first.id
             }
-            if let workspace = model.workspace { fileIndex.refresh(workspace: workspace) }
+            if let cwd = model.activeWorkingDirectory ?? model.workspace {
+                fileIndex.refresh(workspace: cwd)
+            }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 focused = true
             }
@@ -252,7 +254,7 @@ public struct PromptComposerView: View {
 
     private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
         ComposerAttachmentHandling.handleDrop(providers,
-                                              workspace: model.workspace,
+                                              workspace: model.activeWorkingDirectory ?? model.workspace,
                                               insertFileURL: insertFileURL,
                                               insertImage: insertImage)
     }
@@ -262,7 +264,10 @@ public struct PromptComposerView: View {
     }
 
     private func insertFileURL(_ url: URL) {
-        let ref = PromptComposerDraftLogic.fileReference(for: url, workspace: model.workspace)
+        let ref = PromptComposerDraftLogic.fileReference(
+            for: url,
+            workspace: model.activeWorkingDirectory ?? model.workspace
+        )
         insertToken(ref)
     }
 

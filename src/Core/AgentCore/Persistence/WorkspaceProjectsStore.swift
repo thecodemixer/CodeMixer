@@ -47,21 +47,36 @@ public actor WorkspaceProjectsStore {
         public var preferFreshAgentProcess: Bool
         /// `.shared` or `.dedicated(uuid)` for the live CLI slot identity.
         public var agentInstanceIdentity: AgentInstanceIdentity
+        /// Absolute agent working directory when it differs from `path`.
+        /// `nil` means the agent cwd is the project folder itself.
+        public var workingDirectoryPath: String?
+
+        /// Agent cwd: the override when set, otherwise the project folder itself.
+        public var workingDirectoryURL: URL {
+            URL(fileURLWithPath: workingDirectoryPath ?? path, isDirectory: true)
+        }
 
         public init(path: String,
                     displayName: String,
                     projectType: ProjectType,
                     preferFreshAgentProcess: Bool = false,
-                    agentInstanceIdentity: AgentInstanceIdentity = .shared) {
+                    agentInstanceIdentity: AgentInstanceIdentity = .shared,
+                    workingDirectoryPath: String? = nil) {
             self.path = path
             self.displayName = displayName
             self.projectType = projectType
             self.preferFreshAgentProcess = preferFreshAgentProcess
             self.agentInstanceIdentity = agentInstanceIdentity
+            self.workingDirectoryPath = ProjectLocalState.normalizedWorkingDirectoryPath(
+                workingDirectoryPath,
+                projectRootPath: path,
+                projectType: projectType
+            )
         }
 
         enum CodingKeys: String, CodingKey {
             case path, displayName, projectType, preferFreshAgentProcess, agentInstanceIdentity
+            case workingDirectoryPath
         }
 
         public init(from decoder: any Decoder) throws {
@@ -72,6 +87,11 @@ public actor WorkspaceProjectsStore {
             preferFreshAgentProcess = try c.decodeIfPresent(Bool.self, forKey: .preferFreshAgentProcess) ?? false
             agentInstanceIdentity = try c.decodeIfPresent(AgentInstanceIdentity.self,
                                                           forKey: .agentInstanceIdentity) ?? .shared
+            workingDirectoryPath = ProjectLocalState.normalizedWorkingDirectoryPath(
+                try c.decodeIfPresent(String.self, forKey: .workingDirectoryPath),
+                projectRootPath: path,
+                projectType: projectType
+            )
         }
     }
 
@@ -118,7 +138,8 @@ public actor WorkspaceProjectsStore {
     /// - v5: `preferFreshAgentProcess` + `agentInstanceIdentity` on projects
     /// - v6: `FolderProjectKind.folderTree`
     /// - v7: `FolderProjectKind.dualFolderTree`
-    public static let currentSchemaVersion = 7
+    /// - v8: optional `workingDirectoryPath` on agent projects
+    public static let currentSchemaVersion = 8
 
     struct WorkspaceEntry: Codable, Hashable {
         var workspacePath: String
@@ -299,7 +320,8 @@ public actor WorkspaceProjectsStore {
                         displayName: local.displayName,
                         projectType: local.projectType,
                         preferFreshAgentProcess: local.preferFreshAgentProcess,
-                        agentInstanceIdentity: local.agentInstanceIdentity)
+                        agentInstanceIdentity: local.agentInstanceIdentity,
+                        workingDirectoryPath: local.workingDirectoryPath)
     }
 
     /// Non-private: called from `+Mutation` as well as the query/reconcile

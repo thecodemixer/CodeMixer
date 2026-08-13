@@ -1254,7 +1254,7 @@ Codemixer owns a project-local semantic transcript for every session. Agent-owne
 ├── prefs.json           # appearance + auto-approval rules (PrefsStore)
 └── (Keychain)           # paired-device token hashes, TLS P12 password
 <project>/.codemixer/
-├── project.json         # project type + display name
+├── project.json         # project type + display name + optional workingDirectoryPath
 ├── history/
 │   ├── index.json       # derived, store-owned session catalog
 │   ├── .gitignore       # history is local workspace state
@@ -1313,6 +1313,10 @@ The agent-agnostic model behind the GUI session navigator. A *workspace* is the 
 
 Project type is dual-persisted: app-support `workspaces.json` *and* `<project>/.codemixer/project.json` (`ProjectPaths` / `ProjectLocalState`). Each workspace also writes its project catalog to `<workspace>/.codemixer/workspace.json` (`WorkspaceLocalState`). Per-adapter model catalogs live in `<workspace>/.codemixer/workspace-<AgentID.rawValue>.json` (`WorkspaceAdapterLocalState`) — see [Model catalogs](#model-catalogs). `workspaces.json` schema v3 tracks `activeWorkspacePath` so launch restores the last open workspace unless the user chose **Close Workspace**.
 
+Agent projects may set an optional `workingDirectoryPath` on `ProjectRef` / `project.json`. That folder becomes the CLI process cwd (PWD, protocol `cwd`, hooks, git diff/FSEvents, vendor catalog import, and the root touched-file paths are relativized against). `ProjectRef.path` remains project identity — Codemixer transcripts, sessions index, and `project.json` stay there. When unset, cwd equals `path`. Folder-backed projects never store an override.
+
+A pooled child already carries its cwd, so an edit can only land on a cold spawn. `openProject` shuts down any pooled slot for that project+agent whose `AgentRuntime.workingDirectory` no longer matches, which keeps the warm resume / New Chat paths from silently continuing in the previous directory.
+
 ```swift
 public actor WorkspaceProjectsStore {
     public func projects(for:rootProjectType:) async -> [ProjectRef]          // seeds root
@@ -1325,6 +1329,7 @@ public actor WorkspaceProjectsStore {
     public func renameProject(path:to:in:) async throws -> ProjectRef  // label only
     public func removeProject(path:in:) async throws -> RemovedProject? // never the root
     public func restoreProject(_:in:) async throws                     // undo
+    public func setWorkingDirectory(path:to:in:) async throws -> ProjectRef
     public func cachedModels(for:in:) -> WorkspaceAdapterLocalState.CachedAdapterModels?
     public func saveModels(_:for:refreshedAt:in:) throws               // per-adapter catalog
 }

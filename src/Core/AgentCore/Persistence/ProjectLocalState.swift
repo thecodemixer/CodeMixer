@@ -14,8 +14,10 @@ import OSLog
 /// Schema v4 adds `FolderProjectKind.folderTree`.
 /// Schema v5 adds `FolderProjectKind.dualFolderTree` and
 /// `FolderViewState.secondaryRootPath`.
+/// Schema v6 adds optional `workingDirectoryPath` for agent projects whose
+/// CLI cwd differs from the project folder (`ProjectRef.path`).
 public struct ProjectLocalState: Sendable, Codable, Hashable {
-    public static let currentSchemaVersion = 5
+    public static let currentSchemaVersion = 6
 
     public var schemaVersion: Int
     public var displayName: String
@@ -25,19 +27,29 @@ public struct ProjectLocalState: Sendable, Codable, Hashable {
     public var folderView: FolderViewState?
     public var preferFreshAgentProcess: Bool
     public var agentInstanceIdentity: AgentInstanceIdentity
+    /// Absolute agent working directory when it differs from the project folder.
+    /// `nil` means cwd is the project folder itself. Always `nil` for folder projects.
+    public var workingDirectoryPath: String?
 
     public init(schemaVersion: Int = Self.currentSchemaVersion,
                 displayName: String,
                 projectType: ProjectType,
                 folderView: FolderViewState? = nil,
                 preferFreshAgentProcess: Bool = false,
-                agentInstanceIdentity: AgentInstanceIdentity = .shared) {
+                agentInstanceIdentity: AgentInstanceIdentity = .shared,
+                workingDirectoryPath: String? = nil,
+                projectRootPath: String? = nil) {
         self.schemaVersion = schemaVersion
         self.displayName = displayName
         self.projectType = projectType
         self.folderView = Self.normalizedFolderView(folderView, for: projectType)
         self.preferFreshAgentProcess = preferFreshAgentProcess
         self.agentInstanceIdentity = agentInstanceIdentity
+        self.workingDirectoryPath = Self.normalizedWorkingDirectoryPath(
+            workingDirectoryPath,
+            projectRootPath: projectRootPath,
+            projectType: projectType
+        )
     }
 
     public init(ref: WorkspaceProjectsStore.ProjectRef,
@@ -46,13 +58,15 @@ public struct ProjectLocalState: Sendable, Codable, Hashable {
                   projectType: ref.projectType,
                   folderView: folderView,
                   preferFreshAgentProcess: ref.preferFreshAgentProcess,
-                  agentInstanceIdentity: ref.agentInstanceIdentity)
+                  agentInstanceIdentity: ref.agentInstanceIdentity,
+                  workingDirectoryPath: ref.workingDirectoryPath,
+                  projectRootPath: ref.path)
     }
 
     enum CodingKeys: String, CodingKey {
         case schemaVersion, displayName, folderView
         case projectType = "agentMode"
-        case preferFreshAgentProcess, agentInstanceIdentity
+        case preferFreshAgentProcess, agentInstanceIdentity, workingDirectoryPath
     }
 
     public init(from decoder: any Decoder) throws {
@@ -64,6 +78,13 @@ public struct ProjectLocalState: Sendable, Codable, Hashable {
         preferFreshAgentProcess = try c.decodeIfPresent(Bool.self, forKey: .preferFreshAgentProcess) ?? false
         agentInstanceIdentity = try c.decodeIfPresent(AgentInstanceIdentity.self,
                                                       forKey: .agentInstanceIdentity) ?? .shared
+        // Project root is not stored in project.json; equal-to-root collapse
+        // happens when overlaying onto a `ProjectRef` that knows `path`.
+        workingDirectoryPath = Self.normalizedWorkingDirectoryPath(
+            try c.decodeIfPresent(String.self, forKey: .workingDirectoryPath),
+            projectRootPath: nil,
+            projectType: projectType
+        )
     }
 
     public static func normalizedFolderView(_ state: FolderViewState?,
@@ -89,6 +110,23 @@ public struct ProjectLocalState: Sendable, Codable, Hashable {
         let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed.hasPrefix("/") else { return nil }
         return URL(fileURLWithPath: trimmed, isDirectory: true).standardizedFileURL.path
+    }
+
+    /// Absolute working-directory override for agent projects. Relative / empty
+    /// values, folder-backed types, and paths equal to the project root become nil.
+    public static func normalizedWorkingDirectoryPath(_ path: String?,
+                                                      projectRootPath: String?,
+                                                      projectType: ProjectType) -> String? {
+        guard projectType.isAgentBacked else { return nil }
+        guard let path else { return nil }
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.hasPrefix("/") else { return nil }
+        let standardized = URL(fileURLWithPath: trimmed, isDirectory: true).standardizedFileURL.path
+        if let projectRootPath {
+            let root = URL(fileURLWithPath: projectRootPath, isDirectory: true).standardizedFileURL.path
+            if standardized == root { return nil }
+        }
+        return standardized
     }
 }
 
@@ -116,6 +154,11 @@ public enum ProjectLocalStateStore {
             var state = try PersistenceJSON.decode(ProjectLocalState.self, from: data)
             state.folderView = ProjectLocalState.normalizedFolderView(state.folderView,
                                                                       for: state.projectType)
+            state.workingDirectoryPath = ProjectLocalState.normalizedWorkingDirectoryPath(
+                state.workingDirectoryPath,
+                projectRootPath: projectRoot.path,
+                projectType: state.projectType
+            )
             return state
         } catch {
             log.warning("project local state load failed: \(String(describing: error), privacy: .public)")
@@ -131,6 +174,11 @@ public enum ProjectLocalStateStore {
         normalized.schemaVersion = ProjectLocalState.currentSchemaVersion
         normalized.folderView = ProjectLocalState.normalizedFolderView(normalized.folderView,
                                                                        for: normalized.projectType)
+        normalized.workingDirectoryPath = ProjectLocalState.normalizedWorkingDirectoryPath(
+            normalized.workingDirectoryPath,
+            projectRootPath: projectRoot.path,
+            projectType: normalized.projectType
+        )
         let dir = ProjectPaths.directoryURL(in: projectRoot)
         try fileSystem.createDirectory(at: dir, withIntermediates: true)
         let data = try PersistenceJSON.encode(normalized, withoutEscapingSlashes: true)
@@ -265,6 +313,26 @@ public enum ProjectLocalStateStore {
                 "The compare folder must be different from the project folder."
             }
         }
+    }
+
+    /// Returns a standardized working directory when it is an absolute existing
+    /// directory. Paths equal to `projectRoot` normalize to `nil` (no override).
+    public static func validateWorkingDirectory(_ workingDirectory: URL?,
+                                                projectRoot: URL,
+                                                projectType: ProjectType,
+                                                fileSystem: any FileSystem) throws -> String? {
+        guard projectType.isAgentBacked else { return nil }
+        guard let workingDirectory else { return nil }
+        let cwd = workingDirectory.standardizedFileURL
+        let root = projectRoot.standardizedFileURL
+        guard cwd.path.hasPrefix("/") else {
+            throw FileSystemError.notFound(path: cwd.path)
+        }
+        if cwd.path == root.path { return nil }
+        guard fileSystem.isDirectory(at: cwd) else {
+            throw FileSystemError.notFound(path: cwd.path)
+        }
+        return cwd.path
     }
 
     /// Returns a project-relative path when `relative` resolves inside `projectRoot`.

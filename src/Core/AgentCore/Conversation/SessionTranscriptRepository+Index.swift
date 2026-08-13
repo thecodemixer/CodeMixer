@@ -61,14 +61,17 @@ extension SessionTranscriptRepository {
     func importCatalog(_ sessions: [ImportedSession],
                        namespace: String,
                        agentID: AgentID,
-                       into root: URL) throws {
+                       into root: URL,
+                       changedFileRoot: URL? = nil) throws {
         var records = try indexRecords(in: root)
         let now = clock.now()
         for session in sessions {
             let key = SessionTranscriptKey(projectRoot: root,
                                            namespace: namespace,
                                            sessionID: session.id)
-            let transcript = try recordImported(session.events, for: key)
+            let transcript = try recordImported(session.events,
+                                                for: key,
+                                                changedFileRoot: changedFileRoot)
             let existingIndex = records.firstIndex(where: {
                 $0.sessionID == session.id && $0.namespace == namespace
             })

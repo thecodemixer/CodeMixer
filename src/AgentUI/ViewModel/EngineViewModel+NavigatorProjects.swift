@@ -20,6 +20,24 @@ extension EngineViewModel {
         }
     }
 
+    /// Bind sidebar/session identity to `path` and sync `activeWorkingDirectory`
+    /// from the stored project ref (override or project folder).
+    func bindActiveProject(path: String) {
+        let projectURL = URL(fileURLWithPath: path).standardizedFileURL
+        workspace = projectURL
+        if let ref = projectRef(at: projectURL.path) {
+            activeWorkingDirectory = ref.workingDirectoryURL
+        } else {
+            activeWorkingDirectory = projectURL
+        }
+    }
+
+    /// Bind sidebar/session identity from a known project ref.
+    func bindActiveProject(_ project: WorkspaceProjectsStore.ProjectRef) {
+        workspace = URL(fileURLWithPath: project.path).standardizedFileURL
+        activeWorkingDirectory = project.workingDirectoryURL
+    }
+
     /// Bind the active project and arm the adapter's session-handshake composer
     /// gate before engine spawn so an early send cannot race protocol bootstrap.
     public func prepareProjectOpen(url: URL, projectType: ProjectType) async {
@@ -29,7 +47,7 @@ extension EngineViewModel {
         if workspaceRoot == nil {
             workspaceRoot = target
         }
-        workspace = target
+        bindActiveProject(path: target.path)
         let supportsOverview = await Self.adapterSupportsOverviewDashboard(projectType)
         if var caps = projectCapabilities[target.path] {
             caps.supportsOverviewDashboard = supportsOverview
@@ -70,6 +88,7 @@ extension EngineViewModel {
                 projectType: projectType,
                 preferFreshAgentProcess: info.preferFreshAgentProcess,
                 folderView: folderView,
+                workingDirectory: info.workingDirectoryURL,
                 in: workspaceRoot
             )
             await finishProjectRegistration(ref, projectType: projectType)
@@ -99,6 +118,7 @@ extension EngineViewModel {
                 displayName: info.name,
                 preferFreshAgentProcess: info.preferFreshAgentProcess,
                 folderView: folderView,
+                workingDirectory: info.workingDirectoryURL,
                 in: workspaceRoot
             )
             await finishProjectRegistration(ref, projectType: projectType)
@@ -133,6 +153,31 @@ extension EngineViewModel {
             primaryRoot: primaryRoot,
             fileSystem: SystemFileSystem()
         )
+    }
+
+    /// Update the agent working-directory override for an existing project.
+    /// Takes effect the next time that project's agent starts.
+    @discardableResult
+    public func setProjectWorkingDirectory(path: String, to workingDirectory: URL?) async -> String? {
+        guard let workspaceRoot, let store = workspaceProjects else {
+            return "No workspace is open."
+        }
+        do {
+            let updated = try await store.setWorkingDirectory(
+                path: path,
+                to: workingDirectory,
+                in: workspaceRoot
+            )
+            let refs = await store.projects(for: workspaceRoot)
+            await applyProjectList(refs)
+            if workspace?.path == updated.path {
+                bindActiveProject(updated)
+            }
+            return nil
+        } catch {
+            recordProjectError(error)
+            return projectMutationMessage(error)
+        }
     }
 
     /// Create a new project (subfolder of the workspace) and switch to it.
@@ -268,7 +313,7 @@ extension EngineViewModel {
     func applyRenamedProjectPath(from oldPath: String, to newPath: String) {
         guard oldPath != newPath else { return }
         if workspace?.path == oldPath {
-            workspace = URL(fileURLWithPath: newPath, isDirectory: true)
+            bindActiveProject(path: newPath)
         }
         if let sessions = sessionsByProject.removeValue(forKey: oldPath) {
             sessionsByProject[newPath] = sessions
@@ -296,6 +341,7 @@ extension EngineViewModel {
     public func adoptEmptyWorkspace(_ url: URL) async {
         workspaceRoot = url
         workspace = nil
+        activeWorkingDirectory = nil
         sessionID = nil
         projects = []
         sessionsByProject = [:]
@@ -328,6 +374,7 @@ extension EngineViewModel {
     public func resetForClosedWorkspace() {
         workspaceRoot = nil
         workspace = nil
+        activeWorkingDirectory = nil
         sessionID = nil
         projects = []
         sessionsByProject = [:]

@@ -11,7 +11,8 @@ struct ProjectInfoSheetTests {
             path: "/workspace/api",
             displayName: "api",
             projectType: .claudeCode,
-            preferFreshAgentProcess: true
+            preferFreshAgentProcess: true,
+            workingDirectoryPath: "/src/api"
         )
         var closed = false
         let sheet = ProjectInfoSheet(project: project) { closed = true }
@@ -19,6 +20,7 @@ struct ProjectInfoSheetTests {
         let info = ProjectInfoPresentation.make(from: sheet.project)
         #expect(info.projectName == "api")
         #expect(info.path == "/workspace/api")
+        #expect(info.workingDirectoryPath == "/src/api")
         #expect(info.categoryLabel == "Single agent")
         #expect(info.preferFreshAgentProcess == true)
 
@@ -26,19 +28,35 @@ struct ProjectInfoSheetTests {
         #expect(closed)
     }
 
-    @Test("A folder project hides the agent-only Advanced row")
+    @Test("A folder project hides the agent-only Advanced row and working directory")
     @MainActor
     func folderProjectHasNoAdvancedRow() {
         let project = WorkspaceProjectsStore.ProjectRef(
             path: "/workspace/docs",
             displayName: "docs",
             projectType: .folder(.files),
-            preferFreshAgentProcess: true
+            preferFreshAgentProcess: true,
+            workingDirectoryPath: "/src/docs"
         )
         let sheet = ProjectInfoSheet(project: project) {}
 
         // `nil` is what makes the sheet's DisclosureGroup disappear, so a folder
         // project must not inherit the stored agent-process preference.
-        #expect(ProjectInfoPresentation.make(from: sheet.project).preferFreshAgentProcess == nil)
+        let info = ProjectInfoPresentation.make(from: sheet.project)
+        #expect(info.preferFreshAgentProcess == nil)
+        #expect(info.workingDirectoryPath == nil)
+        #expect(project.workingDirectoryPath == nil)
+    }
+
+    @Test("Agent projects expose the working directory even when it matches the project folder")
+    @MainActor
+    func agentProjectShowsDefaultWorkingDirectory() {
+        let project = WorkspaceProjectsStore.ProjectRef(
+            path: "/workspace/api",
+            displayName: "api",
+            projectType: .codex
+        )
+        let info = ProjectInfoPresentation.make(from: project)
+        #expect(info.workingDirectoryPath == "/workspace/api")
     }
 }

@@ -14,7 +14,7 @@ extension EngineViewModel {
 
     public func beginSessionSwitch(projectPath: String, sessionID id: String) {
         rememberSupersededSessionSwitch(replacingWith: id)
-        workspace = URL(fileURLWithPath: projectPath).standardizedFileURL
+        bindActiveProject(path: projectPath)
         sessionID = id
         clearConversationState()
         promotePendingPhases(for: id, projectPath: projectPath)

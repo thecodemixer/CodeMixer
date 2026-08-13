@@ -15,6 +15,7 @@
     "AgentEngine + ClaudeAdapter live harness": 180.0,
     "AgentEngine + CodexAdapter live harness": 180.0,
     "Folder tree — live filesystem end-to-end": 120.0,
+    "Live working directory — agent project cwd override": 600.0,
     "PTYHost — process lifecycle": 10.0,
     "RemoteEngineClient": 3.0,
     "RemoteControlServer — end-to-end over in-memory transport": 5.0,

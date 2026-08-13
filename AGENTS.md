@@ -83,7 +83,7 @@ Codemixer/
 | Status phrase priority | `Core/AgentCore/Status/StatusPhraseResolver.swift` |
 | Activity heartbeat | `Core/AgentCore/Activity/HeartbeatActivityMonitor.swift` |
 | Prefs / sessions / appearance persistence | `Core/AgentCore/Persistence/{PrefsStore,SessionStore,AppearancePrefs}.swift` |
-| Agent-agnostic Workspace→Projects model + persistence | `Core/AgentCore/Persistence/{WorkspaceProjectsStore,ProjectType,ProjectAgentRouter,ProjectLocalState,WorkspaceLocalState,WorkspaceAdapterLocalState}.swift` (per-adapter model caches in `workspace-<AgentID>.json`) |
+| Agent-agnostic Workspace→Projects model + persistence | `Core/AgentCore/Persistence/{WorkspaceProjectsStore,ProjectType,ProjectAgentRouter,ProjectLocalState,WorkspaceLocalState,WorkspaceAdapterLocalState}.swift` (per-adapter model caches in `workspace-<AgentID>.json`; optional `workingDirectoryPath` on agent projects) |
 | Core framework wrappers (Process, process liveness, Keychain, FSEvents) | `Core/AgentCore/External/{ProcessRunner,ProcessInspector,KeychainStore,FSEventsStream}.swift` |
 | Product constants (ports, identity, timing, buffers, paths) | `Core/AgentCore/{RemoteDefaults,RemoteAuthTiming,DaemonDefaults,AppIdentity,ActivityTiming,StreamBufferDefaults}.swift`, `Core/AgentCore/Paths/{AppSupportPaths,SystemPaths,ProjectPaths}.swift` |
 | DI seams | `Core/AgentCore/Seams/{Clock,RandomSource,Environment,FileSystem,Seams}.swift` |
@@ -167,6 +167,7 @@ Codemixer/
 | Folder table browser (`files`/`logs`/`docs`/`modelhike`) | `AgentUI/Folder/FolderView.swift`, `FolderView+FileTable.swift`, `FolderViewModel.swift` |
 | Folder tree browser (`folderTree`) | `AgentUI/Folder/FolderTreeView.swift`, `FolderTreeView+TreeColumn.swift`, `FolderTreeColumn.swift`, `FolderTreeViewModel.swift` (+Tree/+Preview/+Watching) |
 | Dual folder tree browser (`dualFolderTree`) | `AgentUI/Folder/DualFolderTreeView.swift`, `DualFolderTreeCoordinator.swift`, `DualFolderPaneLayout.swift` |
+| Project create/configure (incl. agent working-directory chooser) | `AgentUI/Pickers/ProjectConfigurationSheets.swift`, `ProjectDraft.swift`, `ProjectInfoSheet.swift` |
 | Per-root tree banners / empty states | `AgentUI/Folder/FolderTreeStatusViews.swift` |
 | Temporary sidebar hiding for focused surfaces (never persisted) | `AgentUI/Workspace/SidebarSuppressionController.swift` (used by `WorkspaceScene`) |
 | Folder scan + shared preview helpers / icons | `Core/AgentCore/Persistence/FolderScanner.swift`, `AgentUI/Folder/{FolderFileSupport,FolderFileIcon,FolderTreeBuilder,FolderTreeNode}.swift` |

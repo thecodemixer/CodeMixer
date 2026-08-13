@@ -71,9 +71,13 @@ public struct SessionSidebarView: View {
             )
         }
         .sheet(item: $infoTarget) { project in
-            ProjectInfoSheet(project: project) {
-                infoTarget = nil
-            }
+            ProjectInfoSheet(
+                project: project,
+                onClose: { infoTarget = nil },
+                onSetWorkingDirectory: { url in
+                    await model.setProjectWorkingDirectory(path: project.path, to: url)
+                }
+            )
         }
         .animation(Theme.motion.resolve(Theme.motion.changing, reduceMotion: reduceMotion),
                    value: focusMode)

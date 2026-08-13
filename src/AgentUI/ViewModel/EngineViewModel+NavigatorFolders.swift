@@ -7,8 +7,7 @@ extension EngineViewModel {
                                   relativePath: String?,
                                   focusPreview: Bool = false) {
         guard let kind = project.projectType.folderKind else { return }
-        let target = URL(fileURLWithPath: project.path).standardizedFileURL
-        workspace = target
+        bindActiveProject(project)
         sessionID = nil
         clearConversationState()
         clearAllPendingPermissions()

@@ -23,17 +23,21 @@ public struct ProjectDraft: Sendable, Hashable {
     public var existingFolderURL: URL?
     /// Absolute compare-folder root for `FolderProjectKind.dualFolderTree`.
     public var secondaryFolderURL: URL?
+    /// Absolute agent working directory when it differs from the project folder.
+    public var workingDirectoryURL: URL?
 
     public init(name: String,
                 projectType: ProjectType? = nil,
                 preferFreshAgentProcess: Bool = false,
                 existingFolderURL: URL? = nil,
-                secondaryFolderURL: URL? = nil) {
+                secondaryFolderURL: URL? = nil,
+                workingDirectoryURL: URL? = nil) {
         self.name = name
         self.projectType = projectType
         self.preferFreshAgentProcess = preferFreshAgentProcess
         self.existingFolderURL = existingFolderURL
         self.secondaryFolderURL = secondaryFolderURL
+        self.workingDirectoryURL = workingDirectoryURL
     }
 
     /// Open / Add Existing: folder chosen, type may still be unknown.

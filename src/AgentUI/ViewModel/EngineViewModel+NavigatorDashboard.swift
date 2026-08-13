@@ -23,8 +23,7 @@ extension EngineViewModel {
             return
         }
 
-        let target = URL(fileURLWithPath: projectPath).standardizedFileURL
-        workspace = target
+        bindActiveProject(path: projectPath)
         clearConversationState()
         sessionID = nil
         detailPane = .dashboard
@@ -35,7 +34,7 @@ extension EngineViewModel {
     /// Overview is a dashboard surface, not a resumable session.
     func selectDashboardOverview(projectPath: String) {
         let wasShowingOverview = showsOverviewDashboard
-        workspace = URL(fileURLWithPath: projectPath).standardizedFileURL
+        bindActiveProject(path: projectPath)
         sessionID = nil
         clearConversationState()
         refreshPermissionActivity()
@@ -76,7 +75,7 @@ extension EngineViewModel {
         if rejectIfModelCatalogUnavailable(forProjectPath: projectPath) { return }
 
         let target = URL(fileURLWithPath: projectPath).standardizedFileURL
-        workspace = target
+        bindActiveProject(path: projectPath)
         sessionID = nil
         clearConversationState()
         clearAllPendingPermissions()

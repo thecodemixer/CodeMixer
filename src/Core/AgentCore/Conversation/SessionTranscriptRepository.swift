@@ -27,32 +27,43 @@ actor SessionTranscriptRepository {
         self.processIsRunning = processIsRunning
     }
 
-    func record(_ event: AgentEvent, for key: SessionTranscriptKey) throws {
+    /// `changedFileRoot` is the agent cwd, which differs from `key.projectRoot`
+    /// when the project carries a working-directory override. Touched-file paths
+    /// come from a CLI running in that cwd, so they only relativize against it;
+    /// the journal itself still lives under the project root.
+    func record(_ event: AgentEvent,
+                for key: SessionTranscriptKey,
+                changedFileRoot: URL? = nil) throws {
         let mutations = TranscriptEventMapper.mutations(
             for: event,
             recordedAt: clock.now(),
-            projectRoot: key.projectRoot
+            changedFileRoot: changedFileRoot ?? key.projectRoot
         )
         try record(mutations, for: key, updatesIndex: true)
     }
 
-    func record(_ events: [AgentEvent], for key: SessionTranscriptKey) throws {
+    func record(_ events: [AgentEvent],
+                for key: SessionTranscriptKey,
+                changedFileRoot: URL? = nil) throws {
         let now = clock.now()
+        let root = changedFileRoot ?? key.projectRoot
         let mutations = events.flatMap {
             TranscriptEventMapper.mutations(for: $0,
                                             recordedAt: now,
-                                            projectRoot: key.projectRoot)
+                                            changedFileRoot: root)
         }
         try record(mutations, for: key, updatesIndex: true)
     }
 
     func recordImported(_ events: [AgentEvent],
-                        for key: SessionTranscriptKey) throws -> SessionTranscript {
+                        for key: SessionTranscriptKey,
+                        changedFileRoot: URL? = nil) throws -> SessionTranscript {
         let now = clock.now()
+        let root = changedFileRoot ?? key.projectRoot
         let mutations = events.flatMap {
             TranscriptEventMapper.mutations(for: $0,
                                             recordedAt: now,
-                                            projectRoot: key.projectRoot)
+                                            changedFileRoot: root)
         }
         try record(mutations, for: key, updatesIndex: false)
         return try transcript(for: key)

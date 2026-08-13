@@ -97,10 +97,14 @@ public final class EngineViewModel {
     public internal(set) var sessionID: String?
     /// Project paths with a live or parked pooled agent process in this workspace.
     public internal(set) var livePooledProjectPaths: Set<String> = []
-    /// Active project cwd from the agent session (conversation / diff / composer).
+    /// Active project identity folder (`ProjectRef.path`) — sidebar / sessions.
     public internal(set) var workspace: URL?
+    /// Agent process cwd for the active project. Equals `workspace` unless the
+    /// project has a working-directory override. Diffs, composer `@` index, and
+    /// `sessionStarted` filtering use this URL.
+    public internal(set) var activeWorkingDirectory: URL?
     /// Loaded workspace folder (one per window). Owns the projects list in the
-    /// sidebar; distinct from `workspace`, which tracks the active project cwd.
+    /// sidebar; distinct from `workspace`, which tracks the active project.
     /// Set by the app shell when adopting / opening / closing a workspace.
     public var workspaceRoot: URL?
     public internal(set) var messages: [Message] = []
@@ -445,6 +449,7 @@ public final class EngineViewModel {
                            sessions: [String: [SessionSummary]]) {
         self.workspaceRoot = workspace
         self.workspace = workspace
+        self.activeWorkingDirectory = workspace
         self.projects = projects
         self.sessionsByProject = sessions
     }

@@ -23,14 +23,16 @@ extension AgentEngine {
             if !TranscriptEventMapper.mutations(
                 for: event,
                 recordedAt: seams.clock.now(),
-                projectRoot: workspace ?? URL(fileURLWithPath: "/")
+                changedFileRoot: workingDirectory ?? workspace ?? URL(fileURLWithPath: "/")
             ).isEmpty {
                 pendingTranscriptEvents.append(event)
             }
             return
         }
         do {
-            try await transcriptRepository.record(event, for: key)
+            try await transcriptRepository.record(event,
+                                                  for: key,
+                                                  changedFileRoot: workingDirectory)
         } catch {
             await publishHistoryError(error, key: key, operation: "write")
         }
@@ -50,7 +52,9 @@ extension AgentEngine {
             if !pendingTranscriptEvents.isEmpty {
                 let pending = pendingTranscriptEvents
                 pendingTranscriptEvents.removeAll()
-                try await transcriptRepository.record(pending, for: key)
+                try await transcriptRepository.record(pending,
+                                                      for: key,
+                                                      changedFileRoot: workingDirectory)
             }
             try await publishStoredSessions(in: key.projectRoot)
         } catch {
@@ -60,7 +64,8 @@ extension AgentEngine {
 
     func recordBackgroundSessionEvents(_ batch: BackgroundSessionEventBatch,
                                        adapter: any AgentAdapter,
-                                       workspace: URL) async {
+                                       workspace: URL,
+                                       workingDirectory: URL) async {
         let key = SessionTranscriptKey(projectRoot: workspace,
                                        namespace: adapter.historyNamespace,
                                        sessionID: batch.sessionID)
@@ -71,7 +76,9 @@ extension AgentEngine {
                 agentID: adapter.id,
                 in: key.projectRoot
             )
-            try await transcriptRepository.record(batch.events, for: key)
+            try await transcriptRepository.record(batch.events,
+                                                  for: key,
+                                                  changedFileRoot: workingDirectory)
             try await publishStoredSessions(in: key.projectRoot)
         } catch {
             await publishHistoryError(error, key: key, operation: "write")

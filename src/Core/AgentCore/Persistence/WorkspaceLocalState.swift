@@ -14,7 +14,8 @@ public struct WorkspaceLocalState: Sendable, Codable, Hashable {
     /// newer catalogs rather than mis-decode them.
     /// Schema v5 adds `FolderProjectKind.folderTree`.
     /// Schema v6 adds `FolderProjectKind.dualFolderTree`.
-    public static let currentSchemaVersion = 6
+    /// Schema v7 adds optional `workingDirectoryPath` on agent projects.
+    public static let currentSchemaVersion = 7
 
     public var schemaVersion: Int
     public var projects: [WorkspaceProjectsStore.ProjectRef]

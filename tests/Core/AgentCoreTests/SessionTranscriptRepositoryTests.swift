@@ -241,6 +241,25 @@ struct SessionTranscriptRepositoryTests {
         try await repository.shutdown()
     }
 
+    @Test("touched files relativize against the agent working directory, not the project root")
+    func touchedFilesRelativizeAgainstWorkingDirectory() async throws {
+        let fileSystem = InMemoryFileSystem()
+        let clock = FakeClock()
+        let key = makeKey("working-directory")
+        let source = TestPaths.underTemporary("transcript-repository-source")
+        let repository = makeRepository(fileSystem: fileSystem, clock: clock, ownerPID: 601)
+
+        let touched = AgentEvent.fileTouched(
+            source.appendingPathComponent("Sources/App.swift"),
+            kind: .fsObserved
+        )
+        try await repository.record(touched, for: key, changedFileRoot: source)
+
+        let files = try await repository.changedFiles(for: key)
+        #expect(files.map(\.relativePath) == ["Sources/App.swift"])
+        try await repository.shutdown()
+    }
+
     private func makeRepository(
         fileSystem: InMemoryFileSystem,
         clock: FakeClock,

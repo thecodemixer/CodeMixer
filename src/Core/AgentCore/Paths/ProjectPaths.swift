@@ -2,12 +2,18 @@ import Foundation
 
 /// On-disk layout for Codemixer state inside a project or workspace folder.
 ///
-/// Per **project** (agent cwd / `ProjectRef.path`). For a nested project that
-/// is typically `<workspace>/<projectName>/`; it is the workspace folder
-/// itself only when that folder was opened as the seeded root project:
-/// - `<project>/.codemixer/project.json` — type + display name
+/// Per **project** (`ProjectRef.path` — project identity folder). For a nested
+/// project that is typically `<workspace>/<projectName>/`; it is the workspace
+/// folder itself only when that folder was opened as the seeded root project:
+/// - `<project>/.codemixer/project.json` — type + display name + optional
+///   `workingDirectoryPath` (agent cwd override when it differs from this folder)
 /// - `<project>/.codemixer/history/` — adapter-namespaced transcript journals,
 ///   the derived session index, and a local `.gitignore`
+///
+/// Agent process cwd defaults to `ProjectRef.path`. When
+/// `workingDirectoryPath` is set, spawn / PWD / protocol cwd / git / FSEvents
+/// / vendor catalog import use that folder instead; Codemixer transcripts and
+/// `project.json` stay under `ProjectRef.path`.
 ///
 /// Per **workspace** (window shell / `workspaceRoot`):
 /// - `<workspace>/.codemixer/workspace.json` — catalog of member projects

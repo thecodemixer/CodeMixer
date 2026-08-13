@@ -15,6 +15,7 @@ struct ProjectInfoPresentation: Equatable, Sendable {
 
     let projectName: String
     let path: String
+    let workingDirectoryPath: String?
     let categoryLabel: String
     let detailRows: [Row]
     /// `nil` for folder projects — Advanced options are not shown there.
@@ -24,6 +25,7 @@ struct ProjectInfoPresentation: Equatable, Sendable {
         make(
             displayName: project.displayName,
             path: project.path,
+            workingDirectoryPath: project.workingDirectoryPath,
             projectType: project.projectType,
             preferFreshAgentProcess: project.preferFreshAgentProcess
         )
@@ -31,12 +33,14 @@ struct ProjectInfoPresentation: Equatable, Sendable {
 
     static func make(displayName: String,
                      path: String,
+                     workingDirectoryPath: String? = nil,
                      projectType: ProjectType,
                      preferFreshAgentProcess: Bool) -> ProjectInfoPresentation {
         let kind = ProjectTypeKind.from(projectType: projectType)
         return ProjectInfoPresentation(
             projectName: displayName,
             path: path,
+            workingDirectoryPath: projectType.isAgentBacked ? (workingDirectoryPath ?? path) : nil,
             categoryLabel: kind.category.label,
             detailRows: detailRows(for: projectType),
             preferFreshAgentProcess: projectType.isAgentBacked ? preferFreshAgentProcess : nil

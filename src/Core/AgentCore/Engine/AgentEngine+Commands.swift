@@ -67,6 +67,7 @@ extension AgentEngine {
             guard let ws = workspace else {
                 throw AgentError.internalInvariant(detail: "editAndResubmitLast: no workspace")
             }
+            let savedWorkingDirectory = workingDirectory ?? ws
             let revisedPrompt = try await promptText(text, attachments: attachments)
             // Snapshot live state before shutdown clears it.
             // `adapter` is guaranteed non-optional here (the guard above enforced it).
@@ -109,7 +110,7 @@ extension AgentEngine {
                 if await savedAdapter.truncateTranscript(
                     afterUserTurnID: adapterTurnID,
                     sessionID: sid,
-                    workspace: ws
+                    workspace: savedWorkingDirectory
                 ) {
                     resumeSessionID = sid
                 } else {
@@ -129,7 +130,8 @@ extension AgentEngine {
                 try await start(adapter: savedAdapter,
                                 workspace: ws,
                                 resumeSessionID: resumeSessionID,
-                                runtimeKey: resumeKey)
+                                runtimeKey: resumeKey,
+                                workingDirectory: savedWorkingDirectory)
             } catch {
                 // The pre-edit process is already gone, so a failed respawn
                 // leaves the session unusable. Every attached surface needs to
@@ -209,14 +211,14 @@ extension AgentEngine {
             await bus.publish(.speakBubbleRequested(eventID: eventID, action: action))
             return ()
         case .revertFile(let file):
-            try await gitReverter.checkout(file: file, workspace: workspace)
+            try await gitReverter.checkout(file: file, workspace: workingDirectory ?? workspace)
             await record(.fileReverted(file: file))
             await bus.publish(.fileReverted(file: file))
             return ()
         case .revertHunk(let file, let hunkID):
             try await gitReverter.revertHunk(file: file,
                                              hunkID: hunkID,
-                                             workspace: workspace)
+                                             workspace: workingDirectory ?? workspace)
             await record(.fileReverted(file: file))
             await bus.publish(.fileReverted(file: file))
             return ()
@@ -323,6 +325,31 @@ extension AgentEngine {
             await restoreHistory(for: transcriptKey)
         }
 
+        let agentWorkingDirectory = project.workingDirectoryURL.standardizedFileURL
+        // Only an explicit override is validated: with none, cwd is the project
+        // folder, and the open path already depends on that folder existing.
+        if project.workingDirectoryPath != nil,
+           !seams.fileSystem.isDirectory(at: agentWorkingDirectory) {
+            throw AgentError.unsupportedOperation(
+                detail: "Working directory \(agentWorkingDirectory.path) is missing or not a folder."
+            )
+        }
+
+        // A pooled child already has its cwd; a working-directory edit can only
+        // land on a cold spawn. Drop stale slots here so the warm resume / New
+        // Chat paths below cannot silently keep running in the old directory.
+        let staleSlots = runtimes.filter { key, runtime in
+            key.projectPath == project.path
+                && key.agentID == nextAdapter.id
+                && runtime.workingDirectory.path != agentWorkingDirectory.path
+        }.map(\.key)
+        for stale in staleSlots {
+            log.notice(
+                "working directory changed; dropping stale slot project=\(project.path, privacy: .public)"
+            )
+            await shutdownSlot(stale, publishStopped: false)
+        }
+
         var key = runtimeKey(for: project, agentID: nextAdapter.id)
         if project.preferFreshAgentProcess {
             // Always replace slots for this project+agent. Mint + persist a
@@ -348,7 +375,8 @@ extension AgentEngine {
                             workspace: projectURL,
                             resumeSessionID: resumeSessionID,
                             permissionMode: .default,
-                            runtimeKey: key)
+                            runtimeKey: key,
+                            workingDirectory: agentWorkingDirectory)
             return
         }
 
@@ -398,7 +426,8 @@ extension AgentEngine {
                         workspace: projectURL,
                         resumeSessionID: resumeSessionID,
                         permissionMode: .default,
-                        runtimeKey: key)
+                        runtimeKey: key,
+                        workingDirectory: agentWorkingDirectory)
     }
 
     private func importProjectHistory(at projectURL: URL) async throws {
@@ -437,7 +466,7 @@ extension AgentEngine {
         for adapter in adapters {
             do {
                 let sessions = try await adapter.importSessionCatalog(
-                    workspace: projectURL,
+                    workspace: project.workingDirectoryURL,
                     env: environment
                 ) { [bus] completed, total in
                     await bus.publish(.historyImportProgress(
@@ -450,7 +479,8 @@ extension AgentEngine {
                     sessions,
                     namespace: adapter.historyNamespace,
                     agentID: adapter.id,
-                    into: projectURL
+                    into: projectURL,
+                    changedFileRoot: project.workingDirectoryURL
                 )
                 imported += sessions.count
             } catch is CancellationError {

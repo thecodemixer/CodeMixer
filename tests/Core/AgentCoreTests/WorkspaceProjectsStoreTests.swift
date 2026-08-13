@@ -739,6 +739,108 @@ struct WorkspaceProjectsStoreTests {
         #expect(!result.entries.contains { $0.relativePath.contains(".codemixer") })
     }
 
+    // MARK: - Working directory override
+
+    @Test("createProject persists an absolute working-directory override")
+    func createProjectPersistsWorkingDirectory() async throws {
+        let fs = InMemoryFileSystem()
+        let store = makeStore(fs: fs)
+        let source = TestPaths.workspace("source-code")
+        try fs.createDirectory(at: source, withIntermediates: true)
+        let ref = try await store.createProject(
+            name: "api",
+            projectType: .claudeCode,
+            workingDirectory: source,
+            in: workspace
+        )
+        #expect(ref.workingDirectoryPath == source.path)
+        #expect(ref.workingDirectoryURL.path == source.path)
+        let loaded = ProjectLocalStateStore.load(from: URL(fileURLWithPath: ref.path), fileSystem: fs)
+        #expect(loaded?.workingDirectoryPath == source.path)
+        let catalog = await store.projects(for: workspace)
+        #expect(catalog.first?.workingDirectoryPath == source.path)
+    }
+
+    @Test("working directory equal to the project folder stores nil")
+    func workingDirectoryEqualToProjectNormalizesNil() async throws {
+        let fs = InMemoryFileSystem()
+        let store = makeStore(fs: fs)
+        let ref = try await store.createProject(name: "api", projectType: .claudeCode, in: workspace)
+        let projectRoot = URL(fileURLWithPath: ref.path)
+        let updated = try await store.setWorkingDirectory(
+            path: ref.path,
+            to: projectRoot,
+            in: workspace
+        )
+        #expect(updated.workingDirectoryPath == nil)
+        #expect(updated.workingDirectoryURL.path == ref.path)
+    }
+
+    @Test("folder projects reject a working-directory override")
+    func folderProjectsClearWorkingDirectory() async throws {
+        let fs = InMemoryFileSystem()
+        let store = makeStore(fs: fs)
+        let source = TestPaths.workspace("source-code")
+        try fs.createDirectory(at: source, withIntermediates: true)
+        let ref = try await store.createProject(
+            name: "docs",
+            projectType: .folder(.files),
+            workingDirectory: source,
+            in: workspace
+        )
+        #expect(ref.workingDirectoryPath == nil)
+    }
+
+    @Test("renameProject preserves workingDirectoryPath")
+    func renamePreservesWorkingDirectory() async throws {
+        let fs = InMemoryFileSystem()
+        let store = makeStore(fs: fs)
+        let source = TestPaths.workspace("source-code")
+        try fs.createDirectory(at: source, withIntermediates: true)
+        let ref = try await store.createProject(
+            name: "api",
+            projectType: .claudeCode,
+            workingDirectory: source,
+            in: workspace
+        )
+        let renamed = try await store.renameProject(path: ref.path, to: "Backend", in: workspace)
+        #expect(renamed.workingDirectoryPath == source.path)
+    }
+
+    @Test("setWorkingDirectory writes index and project.json")
+    func setWorkingDirectoryPersists() async throws {
+        let fs = InMemoryFileSystem()
+        let store = makeStore(fs: fs)
+        let source = TestPaths.workspace("source-code")
+        try fs.createDirectory(at: source, withIntermediates: true)
+        let ref = try await store.createProject(name: "api", projectType: .claudeCode, in: workspace)
+        let updated = try await store.setWorkingDirectory(
+            path: ref.path,
+            to: source,
+            in: workspace
+        )
+        #expect(updated.workingDirectoryPath == source.path)
+        let loaded = ProjectLocalStateStore.load(from: URL(fileURLWithPath: ref.path), fileSystem: fs)
+        #expect(loaded?.workingDirectoryPath == source.path)
+        let catalog = WorkspaceLocalStateStore.load(from: workspace, fileSystem: fs)
+        #expect(catalog?.projects.first?.workingDirectoryPath == source.path)
+    }
+
+    @Test("old project.json without workingDirectoryPath still loads")
+    func oldProjectJSONWithoutWorkingDirectoryLoads() throws {
+        let fs = InMemoryFileSystem()
+        let root = TestPaths.workspace("legacy-project")
+        try fs.createDirectory(at: ProjectPaths.directoryURL(in: root), withIntermediates: true)
+        let json = """
+        {"schemaVersion":5,"displayName":"legacy","agentMode":{"claudeCode":{}},"preferFreshAgentProcess":false}
+        """
+        try fs.writeAtomically(Data(json.utf8), to: ProjectPaths.projectStateURL(in: root))
+        let loaded = ProjectLocalStateStore.load(from: root, fileSystem: fs)
+        #expect(loaded?.displayName == "legacy")
+        #expect(loaded?.workingDirectoryPath == nil)
+        #expect(loaded?.projectType == .claudeCode)
+    }
+
     // MARK: - Helpers
 
     private func makeStore(fs: InMemoryFileSystem = InMemoryFileSystem()) -> WorkspaceProjectsStore {

@@ -1305,6 +1305,36 @@ struct EngineViewModelNavigatorTests {
         await bus.shutdown()
     }
 
+    @Test("sessionStarted with a working-directory override is accepted without switching project identity")
+    func sessionStartedAcceptsWorkingDirectoryOverride() async {
+        let (vm, bus, _) = makeModel()
+        vm.subscribe()
+        defer { vm.unsubscribe() }
+
+        let project = TestPaths.workspace("ws/api")
+        let source = TestPaths.workspace("src/api")
+        vm.workspaceRoot = TestPaths.workspace("ws")
+        vm.projects = [
+            WorkspaceProjectsStore.ProjectRef(
+                path: project.path,
+                displayName: "api",
+                projectType: .claudeCode,
+                workingDirectoryPath: source.path
+            ),
+        ]
+        vm.bindActiveProject(path: project.path)
+        vm.sessionID = "api-1"
+
+        await bus.publish(.sessionStarted(sessionID: "api-2", model: nil, cwd: source))
+        await drain()
+
+        #expect(vm.workspace?.path == project.path)
+        #expect(vm.activeWorkingDirectory?.path == source.path)
+        #expect(vm.sessionID == "api-2")
+
+        await bus.shutdown()
+    }
+
     @Test("sessionStarted for a subproject keeps workspaceRoot and project sections")
     func sessionStartedSubprojectKeepsWorkspaceProjects() async throws {
         let port = RecordingPort()

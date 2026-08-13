@@ -92,7 +92,10 @@ public actor AgentEngine: AgentEngineCommandPort {
     var eventForwardingTask: Task<Void, Never>?
     var bellTask: Task<Void, Never>?
     var sessionTeardownState: SessionTeardownState = .idle
+    /// Active project identity folder (`ProjectRef.path`).
     var workspace: URL?
+    /// Active agent process cwd. Equals `workspace` unless overridden.
+    var workingDirectory: URL?
     var sessionActivationState: SessionActivationState = .idle
     var pendingTranscriptEvents: [AgentEvent] = []
     var attentionSessionIDsByProject: [String: Set<String>] = [:]
@@ -185,10 +188,16 @@ public actor AgentEngine: AgentEngineCommandPort {
     /// (if the adapter declares `.hooksOverUDS`), binds an `AgentTransport`
     /// matching the adapter's descriptor, and bridges the adapter's event
     /// stream onto the bus.
+    ///
+    /// - Parameters:
+    ///   - workspace: Project identity folder (`ProjectRef.path`) — runtime key,
+    ///     Codemixer transcripts, and sessions index.
+    ///   - workingDirectory: Optional agent process cwd. Defaults to `workspace`.
     public func start(adapter: any AgentAdapter,
                       workspace: URL,
                       resumeSessionID: String? = nil,
-                      permissionMode: PermissionMode = .default) async throws {
+                      permissionMode: PermissionMode = .default,
+                      workingDirectory: URL? = nil) async throws {
         let key = AgentRuntimeKey(projectPath: workspace.path,
                                   agentID: adapter.id,
                                   instance: .shared)
@@ -196,7 +205,8 @@ public actor AgentEngine: AgentEngineCommandPort {
                         workspace: workspace,
                         resumeSessionID: resumeSessionID,
                         permissionMode: permissionMode,
-                        runtimeKey: key)
+                        runtimeKey: key,
+                        workingDirectory: workingDirectory)
     }
 
     /// Start (or replace) a pooled runtime for `runtimeKey` and make it active.
@@ -204,7 +214,8 @@ public actor AgentEngine: AgentEngineCommandPort {
                workspace: URL,
                resumeSessionID: String? = nil,
                permissionMode: PermissionMode = .default,
-               runtimeKey: AgentRuntimeKey) async throws {
+               runtimeKey: AgentRuntimeKey,
+               workingDirectory: URL? = nil) async throws {
         // Park any other active slot; replace this key if it already exists.
         if let active = activeKey, active != runtimeKey {
             await parkActive()
@@ -220,7 +231,9 @@ public actor AgentEngine: AgentEngineCommandPort {
         self.adapter = adapter
         // Always standardize so UI cwd filtering matches ACP `sessionStarted`.
         let workspace = workspace.standardizedFileURL
+        let cwd = (workingDirectory ?? workspace).standardizedFileURL
         self.workspace = workspace
+        self.workingDirectory = cwd
         if resumeSessionID == nil {
             self.transcript = []
             self.changedFiles = []
@@ -261,7 +274,7 @@ public actor AgentEngine: AgentEngineCommandPort {
 
             if let path = hookSocketPath {
                 try await adapter.installHookConfiguration(socketPath: path,
-                                                           workspace: workspace,
+                                                           workspace: cwd,
                                                            fileSystem: seams.fileSystem)
             }
         }
@@ -276,20 +289,20 @@ public actor AgentEngine: AgentEngineCommandPort {
                                             hint: error.localizedDescription)
         }
 
-        let context = LaunchContext(workspace: workspace,
+        let context = LaunchContext(workspace: cwd,
                                     hookSocketPath: hookSocketPath,
                                     resumeSessionID: resumeSessionID,
                                     permissionMode: permissionMode,
                                     extraEnv: adapter.defaultEnvOverrides())
         let argv = adapter.buildLaunchArgv(context: context)
         var env = resolvedEnv.ptySpawnEnvironment(adapterOverrides: adapter.defaultEnvOverrides())
-        env["PWD"] = workspace.path
+        env["PWD"] = cwd.path
 
         let launch = AgentTransportLaunchSpec(
             executable: binary,
             arguments: Array(argv.dropFirst()),
             environment: env,
-            workingDirectory: workspace
+            workingDirectory: cwd
         )
         let transport: any AgentTransport
         do {
@@ -316,14 +329,15 @@ public actor AgentEngine: AgentEngineCommandPort {
                                  },
                                  terminal: transport.terminalSnapshot,
                                  hookSocket: hookHandle,
-                                 workspace: workspace,
+                                 workspace: cwd,
                                  resumeSessionID: resumeSessionID,
                                  sessionID: sessionIDStream,
                                  recordBackgroundSessionEvents: { [weak self] batch in
                                      await self?.recordBackgroundSessionEvents(
                                          batch,
                                          adapter: adapter,
-                                         workspace: workspace
+                                         workspace: workspace,
+                                         workingDirectory: cwd
                                      )
                                  },
                                  updateSessionMetadata: { [weak self] update in
@@ -343,7 +357,9 @@ public actor AgentEngine: AgentEngineCommandPort {
         self.heartbeat = monitor
 
         state = .running(sessionID: resumeSessionID)
-        log.notice("engine started workspace=\(workspace.path, privacy: .public) key=\(runtimeKey.projectPath, privacy: .public)")
+        log.notice(
+            "engine started workspace=\(workspace.path, privacy: .public) cwd=\(cwd.path, privacy: .public) key=\(runtimeKey.projectPath, privacy: .public)"
+        )
         // Forward adapter events onto the bus, with bookkeeping side-effects.
         let forwarding = Task { [weak self] in
             for await event in adapterStream {
@@ -368,6 +384,7 @@ public actor AgentEngine: AgentEngineCommandPort {
             transport: transport,
             hookServer: hookServer,
             workspace: workspace,
+            workingDirectory: cwd,
             boundSessionID: resumeSessionID,
             forwardingTask: forwarding,
             bellTask: bellsTask,
@@ -386,7 +403,7 @@ public actor AgentEngine: AgentEngineCommandPort {
             }
         }
 
-        await startFSWatcher(workspace: workspace)
+        await startFSWatcher(workspace: cwd)
         await publishRuntimePoolChanged()
     }
 
@@ -425,6 +442,7 @@ public actor AgentEngine: AgentEngineCommandPort {
         heartbeat = nil
         adapter = nil
         workspace = nil
+        workingDirectory = nil
         currentSessionID = nil
         currentTurnID = nil
         pendingPermissions.removeAll()
@@ -466,7 +484,8 @@ public actor AgentEngine: AgentEngineCommandPort {
                 await recordBackgroundSessionEvents(
                     .init(sessionID: sessionID, events: [event]),
                     adapter: runtime.adapter,
-                    workspace: runtime.workspace
+                    workspace: runtime.workspace,
+                    workingDirectory: runtime.workingDirectory
                 )
             }
             switch event {
@@ -614,7 +633,7 @@ public actor AgentEngine: AgentEngineCommandPort {
         case .assistantText(_, _, let text, let isFinal) where isFinal:
             transcript.append(.init(role: .assistant, text: text, timestamp: seams.clock.now()))
         case .fileTouched(let url, _):
-            let file = ChangedFile(url: url, workspace: workspace)
+            let file = ChangedFile(url: url, workspace: workingDirectory ?? workspace)
             if !changedFiles.contains(file) { changedFiles.append(file) }
         default:
             break
@@ -763,14 +782,14 @@ public actor AgentEngine: AgentEngineCommandPort {
     /// set and each one is published as `.fileTouched` against the wrong
     /// workspace.
     func refreshChangedFilesFromGit(for origin: AgentRuntimeKey?) async {
-        guard let workspace, activeKey == origin else { return }
-        let diffEngine = GitDiffEngine(workspace: workspace)
+        guard let cwd = workingDirectory ?? workspace, activeKey == origin else { return }
+        let diffEngine = GitDiffEngine(workspace: cwd)
         guard let gitFiles = try? await diffEngine.changedFiles() else { return }
-        guard activeKey == origin, self.workspace == workspace else { return }
+        guard activeKey == origin, (workingDirectory ?? workspace) == cwd else { return }
         let delta = ChangedFilesReconciler.reconcile(current: changedFiles, gitPaths: gitFiles)
         changedFiles = delta.next
         for file in delta.added {
-            let url = workspace.appendingPathComponent(file.relativePath)
+            let url = cwd.appendingPathComponent(file.relativePath)
             await bus.publish(.fileTouched(url, kind: .fsObserved))
         }
         for file in delta.removed {

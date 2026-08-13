@@ -1534,6 +1534,7 @@ private func _a2uiPropsMembers() {
 // normalized
 // normalizedFolderView
 // normalizedSecondaryRootPath
+// normalizedWorkingDirectoryPath
 // note
 // noteHookFallbackAssistantText
 // notification
@@ -1554,6 +1555,7 @@ private func _a2uiPropsMembers() {
 // onNext
 // onOpen
 // onPrev
+// onSetWorkingDirectory
 // onTap
 // onTranscript
 // opacity
@@ -1836,6 +1838,8 @@ private func _a2uiPropsMembers() {
 // setPermissionMode
 // setPointingHandCursor
 // setProjectType
+// setProjectWorkingDirectory
+// setWorkingDirectory
 // setting
 // settingsMinHeight
 // settingsMinWidth
@@ -2041,6 +2045,7 @@ private func _a2uiPropsMembers() {
 // validate
 // validateSecondaryRoot
 // validateToken
+// validateWorkingDirectory
 // validatedDualFolderView
 // validationError
 // validationRegexp
@@ -2070,6 +2075,8 @@ private func _a2uiPropsMembers() {
 // workLaneMinWidth
 // workLaneToolsSectionMaxHeight
 // workingDirectory
+// workingDirectoryPath
+// workingDirectoryURL
 // workingPhrase
 // workspace
 // workspaceAdapterStateFileName
@@ -2091,5 +2098,5 @@ private func _a2uiPropsMembers() {
 // zsh
 // MANIFEST_SYMBOLS_END
 
-// Total: 1560 unique public symbols
+// Total: 1567 unique public symbols
 
