@@ -24,13 +24,23 @@ extension EngineViewModel {
         supportsResumableSessions = false
         // Preview-only opens are owned by FilePreviewPanelHost — do not seed the
         // folder list's pending selection (avoids a one-frame list+empty-preview flash).
+        // Dual trees never enter preview-only (no pins / ambiguous relative paths).
         let previewOnly = focusPreview
             && relativePath != nil
             && kind.showsPreviewOnSelection
+            && !kind.usesDualTreeNavigation
         if previewOnly, let relativePath {
             detailPane = .folderPreviewOnly(kind: kind, relativePath: relativePath)
         } else {
-            detailPane = .folderBrowser(kind: kind, selectedRelativePath: relativePath, pendingRelativePath: relativePath)
+            detailPane = .folderBrowser(
+                kind: kind,
+                selectedRelativePath: kind.usesDualTreeNavigation ? nil : relativePath,
+                pendingRelativePath: kind.usesDualTreeNavigation ? nil : relativePath
+            )
+        }
+        if kind.usesDualTreeNavigation {
+            // Reselecting the project title must reset an already-mounted dual view.
+            dualFolderOverviewResetGeneration &+= 1
         }
         refreshFolderSidebarShortcuts(for: project)
     }

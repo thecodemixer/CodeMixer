@@ -165,7 +165,10 @@ Codemixer/
 | Bootstrap (Mode B probe, notifications) | `CodemixerApp/Bootstrap.swift`, `Bootstrap+Remote.swift` |
 | Diff panel | `AgentUI/Diff/DiffPanelView.swift` |
 | Folder table browser (`files`/`logs`/`docs`/`modelhike`) | `AgentUI/Folder/FolderView.swift`, `FolderView+FileTable.swift`, `FolderViewModel.swift` |
-| Folder tree browser (`folderTree`) | `AgentUI/Folder/FolderTreeView.swift`, `FolderTreeView+TreeColumn.swift`, `FolderTreeViewModel.swift` (+Tree/+Preview/+Watching) |
+| Folder tree browser (`folderTree`) | `AgentUI/Folder/FolderTreeView.swift`, `FolderTreeView+TreeColumn.swift`, `FolderTreeColumn.swift`, `FolderTreeViewModel.swift` (+Tree/+Preview/+Watching) |
+| Dual folder tree browser (`dualFolderTree`) | `AgentUI/Folder/DualFolderTreeView.swift`, `DualFolderTreeCoordinator.swift`, `DualFolderPaneLayout.swift` |
+| Per-root tree banners / empty states | `AgentUI/Folder/FolderTreeStatusViews.swift` |
+| Temporary sidebar hiding for focused surfaces (never persisted) | `AgentUI/Workspace/SidebarSuppressionController.swift` (used by `WorkspaceScene`) |
 | Folder scan + shared preview helpers / icons | `Core/AgentCore/Persistence/FolderScanner.swift`, `AgentUI/Folder/{FolderFileSupport,FolderFileIcon,FolderTreeBuilder,FolderTreeNode}.swift` |
 | Shared folder file-content renderer + table/tree chrome | `AgentUI/Folder/FolderPreviewViews.swift` (`FilePreviewPanel`), `FilePreviewPanel.swift` (`FolderViewPreviewPanel` + host), `FolderTreePreviewPanel.swift` + `FolderTreePreviewPanelHost.swift`. File-type routing (`previewContentKind`, `urlRenderedMode`) lives in `FolderFileSupport`; every folder kind previews the selected file |
 | PDF / local-markup preview wrappers | `AgentUI/External/FilePreviewRepresentables.swift` — `FolderPDFPreview`, `FolderLocalFileWebView`, `LocalFilePreviewNavigationPolicy` (previewed HTML/SVG is confined to the project root, scripts disabled) |
@@ -289,8 +292,8 @@ tests/
 | Interaction coverage (every command/event surfaced) | `AgentUITests/InteractionCoverageTests.swift` |
 | Session export | `AgentUITests/SessionExporterTests.swift` |
 | Folder table model | `AgentUITests/FolderViewModelTests.swift` |
-| Folder tree builder / icons / model | `AgentUITests/FolderTreeViewModelTests.swift` |
-| Folder tree live filesystem + FSEvents + on-disk project state (opt-in) | `AgentUITests/LiveFolderTreeHarness.swift` — `CODEMIXER_LIVE_FOLDER_TREE=1` |
+| Folder tree builder / icons / model / dual coordinator / sidebar suppression | `AgentUITests/FolderTreeViewModelTests.swift` |
+| Folder tree live filesystem + FSEvents + on-disk project state (opt-in; includes dual) | `AgentUITests/LiveFolderTreeHarness.swift` — `CODEMIXER_LIVE_FOLDER_TREE=1` |
 | Voice + TTS + speech wrappers | `AgentUITests/{VoiceInputServiceTests,TTSStripMarkdownTests,SpeechCaptureTests,SpeechSynthesisTests}.swift` |
 | QR + system notifications | `AgentUITests/{QRCodeRendererTests,SystemNotificationsTests}.swift` |
 

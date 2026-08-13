@@ -21,15 +21,19 @@ public struct ProjectDraft: Sendable, Hashable {
     /// When set, register/open this existing folder instead of creating
     /// `<workspace>/<name>/`.
     public var existingFolderURL: URL?
+    /// Absolute compare-folder root for `FolderProjectKind.dualFolderTree`.
+    public var secondaryFolderURL: URL?
 
     public init(name: String,
                 projectType: ProjectType? = nil,
                 preferFreshAgentProcess: Bool = false,
-                existingFolderURL: URL? = nil) {
+                existingFolderURL: URL? = nil,
+                secondaryFolderURL: URL? = nil) {
         self.name = name
         self.projectType = projectType
         self.preferFreshAgentProcess = preferFreshAgentProcess
         self.existingFolderURL = existingFolderURL
+        self.secondaryFolderURL = secondaryFolderURL
     }
 
     /// Open / Add Existing: folder chosen, type may still be unknown.

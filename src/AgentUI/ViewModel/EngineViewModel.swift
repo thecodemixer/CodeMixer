@@ -172,6 +172,9 @@ public final class EngineViewModel {
     public internal(set) var folderPinnedPathsByProject: [String: [String]] = [:]
     /// Automatic newest-log shortcuts keyed by project path.
     public internal(set) var folderAutomaticShortcutsByProject: [String: [FolderSidebarShortcut]] = [:]
+    /// Bumped when the dual-folder project title is selected so an already-visible
+    /// `DualFolderTreeView` resets to trees-only (SwiftUI may keep the same identity).
+    public internal(set) var dualFolderOverviewResetGeneration: Int = 0
     /// Where a Custom ACP CLI restart is in its close → respawn → re-advertise
     /// sequence. Stored as one value so "waiting for a dashboard advertisement"
     /// can never be represented before the old process has actually been torn

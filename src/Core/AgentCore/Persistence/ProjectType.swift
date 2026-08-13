@@ -88,6 +88,7 @@ public enum FolderProjectKind: String, Sendable, Codable, Hashable, CaseIterable
     case docs
     case modelhike
     case folderTree
+    case dualFolderTree
 
     public var id: String { rawValue }
 
@@ -98,6 +99,7 @@ public enum FolderProjectKind: String, Sendable, Codable, Hashable, CaseIterable
         case .docs: return "Docs"
         case .modelhike: return "Modelhike"
         case .folderTree: return "Folder Tree"
+        case .dualFolderTree: return "Dual Folder Tree"
         }
     }
 
@@ -110,13 +112,14 @@ public enum FolderProjectKind: String, Sendable, Codable, Hashable, CaseIterable
         case .docs: return "book"
         case .modelhike: return "point.3.connected.trianglepath.dotted"
         case .folderTree: return "list.bullet.indent"
+        case .dualFolderTree: return "rectangle.split.2x1"
         }
     }
 
     /// Whether selecting a file opens a right-side preview.
     public var showsPreviewOnSelection: Bool {
         switch self {
-        case .files, .logs, .docs, .modelhike, .folderTree: return true
+        case .files, .logs, .docs, .modelhike, .folderTree, .dualFolderTree: return true
         }
     }
 
@@ -124,15 +127,16 @@ public enum FolderProjectKind: String, Sendable, Codable, Hashable, CaseIterable
     public var usesMarkdownPreview: Bool {
         switch self {
         case .docs, .modelhike: return true
-        case .files, .logs, .folderTree: return false
+        case .files, .logs, .folderTree, .dualFolderTree: return false
         }
     }
 
     /// User-pinned sidebar shortcuts are supported for these kinds.
+    /// Dual trees refuse pins — a relative path is ambiguous across two roots.
     public var supportsPinnedSidebarEntries: Bool {
         switch self {
         case .files, .docs, .modelhike, .folderTree: return true
-        case .logs: return false
+        case .logs, .dualFolderTree: return false
         }
     }
 
@@ -144,6 +148,11 @@ public enum FolderProjectKind: String, Sendable, Codable, Hashable, CaseIterable
     /// Whether the project uses the dedicated tree outline surface (`FolderTreeView`).
     public var usesTreeNavigation: Bool {
         self == .folderTree
+    }
+
+    /// Whether the project uses the dual-tree compare surface (`DualFolderTreeView`).
+    public var usesDualTreeNavigation: Bool {
+        self == .dualFolderTree
     }
 }
 
@@ -177,9 +186,24 @@ public struct FolderViewState: Sendable, Codable, Hashable {
 
     /// Project-relative paths in user-defined order.
     public var pinnedRelativePaths: [String]
+    /// Absolute path of the right-hand root for `FolderProjectKind.dualFolderTree`.
+    /// Ignored for every other folder kind.
+    public var secondaryRootPath: String?
 
-    public init(pinnedRelativePaths: [String] = []) {
+    public init(pinnedRelativePaths: [String] = [],
+                secondaryRootPath: String? = nil) {
         self.pinnedRelativePaths = pinnedRelativePaths
+        self.secondaryRootPath = secondaryRootPath
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case pinnedRelativePaths, secondaryRootPath
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        pinnedRelativePaths = try c.decodeIfPresent([String].self, forKey: .pinnedRelativePaths) ?? []
+        secondaryRootPath = try c.decodeIfPresent(String.self, forKey: .secondaryRootPath)
     }
 
     /// Keeps at most `maxPinnedPaths` unique relative paths, preserving order.

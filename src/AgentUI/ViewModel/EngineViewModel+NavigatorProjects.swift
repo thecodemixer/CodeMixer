@@ -63,10 +63,13 @@ extension EngineViewModel {
             return "No workspace is open."
         }
         do {
+            let primaryRoot = workspaceRoot.appendingPathComponent(info.name, isDirectory: true)
+            let folderView = try Self.folderViewState(for: info, primaryRoot: primaryRoot)
             let ref = try await store.createProject(
                 name: info.name,
                 projectType: projectType,
                 preferFreshAgentProcess: info.preferFreshAgentProcess,
+                folderView: folderView,
                 in: workspaceRoot
             )
             await finishProjectRegistration(ref, projectType: projectType)
@@ -89,11 +92,13 @@ extension EngineViewModel {
             return "No workspace is open."
         }
         do {
+            let folderView = try Self.folderViewState(for: info, primaryRoot: url)
             let ref = try await store.addExistingProject(
                 url: url,
                 projectType: projectType,
                 displayName: info.name,
                 preferFreshAgentProcess: info.preferFreshAgentProcess,
+                folderView: folderView,
                 in: workspaceRoot
             )
             await finishProjectRegistration(ref, projectType: projectType)
@@ -111,6 +116,23 @@ extension EngineViewModel {
             recordProjectError(error)
             return projectMutationMessage(error)
         }
+    }
+
+    /// Builds persisted folder-view state for dual trees. The store owns the
+    /// validation rules; failing here keeps the sheet open with the reason
+    /// instead of surfacing a half-created project.
+    private static func folderViewState(for info: ProjectDraft,
+                                        primaryRoot: URL) throws -> FolderViewState? {
+        guard info.projectType?.folderKind?.usesDualTreeNavigation == true else { return nil }
+        guard let secondary = info.secondaryFolderURL else {
+            throw ProjectLocalStateStore.StoreSecondaryRootError.missing
+        }
+        return try ProjectLocalStateStore.validatedDualFolderView(
+            FolderViewState(pinnedRelativePaths: [],
+                            secondaryRootPath: secondary.standardizedFileURL.path),
+            primaryRoot: primaryRoot,
+            fileSystem: SystemFileSystem()
+        )
     }
 
     /// Create a new project (subfolder of the workspace) and switch to it.
@@ -262,7 +284,7 @@ extension EngineViewModel {
     }
 
     private func projectMutationMessage(_ error: any Error) -> String {
-        (error as? LocalizedError)?.errorDescription
+        (error as? any LocalizedError)?.errorDescription
             ?? (error as? AgentError)?.userMessage
             ?? error.localizedDescription
     }

@@ -332,4 +332,61 @@ struct LiveFolderTreeIntegrationTests {
 
         await bus.shutdown()
     }
+
+    @Test("A dualFolderTree project persists both roots and routes in the navigator")
+    func dualProjectPersistsOnDiskAndRoutes() async throws {
+        guard LiveFolderTreeHarness.isEnabled() else { return }
+        let leftFixture = try LiveFolderTreeHarness.makeFixture(named: "dual-left")
+        let rightFixture = try LiveFolderTreeHarness.makeFixture(named: "dual-right")
+        defer {
+            LiveFolderTreeHarness.tearDown(leftFixture)
+            LiveFolderTreeHarness.tearDown(rightFixture)
+        }
+
+        let fileSystem = SystemFileSystem()
+        let environment = FakeEnvironment(home: leftFixture.home)
+        let workspace = leftFixture.home.appendingPathComponent("workspace", isDirectory: true)
+        try fileSystem.createDirectory(at: workspace, withIntermediates: true)
+
+        let store = WorkspaceProjectsStore(environment: environment, fileSystem: fileSystem)
+        await store.load()
+        let ref = try await store.createProject(
+            name: "dual",
+            projectType: .folder(.dualFolderTree),
+            folderView: FolderViewState(secondaryRootPath: rightFixture.root.path),
+            in: workspace
+        )
+        let state = ProjectLocalStateStore.load(
+            from: URL(fileURLWithPath: ref.path),
+            fileSystem: fileSystem
+        )
+        #expect(state?.projectType == .folder(.dualFolderTree))
+        #expect(state?.folderView?.secondaryRootPath == rightFixture.root.standardizedFileURL.path)
+
+        let port = LiveFolderTreePort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port, bus: bus, clock: SystemClock(), random: FakeRandomSource())
+        vm.workspaceProjects = store
+        await vm.adoptEmptyWorkspace(workspace)
+        await vm.applyProjectList(await store.projects(for: workspace))
+        vm.selectProject(path: ref.path)
+
+        #expect(vm.showsFolderBrowser)
+        #expect(vm.activeFolderProjectKind == .dualFolderTree)
+        #expect(vm.activeFolderSelectionRelativePath == nil)
+        #expect(port.commands.isEmpty, "a dual folder project must never start an agent")
+
+        let coordinator = DualFolderTreeCoordinator(
+            primaryRoot: URL(fileURLWithPath: ref.path),
+            secondaryRoot: rightFixture.root
+        )
+        coordinator.start()
+        defer { coordinator.stop() }
+        #expect(await liveFolderTreePoll {
+            (coordinator.leftModel?.entries.isEmpty == false)
+                && (coordinator.rightModel?.entries.isEmpty == false)
+        })
+
+        await bus.shutdown()
+    }
 }

@@ -15,6 +15,9 @@ public struct WorkspaceScene: View {
     @State private var paletteVisible: Bool = false
     @State private var navigatorFocusMode: Bool = false
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    /// Dual-folder preview mode temporarily hides the sidebar without writing prefs.
+    @State private var suppressSidebarForDualPreviews: Bool = false
+    @State private var sidebarSuppression = SidebarSuppressionController()
 
     @Environment(\.effectiveReduceMotion) private var reduceMotion
 
@@ -49,7 +52,13 @@ public struct WorkspaceScene: View {
                        == URL(fileURLWithPath: path).standardizedFileURL.path
                }),
                let kind = project.projectType.folderKind {
-                if kind.usesTreeNavigation, model.showsPreviewOnly,
+                if kind.usesDualTreeNavigation {
+                    DualFolderTreeView(
+                        model: model,
+                        project: project,
+                        suppressSidebarForPreviews: $suppressSidebarForDualPreviews
+                    )
+                } else if kind.usesTreeNavigation, model.showsPreviewOnly,
                    let relativePath = model.activeFolderSelectionRelativePath {
                     FolderTreePreviewPanelHost(
                         model: model,
@@ -105,11 +114,20 @@ public struct WorkspaceScene: View {
         }
         .onDisappear { model.unsubscribe() }
         .onChange(of: columnVisibility) { _, visibility in
-            let visible = (visibility != .detailOnly)
-            guard visible != model.sidebarVisible else { return }
-            model.sidebarVisible = visible
-            // Persist via the shared prefs path (multi-mode safe), not UserDefaults.
-            model.updateAppearance(.sidebarVisible(visible))
+            switch sidebarSuppression.reaction(to: visibility) {
+            case .ignore:
+                break
+            case .correct(let corrected):
+                columnVisibility = corrected
+            case .persist(let visible):
+                guard visible != model.sidebarVisible else { return }
+                model.sidebarVisible = visible
+                // Persist via the shared prefs path (multi-mode safe), not UserDefaults.
+                model.updateAppearance(.sidebarVisible(visible))
+            }
+        }
+        .onChange(of: suppressSidebarForDualPreviews) { _, suppress in
+            applyDualPreviewSidebarSuppression(suppress)
         }
         // Hidden buttons so Cmd+F / Cmd+\ / Cmd+K work from anywhere in the scene.
         .background {
@@ -239,9 +257,22 @@ public struct WorkspaceScene: View {
     }
 
     private func toggleSidebar() {
+        // A focused surface owns column visibility until it releases it.
+        guard sidebarSuppression.allowsManualToggle else { return }
         let animation = Theme.motion.resolve(Theme.motion.changing, reduceMotion: reduceMotion)
         withAnimation(animation) {
             columnVisibility = (columnVisibility == .detailOnly) ? .all : .detailOnly
+        }
+    }
+
+    private func applyDualPreviewSidebarSuppression(_ suppress: Bool) {
+        let animation = Theme.motion.resolve(Theme.motion.changing, reduceMotion: reduceMotion)
+        let target = suppress
+            ? sidebarSuppression.begin(from: columnVisibility)
+            : sidebarSuppression.end()
+        guard let target, target != columnVisibility else { return }
+        withAnimation(animation) {
+            columnVisibility = target
         }
     }
 

@@ -1,13 +1,18 @@
 import SwiftUI
 import AgentCore
 
-/// Preview chrome for `FolderProjectKind.folderTree` — markdown/source, text,
-/// binary, and error states. No log follow or TOC rail.
+/// Preview chrome for tree folder surfaces — markdown/source, text, binary,
+/// and error states. No log follow or TOC rail.
 struct FolderTreePreviewPanel: View {
     @Bindable var model: FolderTreeViewModel
     var onClose: () -> Void
     var trailingActionTitle: String? = nil
     var onTrailingAction: (() -> Void)? = nil
+    /// Optional root folder name shown beside the file title (dual trees).
+    var rootContextTitle: String? = nil
+    var minWidth: CGFloat = Theme.layout.folderPreviewMinWidth
+    /// When false, the parent owns Escape (dual trees clear both sides).
+    var bindsEscapeShortcut: Bool = true
 
     var body: some View {
         VStack(spacing: 0) {
@@ -15,22 +20,32 @@ struct FolderTreePreviewPanel: View {
             Divider()
             previewBody
         }
-        .frame(minWidth: Theme.layout.folderPreviewMinWidth)
+        .frame(minWidth: minWidth)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .layoutPriority(1)
         .background(Theme.surface.canvas)
         .background {
-            Button("Close Preview") { onClose() }
-                .keyboardShortcut(.escape, modifiers: [])
-                .hidden()
+            if bindsEscapeShortcut {
+                Button("Close Preview") { onClose() }
+                    .keyboardShortcut(.escape, modifiers: [])
+                    .hidden()
+            }
         }
     }
 
     private var header: some View {
         HStack(spacing: Theme.spacing.s8) {
-            Text(model.previewTitle.isEmpty ? "Preview" : model.previewTitle)
-                .font(Theme.typography.label)
-                .lineLimit(1)
+            VStack(alignment: .leading, spacing: Theme.spacing.s4) {
+                if let rootContextTitle, !rootContextTitle.isEmpty {
+                    Text(rootContextTitle)
+                        .font(Theme.typography.caption)
+                        .foregroundStyle(Theme.text.tertiary)
+                        .lineLimit(1)
+                }
+                Text(model.previewTitle.isEmpty ? "Preview" : model.previewTitle)
+                    .font(Theme.typography.label)
+                    .lineLimit(1)
+            }
             Spacer(minLength: 0)
             if showsSourceToggle {
                 Picker(selection: Binding(

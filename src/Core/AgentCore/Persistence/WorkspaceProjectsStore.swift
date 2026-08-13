@@ -117,7 +117,8 @@ public actor WorkspaceProjectsStore {
     /// - v4: `ProjectType.folder(...)` non-agent folder browser types
     /// - v5: `preferFreshAgentProcess` + `agentInstanceIdentity` on projects
     /// - v6: `FolderProjectKind.folderTree`
-    public static let currentSchemaVersion = 6
+    /// - v7: `FolderProjectKind.dualFolderTree`
+    public static let currentSchemaVersion = 7
 
     struct WorkspaceEntry: Codable, Hashable {
         var workspacePath: String

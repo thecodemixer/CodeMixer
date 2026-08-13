@@ -157,6 +157,13 @@ public enum Theme {
         public static let folderBrowserListMaxWidth: CGFloat = 340
         /// Preview pane gets the remaining width; keep it roomy for markdown/logs.
         public static let folderPreviewMinWidth: CGFloat = 480
+        /// Dual folder tree: outer trees start narrow so two previews fit, then
+        /// follow the split handles — no maximum.
+        public static let dualFolderTreeListMinWidth: CGFloat = 160
+        public static let dualFolderTreeListIdealWidth: CGFloat = 260
+        public static let dualFolderPreviewMinWidth: CGFloat = 280
+        /// Sum of the four pane minimums; the dual layout compresses no further.
+        public static let dualFolderFocusedContentMinWidth: CGFloat = 880
         public static let installMinWidth: CGFloat = 480
         public static let installMaxWidth: CGFloat = 560
         public static let settingsMinWidth: CGFloat = 440

@@ -1,8 +1,24 @@
 import Foundation
+import SwiftUI
 import Testing
 @testable import AgentUI
 @testable import AgentCore
 @testable import AgentTestSupport
+
+@Suite("Folder preview honours the Wrap toggle")
+struct FolderTextScrollAxesTests {
+    @Test("Wrapping forbids horizontal scrolling so the text takes the viewport width")
+    func wrapUsesVerticalAxisOnly() {
+        #expect(FolderTextScrollAxes.resolve(lineWrap: true) == .vertical)
+    }
+
+    @Test("Unwrapped text stays reachable by scrolling horizontally")
+    func unwrappedAllowsBothAxes() {
+        let axes = FolderTextScrollAxes.resolve(lineWrap: false)
+        #expect(axes.contains(.horizontal))
+        #expect(axes.contains(.vertical))
+    }
+}
 
 @Suite("Folder markdown HTML renderer — escaping and structure")
 struct MarkdownHTMLRendererTests {

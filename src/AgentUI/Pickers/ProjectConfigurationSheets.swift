@@ -16,6 +16,7 @@ struct ProjectTypeForm: View {
     @Binding var customArguments: String
     @Binding var customTransport: AgentTransportKind
     @Binding var folderKind: FolderProjectKind
+    @Binding var secondaryFolderURL: URL?
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.spacing.s16) {
@@ -51,8 +52,47 @@ struct ProjectTypeForm: View {
                 }
                 .pickerStyle(.menu)
                 .accessibilityLabel("Folder view type")
+                .onChange(of: folderKind) { _, kind in
+                    if !kind.usesDualTreeNavigation {
+                        secondaryFolderURL = nil
+                    }
+                }
+                if folderKind.usesDualTreeNavigation {
+                    dualSecondaryFolderChooser
+                }
             case .custom:
                 customFields
+            }
+        }
+    }
+
+    private var dualSecondaryFolderChooser: some View {
+        VStack(alignment: .leading, spacing: Theme.spacing.s8) {
+            Text("Compare folder")
+                .font(Theme.typography.caption)
+                .foregroundStyle(Theme.text.secondary)
+            HStack(spacing: Theme.spacing.s8) {
+                Text(secondaryFolderURL?.path ?? "No folder selected")
+                    .font(Theme.typography.caption)
+                    .foregroundStyle(secondaryFolderURL == nil
+                                     ? Theme.text.tertiary
+                                     : Theme.text.secondary)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityLabel("Selected compare folder")
+                Button("Choose Folder…") {
+                    guard let url = DesktopActions.chooseDirectoryPanel(
+                        prompt: "Choose Compare Folder"
+                    ) else { return }
+                    secondaryFolderURL = url
+                }
+                .accessibilityLabel("Choose compare folder")
+            }
+            if let name = secondaryFolderURL?.lastPathComponent {
+                Text("Right tree root: \(name)")
+                    .font(Theme.typography.caption)
+                    .foregroundStyle(Theme.text.tertiary)
             }
         }
     }
@@ -355,6 +395,7 @@ public struct NewProjectSheet: View {
     @State private var folderKind: FolderProjectKind = .files
     @State private var folderLocationMode: FolderLocationMode = .createInWorkspace
     @State private var folderLocation: URL?
+    @State private var secondaryFolderURL: URL?
     @State private var customExecutable: String = ""
     @State private var customArguments: String = ""
     @State private var customTransport: AgentTransportKind = .agentClientProtocol
@@ -411,7 +452,19 @@ public struct NewProjectSheet: View {
     private var canCreate: Bool {
         guard !isCreating, resolvedProjectType != nil, !trimmedName.isEmpty else { return false }
         if category == .folder, folderLocationMode == .chooseExisting {
-            return folderLocation != nil
+            guard folderLocation != nil else { return false }
+        }
+        if category == .folder, folderKind.usesDualTreeNavigation {
+            guard let secondary = secondaryFolderURL else { return false }
+            let primary = folderLocationMode == .chooseExisting
+                ? folderLocation?.standardizedFileURL
+                : workspaceURL.appendingPathComponent(trimmedName, isDirectory: true).standardizedFileURL
+            if let primary, secondary.standardizedFileURL.path == primary.path {
+                return false
+            }
+        }
+        if category == .folder, folderLocationMode == .chooseExisting {
+            return true
         }
         return nameCollisionMessage == nil
     }
@@ -419,7 +472,7 @@ public struct NewProjectSheet: View {
     private var sheetSubtitle: String {
         switch category {
         case .folder:
-            return "Browse files, logs, docs, modelhike, or a folder tree. Create an empty folder in this workspace or point at an existing directory."
+            return "Browse files, logs, docs, modelhike, a folder tree, or a dual folder tree. Create an empty folder in this workspace or point at an existing directory."
         case .singleAgent, .mixed, .custom:
             return "Creates a subfolder in the current workspace and writes project type to `.codemixer/project.json`."
         }
@@ -439,13 +492,15 @@ public struct NewProjectSheet: View {
                 customExecutable: $customExecutable,
                 customArguments: $customArguments,
                 customTransport: $customTransport,
-                folderKind: $folderKind
+                folderKind: $folderKind,
+                secondaryFolderURL: $secondaryFolderURL
             )
             .disabled(isCreating)
             .onChange(of: category) { _, newCategory in
                 if newCategory != .folder {
                     folderLocation = nil
                     folderLocationMode = .createInWorkspace
+                    secondaryFolderURL = nil
                 }
                 createError = nil
             }
@@ -500,11 +555,21 @@ public struct NewProjectSheet: View {
                 let folderURL: URL? = (category == .folder && folderLocationMode == .chooseExisting)
                     ? folderLocation
                     : nil
+                if folderKind.usesDualTreeNavigation, let secondary = secondaryFolderURL {
+                    let primary = (folderURL
+                        ?? workspaceURL.appendingPathComponent(trimmedName, isDirectory: true))
+                        .standardizedFileURL
+                    if secondary.standardizedFileURL.path == primary.path {
+                        createError = "The compare folder must be different from the project folder."
+                        return
+                    }
+                }
                 let createdError = await onCreate(ProjectDraft(
                     name: trimmedName,
                     projectType: projectType,
                     preferFreshAgentProcess: preferFreshAgentProcess,
-                    existingFolderURL: folderURL
+                    existingFolderURL: folderURL,
+                    secondaryFolderURL: folderKind.usesDualTreeNavigation ? secondaryFolderURL : nil
                 ))
                 if let createdError {
                     createError = createdError
@@ -578,10 +643,12 @@ public struct ConfigureProjectSheet: View {
     @State private var builtInAgent: AgentID = .claudeCode
     @State private var mixedDefault: AgentID = .claudeCode
     @State private var folderKind: FolderProjectKind = .files
+    @State private var secondaryFolderURL: URL?
     @State private var customExecutable: String = ""
     @State private var customArguments: String = ""
     @State private var customTransport: AgentTransportKind = .agentClientProtocol
     @State private var preferFreshAgentProcess = false
+    @State private var configureError: String?
 
     public init(projectURL: URL,
                 random: any RandomSource = SystemRandomSource(),
@@ -605,6 +672,15 @@ public struct ConfigureProjectSheet: View {
         )
     }
 
+    private var canOpen: Bool {
+        guard resolvedProjectType != nil else { return false }
+        if category == .folder, folderKind.usesDualTreeNavigation {
+            guard let secondary = secondaryFolderURL else { return false }
+            return secondary.standardizedFileURL.path != projectURL.standardizedFileURL.path
+        }
+        return true
+    }
+
     public var body: some View {
         VStack(alignment: .leading, spacing: Theme.spacing.s24) {
             sheetHeader(
@@ -619,20 +695,40 @@ public struct ConfigureProjectSheet: View {
                 customExecutable: $customExecutable,
                 customArguments: $customArguments,
                 customTransport: $customTransport,
-                folderKind: $folderKind
+                folderKind: $folderKind,
+                secondaryFolderURL: $secondaryFolderURL
             )
 
             if category != .folder {
                 ProjectAdvancedOptions(preferFreshAgentProcess: $preferFreshAgentProcess)
             }
 
-            sheetFooter(primaryTitle: "Open", primaryEnabled: resolvedProjectType != nil, onCancel: onCancel) {
+            if let configureError {
+                Text(configureError)
+                    .font(Theme.typography.caption)
+                    .foregroundStyle(Theme.signal.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel(configureError)
+            }
+
+            sheetFooter(primaryTitle: "Open", primaryEnabled: canOpen, onCancel: onCancel) {
                 guard let projectType = resolvedProjectType else { return }
+                if folderKind.usesDualTreeNavigation {
+                    guard let secondary = secondaryFolderURL else {
+                        configureError = "Choose a compare folder for the dual folder tree."
+                        return
+                    }
+                    if secondary.standardizedFileURL.path == projectURL.standardizedFileURL.path {
+                        configureError = "The compare folder must be different from the project folder."
+                        return
+                    }
+                }
                 onConfirm(ProjectDraft(
                     name: projectURL.lastPathComponent,
                     projectType: projectType,
                     preferFreshAgentProcess: preferFreshAgentProcess,
-                    existingFolderURL: projectURL
+                    existingFolderURL: projectURL,
+                    secondaryFolderURL: folderKind.usesDualTreeNavigation ? secondaryFolderURL : nil
                 ))
             }
         }

@@ -538,6 +538,144 @@ struct WorkspaceProjectsStoreTests {
         #expect(projects.contains { $0.path == ref.path && $0.projectType == .folder(.folderTree) })
     }
 
+    @Test("Dual folder tree persists secondary root and drops it for other kinds")
+    func dualFolderTreeSecondaryRootRoundTrip() async throws {
+        let fs = InMemoryFileSystem()
+        let store = makeStore(fs: fs)
+        let compare = workspace.appendingPathComponent("compare-root", isDirectory: true)
+        try fs.createDirectory(at: compare, withIntermediates: true)
+        let folderView = FolderViewState(
+            pinnedRelativePaths: ["should-be-dropped.md"],
+            secondaryRootPath: compare.path
+        )
+        let ref = try await store.createProject(
+            name: "dual",
+            projectType: .folder(.dualFolderTree),
+            folderView: folderView,
+            in: workspace
+        )
+        let root = URL(fileURLWithPath: ref.path)
+        let local = ProjectLocalStateStore.load(from: root, fileSystem: fs)
+        #expect(local?.projectType == .folder(.dualFolderTree))
+        #expect(local?.folderView?.secondaryRootPath == compare.standardizedFileURL.path)
+        #expect(local?.folderView?.pinnedRelativePaths.isEmpty == true)
+
+        // Non-dual kinds must not keep a secondary root.
+        let files = try await store.createProject(name: "files-only", projectType: .folder(.files), in: workspace)
+        try ProjectLocalStateStore.save(
+            ProjectLocalState(
+                displayName: files.displayName,
+                projectType: .folder(.files),
+                folderView: FolderViewState(pinnedRelativePaths: [], secondaryRootPath: compare.path)
+            ),
+            to: URL(fileURLWithPath: files.path),
+            fileSystem: fs
+        )
+        let filesLocal = ProjectLocalStateStore.load(
+            from: URL(fileURLWithPath: files.path),
+            fileSystem: fs
+        )
+        #expect(filesLocal?.folderView?.secondaryRootPath == nil)
+
+        // Reject same-as-primary and relative paths.
+        #expect(throws: ProjectLocalStateStore.StoreSecondaryRootError.sameAsPrimary(path: root.path)) {
+            try ProjectLocalStateStore.validateSecondaryRoot(root, primaryRoot: root, fileSystem: fs)
+        }
+        #expect(ProjectLocalState.normalizedSecondaryRootPath("relative/path") == nil)
+        #expect(ProjectLocalState.normalizedSecondaryRootPath("/tmp/compare") == "/tmp/compare")
+    }
+
+    @Test("Rename and reconcile keep the dual compare root")
+    func dualFolderTreeSecondaryRootSurvivesRename() async throws {
+        let fs = InMemoryFileSystem()
+        let store = makeStore(fs: fs)
+        let compare = workspace.appendingPathComponent("compare-rename", isDirectory: true)
+        try fs.createDirectory(at: compare, withIntermediates: true)
+        let ref = try await store.createProject(
+            name: "dual-rename",
+            projectType: .folder(.dualFolderTree),
+            folderView: FolderViewState(pinnedRelativePaths: [], secondaryRootPath: compare.path),
+            in: workspace
+        )
+        // Renaming moves the folder, so the compare root has to survive the move.
+        let renamed = try await store.renameProject(path: ref.path, to: "dual-renamed", in: workspace)
+        let renamedRoot = URL(fileURLWithPath: renamed.path)
+        let afterRename = ProjectLocalStateStore.load(from: renamedRoot, fileSystem: fs)
+        #expect(afterRename?.displayName == "dual-renamed")
+        #expect(afterRename?.folderView?.secondaryRootPath == compare.standardizedFileURL.path)
+
+        // A reload rebuilds the catalog from disk; the compare root must survive.
+        let reloaded = makeStore(fs: fs)
+        await reloaded.load()
+        let projects = await reloaded.projects(for: workspace)
+        #expect(projects.contains { $0.path == renamed.path })
+        let afterReload = ProjectLocalStateStore.load(from: renamedRoot, fileSystem: fs)
+        #expect(afterReload?.folderView?.secondaryRootPath == compare.standardizedFileURL.path)
+
+        // A compare folder that later disappears must not break metadata writes.
+        try fs.remove(at: compare)
+        let offlineRef = try await store.renameProject(
+            path: renamed.path,
+            to: "dual-offline",
+            in: workspace
+        )
+        let offline = ProjectLocalStateStore.load(
+            from: URL(fileURLWithPath: offlineRef.path),
+            fileSystem: fs
+        )
+        #expect(offline?.displayName == "dual-offline")
+        #expect(offline?.folderView?.secondaryRootPath == compare.standardizedFileURL.path)
+    }
+
+    @Test("Creating a dual project rejects a missing or colliding compare root")
+    func dualFolderTreeRejectsInvalidSecondaryRoot() async throws {
+        let fs = InMemoryFileSystem()
+        let store = makeStore(fs: fs)
+
+        await #expect(throws: ProjectLocalStateStore.StoreSecondaryRootError.missing) {
+            try await store.createProject(
+                name: "dual-missing-view",
+                projectType: .folder(.dualFolderTree),
+                in: workspace
+            )
+        }
+        // The rejected project must not be half-created.
+        #expect(!fs.isDirectory(at: workspace.appendingPathComponent("dual-missing-view")))
+        #expect(await store.projects(for: workspace).isEmpty)
+
+        let absent = workspace.appendingPathComponent("not-there", isDirectory: true)
+        await #expect(throws: FileSystemError.notFound(path: absent.standardizedFileURL.path)) {
+            try await store.createProject(
+                name: "dual-absent-compare",
+                projectType: .folder(.dualFolderTree),
+                folderView: FolderViewState(pinnedRelativePaths: [],
+                                            secondaryRootPath: absent.path),
+                in: workspace
+            )
+        }
+
+        #expect(throws: ProjectLocalStateStore.StoreSecondaryRootError.missing) {
+            try ProjectLocalStateStore.validatedDualFolderView(
+                FolderViewState(pinnedRelativePaths: [], secondaryRootPath: "relative/compare"),
+                primaryRoot: workspace,
+                fileSystem: fs
+            )
+        }
+
+        let collision = workspace.appendingPathComponent("dual-collision", isDirectory: true)
+        await #expect(throws: ProjectLocalStateStore.StoreSecondaryRootError
+            .sameAsPrimary(path: collision.standardizedFileURL.path)) {
+            try await store.createProject(
+                name: "dual-collision",
+                projectType: .folder(.dualFolderTree),
+                folderView: FolderViewState(pinnedRelativePaths: [],
+                                            secondaryRootPath: collision.path),
+                in: workspace
+            )
+        }
+        #expect(!fs.isDirectory(at: collision))
+    }
+
     @Test("Project local state ignores a newer schema rather than decoding it")
     func projectLocalStateRefusesNewerSchema() throws {
         let fs = InMemoryFileSystem()

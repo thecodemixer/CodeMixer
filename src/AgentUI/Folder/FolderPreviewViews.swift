@@ -145,7 +145,7 @@ struct FilePreviewPanel: View {
             FolderSourcePreview(text: text, language: language, lineWrap: lineWrap)
         case .log(let find, let lineWrap, let onUserScroll):
             ZStack {
-                ScrollView {
+                ScrollView(FolderTextScrollAxes.resolve(lineWrap: lineWrap)) {
                     Text(highlightedLogText(text, find: find))
                         .font(Theme.typography.monoSmall)
                         .fontDesign(.monospaced)
@@ -214,6 +214,18 @@ struct FilePreviewPanel: View {
     }
 }
 
+/// Scroll axes for a monospaced text body, derived from the Wrap toggle.
+///
+/// This is the whole mechanism behind Wrap, and it is easy to get wrong in both
+/// directions: allowing horizontal scrolling proposes unbounded width, so the
+/// text keeps its ideal width and never wraps; forbidding it leaves an unwrapped
+/// body with no way to reach the end of a long line.
+enum FolderTextScrollAxes {
+    static func resolve(lineWrap: Bool) -> Axis.Set {
+        lineWrap ? .vertical : [.vertical, .horizontal]
+    }
+}
+
 /// Monospaced source/text body with approximate syntax highlighting.
 ///
 /// Highlighting is skipped above `FolderBrowserLimits.syntaxHighlightMaxBytes`:
@@ -237,7 +249,7 @@ struct FolderSourcePreview: View {
     }
 
     var body: some View {
-        ScrollView([.vertical, .horizontal]) {
+        ScrollView(FolderTextScrollAxes.resolve(lineWrap: lineWrap)) {
             content
                 .font(Theme.typography.monoSmall)
                 .fontDesign(.monospaced)

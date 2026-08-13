@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import SwiftUI
 import Testing
 @testable import AgentUI
 @testable import AgentCore
@@ -871,5 +872,393 @@ struct FolderTreeViewModelTests {
         model.entries = []
         model.isLoading = false
         #expect(model.isEmptyListing)
+    }
+}
+
+@Suite("Dual folder tree — layout and independent models")
+@MainActor
+struct DualFolderTreeCoordinatorTests {
+    @Test("Layout stays trees-only for directories and opens on either file")
+    func layoutResolve() {
+        let dir = FolderFileEntry(
+            relativePath: "src",
+            name: "src",
+            fileExtension: "",
+            byteCount: 0,
+            modifiedAt: Date(timeIntervalSince1970: 0),
+            isDirectory: true
+        )
+        let file = FolderFileEntry(
+            relativePath: "a.swift",
+            name: "a.swift",
+            fileExtension: "swift",
+            byteCount: 1,
+            modifiedAt: Date(timeIntervalSince1970: 0),
+            isDirectory: false
+        )
+        #expect(DualFolderTreeLayout.resolve(left: nil, right: nil) == .treesOnly)
+        #expect(DualFolderTreeLayout.resolve(left: dir, right: nil) == .treesOnly)
+        #expect(DualFolderTreeLayout.resolve(left: file, right: nil) == .previews)
+        #expect(DualFolderTreeLayout.resolve(left: nil, right: file) == .previews)
+        #expect(DualFolderTreeLayout.resolve(left: file, right: file) == .previews)
+    }
+
+    @Test("Two roots scan and select independently; Escape clears both in preview mode")
+    func independentRootsAndEscape() throws {
+        let fs = InMemoryFileSystem()
+        let leftRoot = TestPaths.workspace("dual-left")
+        let rightRoot = TestPaths.workspace("dual-right")
+        try fs.createDirectory(at: leftRoot, withIntermediates: true)
+        try fs.createDirectory(at: rightRoot, withIntermediates: true)
+        try fs.writeAtomically(Data("left".utf8), to: leftRoot.appendingPathComponent("left.txt"))
+        try fs.writeAtomically(Data("right".utf8), to: rightRoot.appendingPathComponent("right.txt"))
+
+        let coordinator = DualFolderTreeCoordinator(
+            primaryRoot: leftRoot,
+            secondaryRoot: rightRoot,
+            fileSystem: fs,
+            clock: FakeClock()
+        )
+        coordinator.start()
+        defer { coordinator.stop() }
+
+        // Wait for async scans started by `start()`.
+        let left = try #require(coordinator.leftModel)
+        let right = try #require(coordinator.rightModel)
+        left.entries = try FolderScanner.scan(root: leftRoot, fileSystem: fs)
+        left.rebuildTree()
+        right.entries = try FolderScanner.scan(root: rightRoot, fileSystem: fs)
+        right.rebuildTree()
+
+        left.select("left.txt")
+        #expect(coordinator.layout == .previews)
+        #expect(right.selectedRelativePath == nil)
+
+        right.searchText = "right"
+        #expect(left.searchText.isEmpty)
+
+        #expect(coordinator.handleEscape())
+        #expect(coordinator.layout == .treesOnly)
+        #expect(left.selectedRelativePath == nil)
+        #expect(right.selectedRelativePath == nil)
+        // Search on the right survives preview exit — only selections clear.
+        #expect(right.searchText == "right")
+
+        coordinator.focus(.right)
+        #expect(coordinator.handleEscape())
+        #expect(right.searchText.isEmpty)
+    }
+
+    @Test("Project overview reset clears filters and selections on both sides")
+    func overviewReset() throws {
+        let fs = InMemoryFileSystem()
+        let leftRoot = TestPaths.workspace("dual-overview-left")
+        let rightRoot = TestPaths.workspace("dual-overview-right")
+        try fs.createDirectory(at: leftRoot, withIntermediates: true)
+        try fs.createDirectory(at: rightRoot, withIntermediates: true)
+        try fs.writeAtomically(Data("a".utf8), to: leftRoot.appendingPathComponent("a.txt"))
+        try fs.writeAtomically(Data("b".utf8), to: rightRoot.appendingPathComponent("b.txt"))
+
+        let coordinator = DualFolderTreeCoordinator(
+            primaryRoot: leftRoot,
+            secondaryRoot: rightRoot,
+            fileSystem: fs,
+            clock: FakeClock()
+        )
+        coordinator.start()
+        defer { coordinator.stop() }
+        let left = try #require(coordinator.leftModel)
+        let right = try #require(coordinator.rightModel)
+        left.entries = try FolderScanner.scan(root: leftRoot, fileSystem: fs)
+        left.rebuildTree()
+        right.entries = try FolderScanner.scan(root: rightRoot, fileSystem: fs)
+        right.rebuildTree()
+
+        left.select("a.txt")
+        right.select("b.txt")
+        left.searchText = "a"
+        right.showFilters = true
+        coordinator.resetForProjectOverview()
+        #expect(coordinator.layout == .treesOnly)
+        #expect(left.selectedRelativePath == nil)
+        #expect(right.selectedRelativePath == nil)
+        #expect(left.searchText.isEmpty)
+        #expect(!right.showFilters)
+    }
+
+    @Test("Missing secondary root surfaces recovery state")
+    func missingSecondaryRoot() {
+        let fs = InMemoryFileSystem()
+        let leftRoot = TestPaths.workspace("dual-missing-left")
+        try? fs.createDirectory(at: leftRoot, withIntermediates: true)
+        let coordinator = DualFolderTreeCoordinator(
+            primaryRoot: leftRoot,
+            secondaryRoot: TestPaths.workspace("dual-missing-right"),
+            fileSystem: fs,
+            clock: FakeClock()
+        )
+        coordinator.start()
+        defer { coordinator.stop() }
+        #expect(coordinator.leftModel != nil)
+        #expect(coordinator.rightModel == nil)
+        #expect(coordinator.secondaryRootError != nil)
+    }
+
+    @Test("Dual chrome symbols resolve")
+    func dualChromeSymbolsResolve() {
+        let chrome = [
+            FolderProjectKind.dualFolderTree.systemImage,
+            "folder.badge.questionmark",
+            "doc.text.magnifyingglass",
+            "folder",
+            "magnifyingglass",
+        ]
+        for symbol in chrome {
+            #expect(
+                NSImage(systemSymbolName: symbol, accessibilityDescription: nil) != nil,
+                "SF Symbol \(symbol) does not resolve"
+            )
+        }
+    }
+
+    @Test("Closing previews from the panel button returns both sides to trees-only")
+    func closePreviewsFromPanel() throws {
+        let fs = InMemoryFileSystem()
+        let leftRoot = TestPaths.workspace("dual-close-left")
+        let rightRoot = TestPaths.workspace("dual-close-right")
+        try fs.createDirectory(at: leftRoot, withIntermediates: true)
+        try fs.createDirectory(at: rightRoot, withIntermediates: true)
+        try fs.writeAtomically(Data("a".utf8), to: leftRoot.appendingPathComponent("a.txt"))
+        try fs.writeAtomically(Data("b".utf8), to: rightRoot.appendingPathComponent("b.txt"))
+
+        let coordinator = DualFolderTreeCoordinator(
+            primaryRoot: leftRoot,
+            secondaryRoot: rightRoot,
+            fileSystem: fs,
+            clock: FakeClock()
+        )
+        coordinator.start()
+        defer { coordinator.stop() }
+        let left = try #require(coordinator.leftModel)
+        let right = try #require(coordinator.rightModel)
+        left.entries = try FolderScanner.scan(root: leftRoot, fileSystem: fs)
+        left.rebuildTree()
+        right.entries = try FolderScanner.scan(root: rightRoot, fileSystem: fs)
+        right.rebuildTree()
+
+        left.select("a.txt")
+        right.select("b.txt")
+        coordinator.focus(.right)
+        #expect(coordinator.layout == .previews)
+
+        coordinator.closePreviews()
+        #expect(coordinator.layout == .treesOnly)
+        #expect(left.selectedRelativePath == nil)
+        #expect(right.selectedRelativePath == nil)
+        #expect(coordinator.focusedSide == .none)
+    }
+
+    @Test("Selecting a directory keeps trees-only so the sidebar stays visible")
+    func directorySelectionStaysTreesOnly() throws {
+        let fs = InMemoryFileSystem()
+        let leftRoot = TestPaths.workspace("dual-dir-left")
+        let rightRoot = TestPaths.workspace("dual-dir-right")
+        try fs.createDirectory(at: leftRoot.appendingPathComponent("src"), withIntermediates: true)
+        try fs.createDirectory(at: rightRoot, withIntermediates: true)
+        try fs.writeAtomically(
+            Data("a".utf8),
+            to: leftRoot.appendingPathComponent("src/a.txt")
+        )
+
+        let coordinator = DualFolderTreeCoordinator(
+            primaryRoot: leftRoot,
+            secondaryRoot: rightRoot,
+            fileSystem: fs,
+            clock: FakeClock()
+        )
+        coordinator.start()
+        defer { coordinator.stop() }
+        let left = try #require(coordinator.leftModel)
+        left.entries = try FolderScanner.scan(root: leftRoot, fileSystem: fs)
+        left.rebuildTree()
+
+        left.select("src")
+        #expect(coordinator.layout == .treesOnly)
+        left.select("src/a.txt")
+        #expect(coordinator.layout == .previews)
+    }
+
+    @Test("Replacing the compare root rejects the primary root and persists a valid one")
+    func replaceSecondaryRootValidates() throws {
+        let fs = InMemoryFileSystem()
+        let leftRoot = TestPaths.workspace("dual-replace-left")
+        let rightRoot = TestPaths.workspace("dual-replace-right")
+        let otherRoot = TestPaths.workspace("dual-replace-other")
+        for root in [leftRoot, rightRoot, otherRoot] {
+            try fs.createDirectory(at: root, withIntermediates: true)
+        }
+        let ref = WorkspaceProjectsStore.ProjectRef(
+            path: leftRoot.path,
+            displayName: "dual",
+            projectType: .folder(.dualFolderTree)
+        )
+        try ProjectLocalStateStore.save(
+            ref: ref,
+            fileSystem: fs,
+            folderView: FolderViewState(pinnedRelativePaths: [],
+                                        secondaryRootPath: rightRoot.path)
+        )
+
+        let coordinator = DualFolderTreeCoordinator(
+            primaryRoot: leftRoot,
+            secondaryRoot: rightRoot,
+            fileSystem: fs,
+            clock: FakeClock()
+        )
+        coordinator.start()
+        defer { coordinator.stop() }
+
+        #expect(coordinator.replaceSecondaryRoot(leftRoot) != nil)
+        #expect(coordinator.secondaryRoot == rightRoot.standardizedFileURL)
+
+        #expect(coordinator.replaceSecondaryRoot(otherRoot) == nil)
+        #expect(coordinator.secondaryRoot == otherRoot.standardizedFileURL)
+        let stored = ProjectLocalStateStore.load(from: leftRoot, fileSystem: fs)
+        #expect(stored?.folderView?.secondaryRootPath == otherRoot.standardizedFileURL.path)
+    }
+
+    @Test("Focused dual layout reserves room for two trees and two previews")
+    func focusedLayoutFitsFourPanes() {
+        let panes = 2 * Theme.layout.dualFolderTreeListMinWidth
+            + 2 * Theme.layout.dualFolderPreviewMinWidth
+        // The split view honours pane minimums, so the container minimum must
+        // cover all four or a pane gets clipped instead of scrolled.
+        #expect(Theme.layout.dualFolderFocusedContentMinWidth >= panes)
+        #expect(Theme.layout.dualFolderTreeListMinWidth
+                <= Theme.layout.dualFolderTreeListIdealWidth)
+        #expect(Theme.layout.dualFolderTreeListIdealWidth
+                < Theme.layout.dualFolderPreviewMinWidth)
+    }
+
+    @Test("Four-pane layout starts with symmetric trees and previews")
+    func fourPaneLayoutStartsBalanced() {
+        let layout = DualFolderPaneLayout.resolve(
+            availableWidth: 1_000,
+            leftTreeWidth: nil,
+            rightTreeWidth: nil,
+            previewSplitFraction: 0.5
+        )
+        #expect(layout.leftTreeWidth == layout.rightTreeWidth)
+        #expect(layout.leftPreviewWidth == layout.rightPreviewWidth)
+        #expect(layout.leftTreeWidth == 220)
+        #expect(layout.leftPreviewWidth == 280)
+        #expect(layout.rightTreeBoundary == 780)
+    }
+
+    @Test("Trees open wide enough to read a filename on a large window")
+    func treesOpenReadablyOnWideWindows() {
+        let layout = DualFolderPaneLayout.resolve(
+            availableWidth: 1_600,
+            leftTreeWidth: nil,
+            rightTreeWidth: nil,
+            previewSplitFraction: 0.5
+        )
+        #expect(layout.leftTreeWidth == Theme.layout.dualFolderTreeListIdealWidth)
+        #expect(layout.rightTreeWidth == Theme.layout.dualFolderTreeListIdealWidth)
+        // Previews still take the larger share of a wide window.
+        #expect(layout.leftPreviewWidth > layout.leftTreeWidth)
+    }
+
+    @Test("Four-pane handles clamp without hiding any panel")
+    func fourPaneHandlesClamp() {
+        let layout = DualFolderPaneLayout.resolve(
+            availableWidth: 1_000,
+            leftTreeWidth: nil,
+            rightTreeWidth: nil,
+            previewSplitFraction: 0.5
+        )
+        #expect(layout.clampedLeftTreeWidth(for: -500) == layout.treeMinimumWidth)
+        #expect(layout.clampedRightTreeWidth(for: 2_000) == layout.treeMinimumWidth)
+
+        let leftmost = layout.clampedPreviewFraction(for: -500)
+        let rightmost = layout.clampedPreviewFraction(for: 2_000)
+        let centerWidth = layout.leftPreviewWidth + layout.rightPreviewWidth
+        // Sub-pixel tolerance: the fraction round-trip through the center width
+        // lands a hair under the minimum, far below one device pixel.
+        let tolerance: CGFloat = 0.5
+        #expect(centerWidth * leftmost >= layout.previewMinimumWidth - tolerance)
+        #expect(centerWidth * (1 - rightmost) >= layout.previewMinimumWidth - tolerance)
+    }
+
+    @Test("Four-pane layout scales all minimums on narrow windows")
+    func fourPaneLayoutScalesNarrowly() {
+        let layout = DualFolderPaneLayout.resolve(
+            availableWidth: 600,
+            leftTreeWidth: nil,
+            rightTreeWidth: nil,
+            previewSplitFraction: 0.5
+        )
+        #expect(layout.leftTreeWidth == layout.rightTreeWidth)
+        #expect(layout.leftPreviewWidth == layout.rightPreviewWidth)
+        #expect(layout.leftTreeWidth + layout.leftPreviewWidth
+                + layout.rightPreviewWidth + layout.rightTreeWidth == 600)
+        #expect(layout.leftTreeWidth >= layout.treeMinimumWidth)
+        #expect(layout.leftPreviewWidth >= layout.previewMinimumWidth)
+    }
+}
+
+@Suite("Sidebar suppression keeps temporary hides out of appearance prefs")
+struct SidebarSuppressionControllerTests {
+    @Test("A visible sidebar hides for previews and comes back on release")
+    func visibleSidebarRoundTrips() {
+        var controller = SidebarSuppressionController()
+        #expect(controller.allowsManualToggle)
+
+        #expect(controller.begin(from: .all) == .detailOnly)
+        #expect(controller.isSuppressing)
+        #expect(!controller.allowsManualToggle)
+        #expect(controller.reaction(to: .detailOnly) == .ignore)
+        #expect(controller.end() == .all)
+        #expect(!controller.isSuppressing)
+    }
+
+    @Test("An already hidden sidebar stays hidden after release")
+    func hiddenSidebarStaysHidden() {
+        var controller = SidebarSuppressionController()
+        #expect(controller.begin(from: .detailOnly) == nil)
+        #expect(controller.isSuppressing)
+        #expect(controller.end() == .detailOnly)
+    }
+
+    @Test("Native split-view controls are snapped back while suppressed")
+    func nativeControlsCorrected() {
+        var controller = SidebarSuppressionController()
+        _ = controller.begin(from: .all)
+        #expect(controller.reaction(to: .all) == .correct(to: .detailOnly))
+        #expect(controller.reaction(to: .doubleColumn) == .correct(to: .detailOnly))
+    }
+
+    @Test("Only user-driven changes persist, and a restore writes nothing")
+    func persistsOnlyUserChanges() {
+        var controller = SidebarSuppressionController()
+        #expect(controller.reaction(to: .detailOnly) == .persist(visible: false))
+        #expect(controller.reaction(to: .all) == .persist(visible: true))
+
+        _ = controller.begin(from: .all)
+        #expect(controller.reaction(to: .detailOnly) == .ignore)
+        let restored = controller.end()
+        #expect(restored == .all)
+        // Restoring the stashed value reports a persist of the value prefs already
+        // hold, so the scene's equality guard makes it a no-op write.
+        #expect(controller.reaction(to: .all) == .persist(visible: true))
+    }
+
+    @Test("A second begin does not clobber the stashed visibility")
+    func repeatedBeginIsIdempotent() {
+        var controller = SidebarSuppressionController()
+        #expect(controller.begin(from: .all) == .detailOnly)
+        #expect(controller.begin(from: .detailOnly) == nil)
+        #expect(controller.end() == .all)
+        #expect(controller.end() == nil)
     }
 }

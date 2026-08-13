@@ -926,6 +926,7 @@ private func _a2uiPropsMembers() {
 // StdioJSONRPCTransport
 // StopReason
 // StoreError
+// StoreSecondaryRootError
 // StreamBufferDefaults
 // SubscribeOutcome
 // SubscribeReplayOutcome
@@ -1212,6 +1213,10 @@ private func _a2uiPropsMembers() {
 // drain
 // dropdown
 // dropdownRadius
+// dualFolderFocusedContentMinWidth
+// dualFolderPreviewMinWidth
+// dualFolderTreeListIdealWidth
+// dualFolderTreeListMinWidth
 // durationMS
 // echo
 // echoReplyPrefix
@@ -1277,10 +1282,10 @@ private func _a2uiPropsMembers() {
 // file
 // fileExists
 // fileExtension
+// filePreviewMaxBytes
 // fileSystem
 // fileSystemEvents
 // filename
-// filePreviewMaxBytes
 // filesChanged
 // filterable
 // finished
@@ -1528,6 +1533,7 @@ private func _a2uiPropsMembers() {
 // noEventPollInterval
 // normalized
 // normalizedFolderView
+// normalizedSecondaryRootPath
 // note
 // noteHookFallbackAssistantText
 // notification
@@ -1616,6 +1622,7 @@ private func _a2uiPropsMembers() {
 // prepareProjectOpen
 // present
 // presentFilename
+// previewSelectionDebounce
 // primary
 // primaryAction
 // primaryAgentID
@@ -1624,7 +1631,6 @@ private func _a2uiPropsMembers() {
 // primaryKeyboardModifiers
 // primaryKeyboardShortcut
 // privatePrefix
-// previewSelectionDebounce
 // probablyStuckThreshold
 // probeTimeout
 // processEnvironment
@@ -1782,8 +1788,10 @@ private func _a2uiPropsMembers() {
 // secondary
 // secondaryAction
 // secondaryButtonTitle
+// secondaryFolderURL
 // secondaryKeyboardModifiers
 // secondaryKeyboardShortcut
+// secondaryRootPath
 // seedModelCatalog
 // selectAgentMode
 // selectCommands
@@ -1932,8 +1940,8 @@ private func _a2uiPropsMembers() {
 // surfaceID
 // surfaces
 // syncAutoApprovalRules
-// synthesizedReplayMessages
 // syntaxHighlightMaxBytes
+// synthesizedReplayMessages
 // system
 // systemImage
 // tabs
@@ -2007,6 +2015,7 @@ private func _a2uiPropsMembers() {
 // updateAppearance
 // updatePinnedRelativePaths
 // updateRules
+// updateSecondaryRootPath
 // updateSessionMetadata
 // updateTXT
 // upstreamCommit
@@ -2021,6 +2030,7 @@ private func _a2uiPropsMembers() {
 // userPromptSubmit
 // userPromptText
 // userTurnEchoWindow
+// usesDualTreeNavigation
 // usesMarkdownPreview
 // usesTreeNavigation
 // usrBinAndBinPath
@@ -2029,7 +2039,9 @@ private func _a2uiPropsMembers() {
 // uuid
 // uuidString
 // validate
+// validateSecondaryRoot
 // validateToken
+// validatedDualFolderView
 // validationError
 // validationRegexp
 // value
@@ -2079,5 +2091,5 @@ private func _a2uiPropsMembers() {
 // zsh
 // MANIFEST_SYMBOLS_END
 
-// Total: 1533 unique public symbols
+// Total: 1560 unique public symbols
 

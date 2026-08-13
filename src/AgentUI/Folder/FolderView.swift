@@ -94,10 +94,11 @@ struct FolderView: View {
                 } else {
                     let showsPreview = kind.showsPreviewOnSelection
                         && browser.selectedRelativePath != nil
-                    HStack(spacing: 0) {
+                    // Split view rather than a fixed divider so the table/preview
+                    // boundary is draggable.
+                    HSplitView {
                         fileTable(browser, compact: showsPreview)
                         if showsPreview {
-                            Divider()
                             FolderViewPreviewPanel(
                                 browser: browser,
                                 kind: kind,

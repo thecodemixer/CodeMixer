@@ -45,7 +45,9 @@ extension FolderView {
         .frame(
             minWidth: Theme.layout.folderBrowserListMinWidth,
             idealWidth: Theme.layout.folderBrowserListIdealWidth,
-            maxWidth: Theme.layout.folderBrowserListMaxWidth,
+            // No hard maximum: the split handle beside the preview may drag the
+            // list wider than its ideal width.
+            maxWidth: .infinity,
             maxHeight: .infinity
         )
         .layoutPriority(0)

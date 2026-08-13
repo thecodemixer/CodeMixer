@@ -49,10 +49,10 @@ struct FolderTreeView: View {
                 filterBar(treeModel)
             }
             if treeModel.truncated {
-                truncationBanner
+                FolderTreeTruncationBanner()
             }
             if let error = treeModel.lastError {
-                recoveryBanner(
+                FolderTreeRecoveryBanner(
                     title: "Could not scan folder",
                     detail: error,
                     actionTitle: "Retry",
@@ -84,9 +84,10 @@ struct FolderTreeView: View {
                         description: Text("Try a different search or clear filters.")
                     )
                 } else {
-                    HStack(spacing: 0) {
+                    // Split view rather than a fixed divider so the tree/preview
+                    // boundary is draggable.
+                    HSplitView {
                         treeColumn(treeModel)
-                        Divider()
                         if treeModel.selectedRelativePath == nil
                             || treeModel.selectedEntry?.isDirectory == true {
                             selectAFilePlaceholder
@@ -269,37 +270,6 @@ struct FolderTreeView: View {
         .buttonStyle(.plain)
         .accessibilityLabel("Filter \(title)")
         .accessibilityAddTraits(selected ? [.isSelected] : [])
-    }
-
-    private var truncationBanner: some View {
-        Text("Showing the first \(FolderBrowserLimits.maxScanEntries) entries. Narrow the folder or refresh after cleanup.")
-            .font(Theme.typography.caption)
-            .foregroundStyle(Theme.signal.warning)
-            .padding(.horizontal, Theme.spacing.s16)
-            .padding(.vertical, Theme.spacing.s8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.surface.panel)
-            .accessibilityLabel("Folder listing truncated")
-    }
-
-    private func recoveryBanner(title: String,
-                                detail: String,
-                                actionTitle: String,
-                                action: @escaping () -> Void) -> some View {
-        HStack(alignment: .top, spacing: Theme.spacing.s12) {
-            VStack(alignment: .leading, spacing: Theme.spacing.s4) {
-                Text(title)
-                    .font(Theme.typography.label)
-                Text(detail)
-                    .font(Theme.typography.caption)
-                    .foregroundStyle(Theme.text.secondary)
-            }
-            Spacer(minLength: 0)
-            Button(actionTitle, action: action)
-                .accessibilityLabel(actionTitle)
-        }
-        .padding(Theme.spacing.s12)
-        .background(Theme.surface.panel)
     }
 
     private func ensureModel() {

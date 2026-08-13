@@ -9,6 +9,7 @@ extension WorkspaceProjectsStore {
     public func createProject(name: String,
                               projectType: ProjectType,
                               preferFreshAgentProcess: Bool = false,
+                              folderView: FolderViewState? = nil,
                               in workspace: URL) async throws -> ProjectRef {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard Self.isValidProjectName(trimmed) else {
@@ -16,6 +17,14 @@ extension WorkspaceProjectsStore {
         }
         let folder = workspace.appendingPathComponent(trimmed, isDirectory: true)
         let key = Self.key(for: workspace)
+
+        // Validate before creating the folder so a rejected compare root leaves
+        // nothing behind.
+        if projectType.folderKind?.usesDualTreeNavigation == true {
+            _ = try ProjectLocalStateStore.validatedDualFolderView(folderView,
+                                                                   primaryRoot: folder,
+                                                                   fileSystem: fileSystem)
+        }
 
         if fileSystem.isDirectory(at: folder) {
             if let existing = workspaces[key]?.first(where: { $0.path == folder.path }) {
@@ -34,7 +43,7 @@ extension WorkspaceProjectsStore {
                              preferFreshAgentProcess: preferFreshAgentProcess,
                              agentInstanceIdentity: identity)
         try await register(ref, in: workspace, rootProjectType: projectType)
-        try ProjectLocalStateStore.save(ref: ref, fileSystem: fileSystem)
+        try ProjectLocalStateStore.save(ref: ref, fileSystem: fileSystem, folderView: folderView)
         return ref
     }
 
@@ -44,8 +53,14 @@ extension WorkspaceProjectsStore {
                                    projectType: ProjectType,
                                    displayName: String? = nil,
                                    preferFreshAgentProcess: Bool = false,
+                                   folderView: FolderViewState? = nil,
                                    in workspace: URL) async throws -> ProjectRef {
         let key = Self.key(for: workspace)
+        if projectType.folderKind?.usesDualTreeNavigation == true {
+            _ = try ProjectLocalStateStore.validatedDualFolderView(folderView,
+                                                                   primaryRoot: projectURL,
+                                                                   fileSystem: fileSystem)
+        }
         let trimmedName = displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolvedName: String = {
             if let trimmedName, !trimmedName.isEmpty { return trimmedName }
@@ -62,7 +77,7 @@ extension WorkspaceProjectsStore {
                                      preferFreshAgentProcess: preferFreshAgentProcess,
                                      agentInstanceIdentity: identity)
             try await register(updated, in: workspace, rootProjectType: projectType)
-            try ProjectLocalStateStore.save(ref: updated, fileSystem: fileSystem)
+            try ProjectLocalStateStore.save(ref: updated, fileSystem: fileSystem, folderView: folderView)
             return updated
         }
         let ref = ProjectRef(path: projectURL.path,
@@ -71,7 +86,7 @@ extension WorkspaceProjectsStore {
                              preferFreshAgentProcess: preferFreshAgentProcess,
                              agentInstanceIdentity: identity)
         try await register(ref, in: workspace, rootProjectType: projectType)
-        try ProjectLocalStateStore.save(ref: ref, fileSystem: fileSystem)
+        try ProjectLocalStateStore.save(ref: ref, fileSystem: fileSystem, folderView: folderView)
         return ref
     }
 

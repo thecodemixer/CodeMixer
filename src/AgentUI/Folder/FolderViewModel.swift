@@ -73,7 +73,10 @@ final class FolderViewModel {
          fileSystem: any FileSystem = SystemFileSystem(),
          clock: any AgentClock = SystemClock(),
          initialRelativePath: String? = nil) {
-        precondition(!kind.usesTreeNavigation, "FolderViewModel does not host folderTree; use FolderTreeViewModel")
+        precondition(
+            !kind.usesTreeNavigation && !kind.usesDualTreeNavigation,
+            "FolderViewModel does not host tree kinds; use FolderTreeViewModel / DualFolderTreeView"
+        )
         self.root = root.standardizedFileURL
         self.kind = kind
         self.fileSystem = fileSystem
@@ -495,8 +498,10 @@ final class FolderViewModel {
                                       entry: entry,
                                       showSource: showSource,
                                       generation: generation)
-        case .folderTree:
-            preconditionFailure("FolderViewModel does not preview folderTree; use FolderTreeViewModel")
+                case .folderTree, .dualFolderTree:
+                    preconditionFailure(
+                        "FolderViewModel does not preview tree kinds; use FolderTreeViewModel / DualFolderTreeView"
+                    )
         }
     }
 

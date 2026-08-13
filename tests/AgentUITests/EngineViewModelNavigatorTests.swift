@@ -1183,6 +1183,45 @@ struct EngineViewModelNavigatorTests {
         await bus.shutdown()
     }
 
+    @Test("selectProject for dualFolderTree opens browser with nil selection and bumps overview reset")
+    func selectDualFolderTreeProject() async throws {
+        let port = RecordingPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
+        let fileSystem = InMemoryFileSystem()
+        let environment = FakeEnvironment(home: TestPaths.fakeHome)
+        let store = WorkspaceProjectsStore(environment: environment, fileSystem: fileSystem)
+        vm.workspaceProjects = store
+
+        let workspace = TestPaths.workspace("ws-dual-folder-tree-select")
+        let compare = workspace.appendingPathComponent("compare", isDirectory: true)
+        try fileSystem.createDirectory(at: compare, withIntermediates: true)
+        await vm.adoptEmptyWorkspace(workspace)
+        let ref = try await store.createProject(
+            name: "dual",
+            projectType: .folder(.dualFolderTree),
+            folderView: FolderViewState(secondaryRootPath: compare.path),
+            in: workspace
+        )
+        await vm.applyProjectList(await store.projects(for: workspace))
+        let before = vm.dualFolderOverviewResetGeneration
+        vm.selectProject(path: ref.path)
+
+        #expect(vm.showsFolderBrowser)
+        #expect(!vm.showsPreviewOnly)
+        #expect(vm.activeFolderProjectKind == .dualFolderTree)
+        #expect(vm.activeFolderSelectionRelativePath == nil)
+        #expect(vm.dualFolderOverviewResetGeneration == before + 1)
+        #expect(FolderProjectKind.dualFolderTree.usesDualTreeNavigation)
+        #expect(port.commands.isEmpty)
+
+        // Reselecting the same project title bumps again (overview reset).
+        vm.selectProject(path: ref.path)
+        #expect(vm.dualFolderOverviewResetGeneration == before + 2)
+
+        await bus.shutdown()
+    }
+
     @Test("openFolderShortcut for folderTree enters preview-only mode")
     func openFolderTreeShortcutFocusesPreview() async throws {
         let port = RecordingPort()

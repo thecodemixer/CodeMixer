@@ -12,8 +12,10 @@ import OSLog
 /// Schema v2 adds optional `folderView` for pinned sidebar paths on folder
 /// projects (`files` / `docs` / `modelhike` / `folderTree`).
 /// Schema v4 adds `FolderProjectKind.folderTree`.
+/// Schema v5 adds `FolderProjectKind.dualFolderTree` and
+/// `FolderViewState.secondaryRootPath`.
 public struct ProjectLocalState: Sendable, Codable, Hashable {
-    public static let currentSchemaVersion = 4
+    public static let currentSchemaVersion = 5
 
     public var schemaVersion: Int
     public var displayName: String
@@ -66,11 +68,27 @@ public struct ProjectLocalState: Sendable, Codable, Hashable {
 
     public static func normalizedFolderView(_ state: FolderViewState?,
                                             for projectType: ProjectType) -> FolderViewState? {
-        guard let kind = projectType.folderKind, kind.supportsPinnedSidebarEntries else {
-            return nil
+        guard let kind = projectType.folderKind else { return nil }
+        let secondary = kind.usesDualTreeNavigation
+            ? Self.normalizedSecondaryRootPath(state?.secondaryRootPath)
+            : nil
+        if kind.supportsPinnedSidebarEntries {
+            let pins = FolderViewState.normalized(state?.pinnedRelativePaths ?? [])
+            return FolderViewState(pinnedRelativePaths: pins, secondaryRootPath: nil)
         }
-        guard let state else { return FolderViewState() }
-        return FolderViewState(pinnedRelativePaths: FolderViewState.normalized(state.pinnedRelativePaths))
+        if kind.usesDualTreeNavigation {
+            // Dual trees keep only the absolute secondary root; pins are never stored.
+            return FolderViewState(pinnedRelativePaths: [], secondaryRootPath: secondary)
+        }
+        return nil
+    }
+
+    /// Trims and keeps absolute secondary roots; relative / empty values become nil.
+    public static func normalizedSecondaryRootPath(_ path: String?) -> String? {
+        guard let path else { return nil }
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.hasPrefix("/") else { return nil }
+        return URL(fileURLWithPath: trimmed, isDirectory: true).standardizedFileURL.path
     }
 }
 
@@ -119,13 +137,24 @@ public enum ProjectLocalStateStore {
         try fileSystem.writeAtomically(data, to: ProjectPaths.projectStateURL(in: projectRoot))
     }
 
-    /// Writes membership metadata while preserving any existing pin list when
-    /// the project remains a pin-capable folder kind.
+    /// Writes membership metadata while preserving any existing pin list /
+    /// dual secondary root when the project type still carries that state.
+    ///
+    /// An explicit `folderView` is caller-supplied input (project creation), so a
+    /// dual compare root is validated here and rejected before it reaches disk.
+    /// State already on disk is passed through untouched: a compare folder on an
+    /// unmounted volume must not make rename or reconcile fail.
     public static func save(ref: WorkspaceProjectsStore.ProjectRef,
-                            fileSystem: any FileSystem) throws {
+                            fileSystem: any FileSystem,
+                            folderView: FolderViewState? = nil) throws {
         let root = URL(fileURLWithPath: ref.path)
-        let existing = load(from: root, fileSystem: fileSystem)?.folderView
-        let preserved = ProjectLocalState.normalizedFolderView(existing, for: ref.projectType)
+        let existing = folderView ?? load(from: root, fileSystem: fileSystem)?.folderView
+        var preserved = ProjectLocalState.normalizedFolderView(existing, for: ref.projectType)
+        if folderView != nil, ref.projectType.folderKind?.usesDualTreeNavigation == true {
+            preserved = try validatedDualFolderView(preserved,
+                                                    primaryRoot: root,
+                                                    fileSystem: fileSystem)
+        }
         try save(ProjectLocalState(ref: ref, folderView: preserved),
                  to: root,
                  fileSystem: fileSystem)
@@ -140,16 +169,102 @@ public enum ProjectLocalStateStore {
             throw FileSystemError.notFound(path: ProjectPaths.projectStateURL(in: projectRoot).path)
         }
         guard let kind = state.projectType.folderKind, kind.supportsPinnedSidebarEntries else {
-            state.folderView = nil
-            try save(state, to: projectRoot, fileSystem: fileSystem)
-            return nil
+            // Keep dual secondary roots; only clear when the kind stores neither.
+            if state.projectType.folderKind?.usesDualTreeNavigation != true {
+                state.folderView = nil
+                try save(state, to: projectRoot, fileSystem: fileSystem)
+            }
+            return state.folderView
         }
         let contained = paths.compactMap { relative -> String? in
             canonicalizeRelativePath(relative, in: projectRoot, fileSystem: fileSystem)
         }
-        state.folderView = FolderViewState(pinnedRelativePaths: FolderViewState.normalized(contained))
+        state.folderView = FolderViewState(
+            pinnedRelativePaths: FolderViewState.normalized(contained),
+            secondaryRootPath: nil
+        )
         try save(state, to: projectRoot, fileSystem: fileSystem)
         return state.folderView
+    }
+
+    /// Merge-safe secondary-root update for dual folder trees.
+    /// Validates absolute, existing directory distinct from the primary root.
+    @discardableResult
+    public static func updateSecondaryRootPath(_ secondaryRoot: URL?,
+                                               in projectRoot: URL,
+                                               fileSystem: any FileSystem) throws -> FolderViewState? {
+        guard var state = load(from: projectRoot, fileSystem: fileSystem) else {
+            throw FileSystemError.notFound(path: ProjectPaths.projectStateURL(in: projectRoot).path)
+        }
+        guard let kind = state.projectType.folderKind, kind.usesDualTreeNavigation else {
+            state.folderView = ProjectLocalState.normalizedFolderView(state.folderView,
+                                                                      for: state.projectType)
+            try save(state, to: projectRoot, fileSystem: fileSystem)
+            return state.folderView
+        }
+        let validated = try secondaryRoot.map {
+            try validateSecondaryRoot($0, primaryRoot: projectRoot, fileSystem: fileSystem)
+        }
+        state.folderView = FolderViewState(
+            pinnedRelativePaths: [],
+            secondaryRootPath: validated?.path
+        )
+        try save(state, to: projectRoot, fileSystem: fileSystem)
+        return state.folderView
+    }
+
+    /// Validates a caller-supplied dual folder view. Callers that mutate other
+    /// state (project registration, folder creation) run this *before* their
+    /// first side effect so a bad compare folder cannot leave a half-made project.
+    public static func validatedDualFolderView(_ folderView: FolderViewState?,
+                                               primaryRoot: URL,
+                                               fileSystem: any FileSystem) throws -> FolderViewState {
+        guard let candidate = ProjectLocalState
+            .normalizedSecondaryRootPath(folderView?.secondaryRootPath) else {
+            throw StoreSecondaryRootError.missing
+        }
+        let validated = try validateSecondaryRoot(
+            URL(fileURLWithPath: candidate, isDirectory: true),
+            primaryRoot: primaryRoot,
+            fileSystem: fileSystem
+        )
+        return FolderViewState(pinnedRelativePaths: [], secondaryRootPath: validated.path)
+    }
+
+    /// Returns a standardized secondary root when it is an absolute existing
+    /// directory distinct from `primaryRoot`.
+    public static func validateSecondaryRoot(_ secondaryRoot: URL,
+                                             primaryRoot: URL,
+                                             fileSystem: any FileSystem) throws -> URL {
+        let secondary = secondaryRoot.standardizedFileURL
+        let primary = primaryRoot.standardizedFileURL
+        guard secondary.path.hasPrefix("/") else {
+            throw FileSystemError.notFound(path: secondary.path)
+        }
+        // Collision is checked before existence: when a project folder is about to
+        // be created, "same folder" is the actionable reason, not "not found".
+        guard secondary.path != primary.path else {
+            throw StoreSecondaryRootError.sameAsPrimary(path: secondary.path)
+        }
+        guard fileSystem.isDirectory(at: secondary) else {
+            throw FileSystemError.notFound(path: secondary.path)
+        }
+        return secondary
+    }
+
+    /// Typed failure when the compare folder is missing or collides with the primary root.
+    public enum StoreSecondaryRootError: Error, LocalizedError, Sendable, Equatable {
+        case missing
+        case sameAsPrimary(path: String)
+
+        public var errorDescription: String? {
+            switch self {
+            case .missing:
+                "Choose a compare folder for the dual folder tree."
+            case .sameAsPrimary:
+                "The compare folder must be different from the project folder."
+            }
+        }
     }
 
     /// Returns a project-relative path when `relative` resolves inside `projectRoot`.
