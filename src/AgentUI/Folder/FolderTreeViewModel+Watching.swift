@@ -10,6 +10,7 @@ extension FolderTreeViewModel {
         let preservedSearch = searchText
         let preservedFilter = extensionFilter
         let preservedSelection = selectedRelativePath
+        let preservedPreview = previewedRelativePath
         let preservedExpanded = expandedPaths
         scanTask?.cancel()
         isLoading = true
@@ -38,26 +39,26 @@ extension FolderTreeViewModel {
                     self.rebuildTree()
                     let presentPaths = Set(result.entries.map(\.relativePath))
                     self.expandedPaths = preservedExpanded.intersection(presentPaths)
-                    if let selected = preservedSelection,
-                       presentPaths.contains(selected) {
+                    // Row highlight and preview reconcile independently: a folder
+                    // can vanish without touching the open file, and vice versa.
+                    if let selected = preservedSelection, presentPaths.contains(selected) {
                         self.selectedRelativePath = selected
                         self.revealPath(selected)
-                        if let entry = self.selectedEntry, !entry.isDirectory {
-                            self.loadPreview(for: selected)
-                        } else {
-                            self.clearPreview()
-                            if let entry = self.selectedEntry {
-                                self.previewTitle = entry.name
-                            }
-                        }
-                    } else if preservedSelection != nil {
+                    } else {
                         self.selectedRelativePath = nil
+                    }
+                    if let preview = preservedPreview,
+                       presentPaths.contains(preview),
+                       result.entries.first(where: { $0.relativePath == preview })?
+                           .isDirectory == false {
+                        self.previewedRelativePath = preview
+                        self.loadPreview(for: preview)
+                    } else {
+                        self.previewedRelativePath = nil
                         self.clearPreview()
                         if result.entries.isEmpty {
                             self.previewMode = .empty
                         }
-                    } else if result.entries.isEmpty {
-                        self.previewMode = .empty
                     }
                 }
             } catch {
@@ -102,11 +103,13 @@ extension FolderTreeViewModel {
                     self.rebuildTree()
                     self.selectedRelativePath = relativePath
                     if entry.isDirectory {
+                        self.previewedRelativePath = nil
                         self.clearPreview()
                         self.previewMode = .error
                         self.previewText = "Pinned path is a folder."
                         self.previewTitle = entry.name
                     } else {
+                        self.previewedRelativePath = relativePath
                         self.loadPreview(for: relativePath)
                     }
                 }

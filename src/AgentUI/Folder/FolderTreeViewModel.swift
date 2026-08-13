@@ -37,7 +37,14 @@ final class FolderTreeViewModel {
     private var searchTextStorage = ""
     private var extensionFilterStorage: String?
     var showFilters = false
+    /// The highlighted outline row. May be a file or a directory — clicking a
+    /// directory to expand it selects the row without disturbing the preview.
     var selectedRelativePath: String?
+    /// The file whose contents fill the preview pane. Only ever a file, and
+    /// deliberately independent of `selectedRelativePath` so navigating folders
+    /// keeps the open file on screen until another file is chosen or Escape
+    /// closes it. Mutated only through `select(_:)` and refresh reconciliation.
+    var previewedRelativePath: String?
     /// Paths currently pinned in the sidebar.
     var pinnedRelativePaths: Set<String> = []
     /// Directory relative paths the user has expanded (filter does not mutate this).
@@ -81,6 +88,7 @@ final class FolderTreeViewModel {
         self.fileSystem = fileSystem
         self.clock = clock
         self.selectedRelativePath = initialRelativePath
+        self.previewedRelativePath = initialRelativePath
     }
 
     var availableExtensions: [String] {
@@ -102,6 +110,16 @@ final class FolderTreeViewModel {
     var selectedEntry: FolderFileEntry? {
         guard let selectedRelativePath else { return nil }
         return entries.first { $0.relativePath == selectedRelativePath }
+    }
+
+    var previewedEntry: FolderFileEntry? {
+        guard let previewedRelativePath else { return nil }
+        return entries.first { $0.relativePath == previewedRelativePath }
+    }
+
+    /// True when a file preview is open, regardless of which row is highlighted.
+    var isPreviewingFile: Bool {
+        previewedRelativePath != nil
     }
 
     var isEmptyListing: Bool {

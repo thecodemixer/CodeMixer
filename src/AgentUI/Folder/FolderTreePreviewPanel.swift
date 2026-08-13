@@ -94,7 +94,7 @@ struct FolderTreePreviewPanel: View {
     /// Offered only for files that have both a rendered and a source form
     /// (markdown, HTML, SVG) — plain source files have nothing to toggle to.
     private var showsSourceToggle: Bool {
-        guard let entry = model.selectedEntry,
+        guard let entry = model.previewedEntry,
               FolderFileSupport.hasRenderedAndSourceViews(entry) else { return false }
         return model.previewMode == .markdown
             || model.previewMode == .source
@@ -105,12 +105,12 @@ struct FolderTreePreviewPanel: View {
         FilePreviewPanel(
             mode: model.previewMode,
             text: model.previewText,
-            entry: model.selectedEntry,
-            fileURL: model.selectedRelativePath.map(model.absoluteURL(for:)),
+            entry: model.previewedEntry,
+            fileURL: model.previewedRelativePath.map(model.absoluteURL(for:)),
             projectRoot: model.root,
             fileSystem: model.fileSystem,
             textPresentation: .source(
-                language: model.selectedEntry.flatMap(FolderFileSupport.syntaxLanguage(for:)),
+                language: model.previewedEntry.flatMap(FolderFileSupport.syntaxLanguage(for:)),
                 lineWrap: model.lineWrap
             ),
             markdownAnchor: nil,

@@ -560,7 +560,7 @@ struct FolderTreeViewModelTests {
         #expect(model.visibleTreeRoots.first?.entry.relativePath == "src")
     }
 
-    @Test("Selecting a directory clears preview; selecting a file loads text")
+    @Test("A file loads a preview; selecting a folder keeps it; deselecting clears it")
     func selectionPreviewGates() async throws {
         let fs = InMemoryFileSystem()
         let root = TestPaths.workspace("tree-preview-root")
@@ -571,13 +571,29 @@ struct FolderTreeViewModelTests {
         let model = FolderTreeViewModel(root: root, fileSystem: fs)
         model.entries = try FolderScanner.scan(root: root, fileSystem: fs)
         model.rebuildTree()
+
+        // Selecting a folder with nothing open does not conjure a preview.
         model.select("src")
-        #expect(model.previewMode == .none)
-        #expect(model.previewTitle == "src")
+        #expect(!model.isPreviewingFile)
+        #expect(model.previewedRelativePath == nil)
+
         model.select("notes.txt")
         try? await Task.sleep(for: .milliseconds(40))
         #expect(model.previewMode == .text)
         #expect(model.previewText.contains("hello"))
+        #expect(model.previewedRelativePath == "notes.txt")
+
+        // Expanding a folder while a file is open leaves the preview intact.
+        model.select("src")
+        #expect(model.isPreviewingFile)
+        #expect(model.previewedRelativePath == "notes.txt")
+        #expect(model.previewMode == .text)
+        #expect(model.selectedRelativePath == "src")
+
+        // Only an explicit deselection tears it down.
+        model.select(nil)
+        #expect(!model.isPreviewingFile)
+        #expect(model.previewMode == .none)
     }
 
     @Test("Markdown preview toggles source without TOC state")
@@ -1188,11 +1204,63 @@ struct DualFolderTreeCoordinatorTests {
         #expect(right.selectedRelativePath == nil)
         #expect(coordinator.followStatus == .noCounterpart("src/added.swift"))
 
-        // A directory on the primary side is not a preview target either way.
+        // Selecting a directory to navigate does not disturb the previewed
+        // file, so the follow state (and layout) stay put.
         left.select("src")
         coordinator.syncFollowedSelection()
-        #expect(coordinator.followStatus == .idle)
+        #expect(coordinator.followStatus == .noCounterpart("src/added.swift"))
+        #expect(coordinator.layout == .previews)
+    }
+
+    @Test("Selecting a folder keeps the file preview open in both trees")
+    func folderClickKeepsPreview() throws {
+        let fs = InMemoryFileSystem()
+        let leftRoot = TestPaths.workspace("dual-keep-left")
+        let rightRoot = TestPaths.workspace("dual-keep-right")
+        for root in [leftRoot, rightRoot] {
+            try fs.createDirectory(at: root, withIntermediates: true)
+            try fs.createDirectory(at: root.appendingPathComponent("src"),
+                                   withIntermediates: true)
+        }
+        try fs.writeAtomically(Data("a".utf8),
+                               to: leftRoot.appendingPathComponent("src/a.swift"))
+        try fs.writeAtomically(Data("b".utf8),
+                               to: rightRoot.appendingPathComponent("readme.md"))
+
+        let coordinator = DualFolderTreeCoordinator(
+            primaryRoot: leftRoot,
+            secondaryRoot: rightRoot,
+            fileSystem: fs,
+            clock: FakeClock()
+        )
+        coordinator.start()
+        defer { coordinator.stop() }
+        let left = try #require(coordinator.leftModel)
+        let right = try #require(coordinator.rightModel)
+        left.entries = try FolderScanner.scan(root: leftRoot, fileSystem: fs)
+        left.rebuildTree()
+        right.entries = try FolderScanner.scan(root: rightRoot, fileSystem: fs)
+        right.rebuildTree()
+
+        left.select("src/a.swift")
+        right.select("readme.md")
+        #expect(coordinator.layout == .previews)
+
+        // Expanding a folder on either side must not collapse the previews.
+        left.select("src")
+        #expect(coordinator.layout == .previews)
+        #expect(left.previewedRelativePath == "src/a.swift")
+        #expect(left.isPreviewingFile)
+
+        right.select("src")
+        #expect(coordinator.layout == .previews)
+        #expect(right.previewedRelativePath == "readme.md")
+
+        // Escape / close still tears both previews down.
+        #expect(coordinator.handleEscape())
         #expect(coordinator.layout == .treesOnly)
+        #expect(left.previewedRelativePath == nil)
+        #expect(right.previewedRelativePath == nil)
     }
 
     @Test("Replacing the compare root rejects the primary root and persists a valid one")

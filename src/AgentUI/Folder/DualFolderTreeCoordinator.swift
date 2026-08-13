@@ -54,8 +54,8 @@ final class DualFolderTreeCoordinator {
 
     var layout: DualFolderTreeLayout {
         DualFolderTreeLayout.resolve(
-            left: leftModel?.selectedEntry,
-            right: rightModel?.selectedEntry
+            left: leftModel?.previewedEntry,
+            right: rightModel?.previewedEntry
         )
     }
 
@@ -115,8 +115,7 @@ final class DualFolderTreeCoordinator {
     /// there. Ancestors are expanded so the mirrored row is actually visible.
     func syncFollowedSelection() {
         guard followMode == .followPrimary, let rightModel else { return }
-        guard let path = leftModel?.selectedRelativePath,
-              leftModel?.selectedEntry?.isDirectory != true else {
+        guard let path = leftModel?.previewedRelativePath else {
             rightModel.select(nil)
             followStatus = .idle
             return

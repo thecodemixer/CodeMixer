@@ -79,11 +79,11 @@ struct DualFolderTreeView: View {
                 .keyboardShortcut(.space)
                 .hidden()
         }
-        .onChange(of: coordinator.leftModel?.selectedRelativePath) { _, _ in
+        .onChange(of: coordinator.leftModel?.previewedRelativePath) { _, _ in
             coordinator.syncFollowedSelection()
             suppressSidebarForPreviews = (coordinator.layout == .previews)
         }
-        .onChange(of: coordinator.rightModel?.selectedRelativePath) { _, _ in
+        .onChange(of: coordinator.rightModel?.previewedRelativePath) { _, _ in
             suppressSidebarForPreviews = (coordinator.layout == .previews)
         }
         .onAppear {
@@ -377,7 +377,7 @@ struct DualFolderTreeView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .layoutPriority(1)
             .accessibilityLabel("\(path) has no counterpart in \(rootName)")
-        } else if treeModel.selectedRelativePath == nil || treeModel.selectedEntry?.isDirectory == true {
+        } else if !treeModel.isPreviewingFile {
             ContentUnavailableView(
                 "Select a file",
                 systemImage: "doc.text.magnifyingglass",

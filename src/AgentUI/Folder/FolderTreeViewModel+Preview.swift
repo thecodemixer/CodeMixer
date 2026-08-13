@@ -64,10 +64,10 @@ extension FolderTreeViewModel {
 
     func setDocsShowSource(_ showSource: Bool) {
         docsShowSource = showSource
-        if let selectedRelativePath,
-           let entry = selectedEntry,
+        if let previewedRelativePath,
+           let entry = previewedEntry,
            FolderFileSupport.hasRenderedAndSourceViews(entry) {
-            loadPreview(for: selectedRelativePath)
+            loadPreview(for: previewedRelativePath)
         }
     }
 

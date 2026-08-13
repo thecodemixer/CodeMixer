@@ -122,7 +122,7 @@ extension FolderTreeViewModel {
             clearSearchAndFilters()
             return true
         }
-        if selectedRelativePath != nil {
+        if selectedRelativePath != nil || previewedRelativePath != nil {
             select(nil)
             return true
         }
@@ -145,16 +145,18 @@ extension FolderTreeViewModel {
         return parent.isEmpty ? nil : parent
     }
 
+    /// Selection drives the preview only when a file is chosen. Selecting a
+    /// directory (to expand it) leaves the previewed file untouched; only an
+    /// explicit deselection (`select(nil)`, Escape, close) tears the preview
+    /// down.
     private func updatePreviewForSelection() {
         guard let selectedRelativePath else {
+            previewedRelativePath = nil
             clearPreview()
             return
         }
-        if let entry = selectedEntry, entry.isDirectory {
-            clearPreview()
-            previewTitle = entry.name
-            return
-        }
+        guard selectedEntry?.isDirectory != true else { return }
+        previewedRelativePath = selectedRelativePath
         loadPreview(for: selectedRelativePath)
     }
 

@@ -88,8 +88,7 @@ struct FolderTreeView: View {
                     // boundary is draggable.
                     HSplitView {
                         treeColumn(treeModel)
-                        if treeModel.selectedRelativePath == nil
-                            || treeModel.selectedEntry?.isDirectory == true {
+                        if !treeModel.isPreviewingFile {
                             selectAFilePlaceholder
                         } else {
                             FolderTreePreviewPanel(
