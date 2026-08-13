@@ -45,10 +45,34 @@ enum PTYInputReader {
                 if buffer.isEmpty { return .eof }
                 break
             }
+            // A bracketed-paste block carries its own line breaks; only the
+            // Enter that follows the end marker submits. Mirrors the real TUI,
+            // which is how multi-line prompts arrive.
+            if hasSuffix(buffer, Self.pasteStartBytes) {
+                buffer.removeLast(Self.pasteStartBytes.count)
+                buffer.append(next)
+                while !hasSuffix(buffer, Self.pasteEndBytes) {
+                    var pasted: UInt8 = 0
+                    guard read(STDIN_FILENO, &pasted, 1) == 1 else { break }
+                    buffer.append(pasted)
+                }
+                if hasSuffix(buffer, Self.pasteEndBytes) {
+                    buffer.removeLast(Self.pasteEndBytes.count)
+                }
+                continue
+            }
             if next == 0x0D || next == 0x0A { break }
             buffer.append(next)
         }
         let text = String(decoding: buffer, as: UTF8.self)
+            .replacingOccurrences(of: "\r", with: "\n")
         return .submit(text)
+    }
+
+    private static let pasteStartBytes = Array("\u{1B}[200~".utf8)
+    private static let pasteEndBytes = Array("\u{1B}[201~".utf8)
+
+    private static func hasSuffix(_ buffer: [UInt8], _ suffix: [UInt8]) -> Bool {
+        buffer.count >= suffix.count && Array(buffer.suffix(suffix.count)) == suffix
     }
 }

@@ -70,6 +70,11 @@ Codemixer spawns `claude` under a PTY with optional `--permission-mode` /
 `entrypoint: "cli"` / `promptSource: "typed"` in transcript user records
 (not `sdk-cli` / `sdk`).
 
+Single-line prompts are typed bytes followed by carriage return. Multi-line
+prompts use terminal bracketed-paste framing followed by carriage return;
+without framing, Claude Code leaves a fast multi-line burst in its composer
+instead of submitting it.
+
 ### Settings
 
 Project-local `.claude/settings.local.json` with `hooks` object. Precedence: managed policy → CLI → `.claude/settings.local.json` → `.claude/settings.json` → `~/.claude/settings.json`.

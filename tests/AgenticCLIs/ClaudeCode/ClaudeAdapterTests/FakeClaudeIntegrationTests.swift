@@ -74,8 +74,9 @@ struct FakeClaudeIntegrationTests {
             return
         }
 
+        let prompt = "hello twin\nsecond line"
         let sendTask = Task {
-            try await engine.send(.sendPrompt(text: "hello twin", attachments: []))
+            try await engine.send(.sendPrompt(text: prompt, attachments: []))
         }
         defer { sendTask.cancel() }
 
@@ -97,7 +98,7 @@ struct FakeClaudeIntegrationTests {
         await engine.shutdown(reason: .naturalExit)
 
         #expect(events.contains { if case .sessionStarted = $0 { return true }; return false })
-        #expect(events.contains { if case .userTurn(_, let text) = $0 { return text == "hello twin" }; return false })
+        #expect(events.contains { if case .userTurn(_, let text) = $0 { return text == prompt }; return false })
         #expect(events.contains {
             if case .assistantText(_, _, let text, let isFinal) = $0 {
                 return isFinal && text.contains("Hello from the twin.")
