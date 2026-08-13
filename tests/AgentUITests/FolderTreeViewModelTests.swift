@@ -1387,11 +1387,8 @@ struct SidebarSuppressionControllerTests {
     @Test("A visible sidebar hides for previews and comes back on release")
     func visibleSidebarRoundTrips() {
         var controller = SidebarSuppressionController()
-        #expect(controller.allowsManualToggle)
-
         #expect(controller.begin(from: .all) == .detailOnly)
         #expect(controller.isSuppressing)
-        #expect(!controller.allowsManualToggle)
         #expect(controller.reaction(to: .detailOnly) == .ignore)
         #expect(controller.end() == .all)
         #expect(!controller.isSuppressing)
@@ -1405,12 +1402,19 @@ struct SidebarSuppressionControllerTests {
         #expect(controller.end() == .detailOnly)
     }
 
-    @Test("Native split-view controls are snapped back while suppressed")
-    func nativeControlsCorrected() {
+    @Test("Revealing the sidebar while suppressed releases the focused surface")
+    func revealingSidebarReleasesFocus() {
         var controller = SidebarSuppressionController()
         _ = controller.begin(from: .all)
-        #expect(controller.reaction(to: .all) == .correct(to: .detailOnly))
-        #expect(controller.reaction(to: .doubleColumn) == .correct(to: .detailOnly))
+        #expect(controller.reaction(to: .all) == .releaseFocus)
+        #expect(controller.reaction(to: .doubleColumn) == .releaseFocus)
+
+        // Release leaves the sidebar where the user put it — the stash is dropped
+        // rather than restored, so nothing snaps back afterwards.
+        controller.release()
+        #expect(!controller.isSuppressing)
+        #expect(controller.end() == nil)
+        #expect(controller.reaction(to: .all) == .persist(visible: true))
     }
 
     @Test("Only user-driven changes persist, and a restore writes nothing")

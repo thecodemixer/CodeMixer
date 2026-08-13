@@ -86,6 +86,13 @@ struct DualFolderTreeView: View {
         .onChange(of: coordinator.rightModel?.previewedRelativePath) { _, _ in
             suppressSidebarForPreviews = (coordinator.layout == .previews)
         }
+        // The scene clears this when the user reveals the sidebar (toolbar
+        // control, ⌘\, palette). Treat it as the exit from preview mode, since
+        // Escape only arrives when the key view is inside this hierarchy.
+        .onChange(of: suppressSidebarForPreviews) { _, suppress in
+            guard !suppress, coordinator.layout == .previews else { return }
+            coordinator.closePreviews()
+        }
         .onAppear {
             suppressSidebarForPreviews = (coordinator.layout == .previews)
         }

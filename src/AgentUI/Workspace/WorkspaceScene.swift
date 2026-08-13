@@ -117,13 +117,15 @@ public struct WorkspaceScene: View {
             switch sidebarSuppression.reaction(to: visibility) {
             case .ignore:
                 break
-            case .correct(let corrected):
-                columnVisibility = corrected
+            case .releaseFocus:
+                sidebarSuppression.release()
+                // Asking for the navigator also leaves the focused surface. This
+                // is the reliable way out of dual-tree previews: Escape is routed
+                // to the first responder, and a focused web/PDF preview eats it.
+                suppressSidebarForDualPreviews = false
+                persistSidebarVisibility(visibility != .detailOnly)
             case .persist(let visible):
-                guard visible != model.sidebarVisible else { return }
-                model.sidebarVisible = visible
-                // Persist via the shared prefs path (multi-mode safe), not UserDefaults.
-                model.updateAppearance(.sidebarVisible(visible))
+                persistSidebarVisibility(visible)
             }
         }
         .onChange(of: suppressSidebarForDualPreviews) { _, suppress in
@@ -256,13 +258,20 @@ public struct WorkspaceScene: View {
         ]
     }
 
+    /// ⌘\ and the palette command stay live while a surface is suppressing the
+    /// sidebar: revealing it is how the user gets out of that surface.
     private func toggleSidebar() {
-        // A focused surface owns column visibility until it releases it.
-        guard sidebarSuppression.allowsManualToggle else { return }
         let animation = Theme.motion.resolve(Theme.motion.changing, reduceMotion: reduceMotion)
         withAnimation(animation) {
             columnVisibility = (columnVisibility == .detailOnly) ? .all : .detailOnly
         }
+    }
+
+    private func persistSidebarVisibility(_ visible: Bool) {
+        guard visible != model.sidebarVisible else { return }
+        model.sidebarVisible = visible
+        // Persist via the shared prefs path (multi-mode safe), not UserDefaults.
+        model.updateAppearance(.sidebarVisible(visible))
     }
 
     private func applyDualPreviewSidebarSuppression(_ suppress: Bool) {
