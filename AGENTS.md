@@ -167,6 +167,7 @@ Codemixer/
 | Folder table browser (`files`/`logs`/`docs`/`modelhike`) | `AgentUI/Folder/FolderView.swift`, `FolderView+FileTable.swift`, `FolderViewModel.swift` |
 | Folder tree browser (`folderTree`) | `AgentUI/Folder/FolderTreeView.swift`, `FolderTreeView+TreeColumn.swift`, `FolderTreeColumn.swift`, `FolderTreeViewModel.swift` (+Tree/+Preview/+Watching) |
 | Dual folder tree browser (`dualFolderTree`) | `AgentUI/Folder/DualFolderTreeView.swift`, `DualFolderTreeCoordinator.swift`, `DualFolderPaneLayout.swift` |
+| Web pages project (`ProjectType.webPages`) | `Core/AgentCore/Persistence/WebPagesProject.swift`, `AgentUI/WebPages/{WebPagesProjectView,WebPageEditorSheet}.swift`, `AgentUI/External/{WebPageViewStore,WebPageViewRepresentable}.swift`, `AgentUI/ViewModel/EngineViewModel+NavigatorWebPages.swift` |
 | Project create/configure (incl. agent working-directory chooser) | `AgentUI/Pickers/ProjectConfigurationSheets.swift`, `ProjectDraft.swift`, `ProjectInfoSheet.swift` |
 | Per-root tree banners / empty states | `AgentUI/Folder/FolderTreeStatusViews.swift` |
 | Temporary sidebar hiding for focused surfaces (never persisted) | `AgentUI/Workspace/SidebarSuppressionController.swift` (used by `WorkspaceScene`) |
@@ -501,7 +502,7 @@ When extending the codebase after the 2026 maintainability pass:
 | `A2UISchemaProfile` | A2UI version/MIME/catalog-id/`_meta`-key constants and the pinned upstream schema manifest (URL + commit + SHA-256 per file) |
 | `SystemPaths` | `/usr/bin/env`, `/usr/bin/git`, `/usr/bin/openssl`, Terminal.app |
 | `AppSupportPaths` | `prefs.json`, `sessions.json`, `workspaces.json`, attachments dir, `remote-server.p12` |
-| `ProjectPaths` | per-project `.codemixer/project.json`, per-workspace `.codemixer/workspace.json`, per-adapter `workspace-<AgentID>.json` |
+| `ProjectPaths` | per-project `.codemixer/project.json` (incl. optional `webPages` for `ProjectType.webPages`), per-workspace `.codemixer/workspace.json`, per-adapter `workspace-<AgentID>.json` |
 | `ClaudeProjectPaths` | Claude transcript/project slug conventions |
 | `AgentUI/External/DesktopActions` | Pasteboard, Finder reveal, save panels |
 | `Remote/AgentRemoteControl/External/CertificateIdentityImporter` | PKCS#12 import + cert fingerprint extraction |

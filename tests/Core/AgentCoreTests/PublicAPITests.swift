@@ -253,6 +253,17 @@ struct ProjectTypeTests {
         // Must cover a real double click; the macOS default interval is 0.5s.
         #expect(FolderBrowserLimits.rowActivationCoalesceWindow >= 0.5)
     }
+
+    @Test("Web pages project type is non-agent and not folder-backed")
+    func webPagesType() {
+        let type = ProjectType.webPages
+        #expect(type.isWebPagesBacked)
+        #expect(!type.isFolderBacked)
+        #expect(!type.isAgentBacked)
+        #expect(type.primaryAgentID == nil)
+        #expect(type.shortLabel == "Web")
+        #expect(!type.showsSidebarTypeCapsule)
+    }
 }
 
 @Suite("ProjectAgentRouter — adapter id resolution")
@@ -280,6 +291,13 @@ struct ProjectAgentRouterTests {
         #expect(ProjectAgentRouter.resolveAdapterID(projectType: .folder(.files)) == nil)
         #expect(ProjectAgentRouter.resolveAdapterID(projectType: .folder(.logs)) == nil)
         let adapter = await ProjectAgentRouter.resolveAdapter(projectType: .folder(.docs))
+        #expect(adapter == nil)
+    }
+
+    @Test("Web pages project types resolve to no adapter")
+    func webPagesResolveNil() async {
+        #expect(ProjectAgentRouter.resolveAdapterID(projectType: .webPages) == nil)
+        let adapter = await ProjectAgentRouter.resolveAdapter(projectType: .webPages)
         #expect(adapter == nil)
     }
 }

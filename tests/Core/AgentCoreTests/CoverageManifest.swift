@@ -762,6 +762,7 @@ private func _a2uiPropsMembers() {
 // Event
 // EventLogView
 // ExitStatus
+// ExternalWebPageURLPolicy
 // FSEvent
 // FSEventsError
 // FSEventsStream
@@ -964,6 +965,9 @@ private func _a2uiPropsMembers() {
 // UserNotificationBridge
 // VoiceInputService
 // WatcherError
+// WebPageEntry
+// WebPageViewStore
+// WebPagesProjectConfig
 // WindowSize
 // WireAgentError
 // WireAgentErrorCode
@@ -1000,12 +1004,14 @@ private func _a2uiPropsMembers() {
 // activeFolderProjectKind
 // activeFolderSelectionRelativePath
 // activePendingPermission
+// activeWebPageID
 // activeWorkspaceURL
 // activityDotSize
 // activityDotsHeight
 // adapter
 // adapterEvents
 // addExistingProject
+// addWebPage
 // addition
 // additions
 // address
@@ -1022,6 +1028,8 @@ private func _a2uiPropsMembers() {
 // align
 // all
 // allPaired
+// allowsNavigation
+// allowsSameViewPopupLoad
 // anchorMessageID
 // appSupportDirectory
 // appSupportRelativePath
@@ -1122,7 +1130,9 @@ private func _a2uiPropsMembers() {
 // claudeDirectory
 // clear
 // clearActiveWorkspace
+// clearData
 // clearPendingExport
+// clearWebSessionData
 // clientCapabilitiesMetaKey
 // clientCapabilitiesMetaKeyAlias
 // clientCount
@@ -1264,6 +1274,8 @@ private func _a2uiPropsMembers() {
 // eventLogMinWidth
 // eventName
 // events
+// evict
+// evictAll
 // executable
 // executablePath
 // execute
@@ -1401,7 +1413,10 @@ private func _a2uiPropsMembers() {
 // isThinking
 // isTwoWayBound
 // isUnknown
+// isValidDraftURL
 // isVoid
+// isWebPagesBacked
+// isWebPagesProject
 // issue
 // items
 // janitorInterval
@@ -1476,6 +1491,7 @@ private func _a2uiPropsMembers() {
 // max
 // maxAttempts
 // maxBatchItems
+// maxCachedViews
 // maxComponentsPerSurface
 // maxDelay
 // maxExpressionCallCount
@@ -1484,6 +1500,7 @@ private func _a2uiPropsMembers() {
 // maxJSONDepth
 // maxJSONNodes
 // maxListExpansion
+// maxPages
 // maxPayloadBytes
 // maxPinnedPaths
 // maxPointerLength
@@ -1520,6 +1537,7 @@ private func _a2uiPropsMembers() {
 // movablePanelTitle
 // move
 // movePinnedFolderPath
+// moveWebPage
 // muted
 // name
 // named
@@ -1534,6 +1552,7 @@ private func _a2uiPropsMembers() {
 // normalized
 // normalizedFolderView
 // normalizedSecondaryRootPath
+// normalizedWebPages
 // normalizedWorkingDirectoryPath
 // note
 // noteHookFallbackAssistantText
@@ -1570,6 +1589,8 @@ private func _a2uiPropsMembers() {
 // openProjectWidth
 // openSession
 // openURL
+// openWebPage
+// openWebPagesProject
 // openssl
 // optionID
 // optionId
@@ -1584,6 +1605,7 @@ private func _a2uiPropsMembers() {
 // overviewDashboard
 // overviewURL
 // owner
+// pages
 // pairedAt
 // pairedDevices
 // pairedDevicesService
@@ -1641,6 +1663,7 @@ private func _a2uiPropsMembers() {
 // projectCommands
 // projectDirectory
 // projectFileName
+// projectLocalFileSystem
 // projectPath
 // projectPickerMaxHeight
 // projectPickerWidth
@@ -1694,11 +1717,14 @@ private func _a2uiPropsMembers() {
 // refreshFolderSidebarShortcuts
 // refreshKind
 // refreshModelCatalog
+// refreshWebPages
 // refreshedAt
 // register
 // rejectIfModelCatalogUnavailable
+// rekey
 // relativePath
 // release
+// reload
 // reloadProjects
 // reloadSessions
 // reloadWorkspaceModelCatalogStatus
@@ -1711,6 +1737,7 @@ private func _a2uiPropsMembers() {
 // remoteSettingsMinHeight
 // remove
 // removeProject
+// removeWebPage
 // renameProject
 // repeatedListScopePaths
 // replace
@@ -1823,6 +1850,7 @@ private func _a2uiPropsMembers() {
 // sessionSidebarMaxWidth
 // sessionSidebarMinWidth
 // sessionStart
+// sessionStoreIdentifier
 // sessions
 // sessionsFileName
 // sessionsIndexFileName
@@ -1855,6 +1883,7 @@ private func _a2uiPropsMembers() {
 // shipping
 // shippingIDs
 // shortLabel
+// shouldOpenExternally
 // showSilentRecoveryLog
 // showUsageChip
 // showsAutomaticSidebarShortcuts
@@ -1863,6 +1892,7 @@ private func _a2uiPropsMembers() {
 // showsPreviewOnSelection
 // showsPreviewOnly
 // showsSidebarTypeCapsule
+// showsWebPages
 // shutdown
 // sidebarVisible
 // sidecarPort
@@ -2022,10 +2052,13 @@ private func _a2uiPropsMembers() {
 // updateSecondaryRootPath
 // updateSessionMetadata
 // updateTXT
+// updateWebPage
+// updateWebPages
 // upstreamCommit
 // upstreamLicenseNote
 // upstreamRepository
 // url
+// urlString
 // usage
 // useTLS
 // userLine
@@ -2047,6 +2080,7 @@ private func _a2uiPropsMembers() {
 // validateToken
 // validateWorkingDirectory
 // validatedDualFolderView
+// validatedURL
 // validationError
 // validationRegexp
 // value
@@ -2055,15 +2089,20 @@ private func _a2uiPropsMembers() {
 // variant
 // version
 // versionLabel
+// view
 // voice
 // voidFunctions
 // waitForExit
 // warmWorkspaceModelCatalogs
 // warning
 // waveformRange
+// webPageSessionStoreIdentifier
+// webPages
+// webSessionDataCleaner
 // webSocket
 // webSocketPath
 // webSocketPort
+// webView
 // weight
 // windowSize
 // wireCode
@@ -2097,6 +2136,5 @@ private func _a2uiPropsMembers() {
 // writeBytes
 // zsh
 // MANIFEST_SYMBOLS_END
-
-// Total: 1567 unique public symbols
+// Total: 1606 unique public symbols
 

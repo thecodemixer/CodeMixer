@@ -45,7 +45,14 @@ public struct WorkspaceScene: View {
                         ? Theme.layout.sessionSidebarIconRailWidth
                         : Theme.layout.sessionSidebarMaxWidth)
         } detail: {
-            if model.showsFolderBrowser,
+            if model.showsWebPages,
+               let path = model.workspace?.path,
+               let project = model.projects.first(where: {
+                   URL(fileURLWithPath: $0.path).standardizedFileURL.path
+                       == URL(fileURLWithPath: path).standardizedFileURL.path
+               }) {
+                WebPagesProjectView(model: model, project: project)
+            } else if model.showsFolderBrowser,
                let path = model.workspace?.path,
                let project = model.projects.first(where: {
                    URL(fileURLWithPath: $0.path).standardizedFileURL.path

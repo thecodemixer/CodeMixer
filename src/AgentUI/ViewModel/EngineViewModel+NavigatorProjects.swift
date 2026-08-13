@@ -83,11 +83,13 @@ extension EngineViewModel {
         do {
             let primaryRoot = workspaceRoot.appendingPathComponent(info.name, isDirectory: true)
             let folderView = try Self.folderViewState(for: info, primaryRoot: primaryRoot)
+            let webPages = try Self.webPagesConfig(for: info, existingRoot: nil)
             let ref = try await store.createProject(
                 name: info.name,
                 projectType: projectType,
                 preferFreshAgentProcess: info.preferFreshAgentProcess,
                 folderView: folderView,
+                webPages: webPages,
                 workingDirectory: info.workingDirectoryURL,
                 in: workspaceRoot
             )
@@ -112,12 +114,14 @@ extension EngineViewModel {
         }
         do {
             let folderView = try Self.folderViewState(for: info, primaryRoot: url)
+            let webPages = try Self.webPagesConfig(for: info, existingRoot: url)
             let ref = try await store.addExistingProject(
                 url: url,
                 projectType: projectType,
                 displayName: info.name,
                 preferFreshAgentProcess: info.preferFreshAgentProcess,
                 folderView: folderView,
+                webPages: webPages,
                 workingDirectory: info.workingDirectoryURL,
                 in: workspaceRoot
             )
@@ -153,6 +157,40 @@ extension EngineViewModel {
             primaryRoot: primaryRoot,
             fileSystem: SystemFileSystem()
         )
+    }
+
+    /// Builds web-pages config for create/add. Re-adding an existing project
+    /// preserves the on-disk session-store identifier when the draft does not
+    /// carry one.
+    private static func webPagesConfig(for info: ProjectDraft,
+                                       existingRoot: URL?) throws -> WebPagesProjectConfig? {
+        guard info.projectType?.isWebPagesBacked == true else { return nil }
+        for draft in info.webPages {
+            let trimmed = draft.urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            guard WebPageEntry.isValidDraftURL(trimmed) else {
+                throw WebPagesDraftError.invalidURL(trimmed)
+            }
+        }
+        let existingID = existingRoot.flatMap {
+            ProjectLocalStateStore.load(from: $0, fileSystem: SystemFileSystem())?
+                .webPages?.sessionStoreIdentifier
+        }
+        return WebPagesProjectConfig(
+            pages: WebPageEntry.normalized(info.webPages),
+            sessionStoreIdentifier: existingID ?? UUID()
+        )
+    }
+
+    enum WebPagesDraftError: Error, LocalizedError, Equatable {
+        case invalidURL(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .invalidURL(let raw):
+                return "Invalid web page URL: \(raw)"
+            }
+        }
     }
 
     /// Update the agent working-directory override for an existing project.
@@ -222,6 +260,10 @@ extension EngineViewModel {
             openFolderProject(ref, relativePath: nil)
             return
         }
+        if projectType.isWebPagesBacked {
+            openWebPagesProject(ref)
+            return
+        }
         // Soft-warm: record per-adapter failures so a broken CLI lands under
         // Not loaded instead of opening with an empty model picker. Probe is
         // still bounded by `ModelCatalogTiming.probeTimeout`.
@@ -266,8 +308,12 @@ extension EngineViewModel {
     /// undo toast. The seeded root cannot be removed.
     public func removeProject(path: String) {
         guard let workspaceRoot, let store = workspaceProjects else { return }
+        let clearingWeb = projectRef(at: path)?.projectType.isWebPagesBacked == true
         Task { [weak self] in
             do {
+                if clearingWeb {
+                    await MainActor.run { self?.clearWebSessionData(projectPath: path) }
+                }
                 let removed = try await store.removeProject(path: path, in: workspaceRoot)
                 let refs = await store.projects(for: workspaceRoot)
                 let capabilities = await Self.projectCapabilityIndex(for: refs)
@@ -321,6 +367,13 @@ extension EngineViewModel {
         if loadingProjectPaths.remove(oldPath) != nil {
             loadingProjectPaths.insert(newPath)
         }
+        if let pages = webPagesByProject.removeValue(forKey: oldPath) {
+            webPagesByProject[newPath] = pages
+        }
+        if let storeID = webPageSessionStoreIDsByProject.removeValue(forKey: oldPath) {
+            webPageSessionStoreIDsByProject[newPath] = storeID
+        }
+        WebPageViewStore.shared.rekey(from: oldPath, to: newPath)
         projectCapabilities.rekey(from: oldPath, to: newPath)
     }
 
@@ -349,7 +402,7 @@ extension EngineViewModel {
         loadingProjectPaths = []
         folderPinnedPathsByProject = [:]
         folderAutomaticShortcutsByProject = [:]
-        clearFolderBrowserSurface()
+        clearNonConversationSurfaces()
         removedProjectUndo = nil
         removedProjectUndoTask?.cancel()
         removedProjectUndoTask = nil
@@ -382,7 +435,7 @@ extension EngineViewModel {
         loadingProjectPaths = []
         folderPinnedPathsByProject = [:]
         folderAutomaticShortcutsByProject = [:]
-        clearFolderBrowserSurface()
+        clearNonConversationSurfaces()
         removedProjectUndo = nil
         removedProjectUndoTask?.cancel()
         removedProjectUndoTask = nil
@@ -409,6 +462,9 @@ extension EngineViewModel {
         for ref in refs where ref.projectType.isFolderBacked {
             refreshFolderSidebarShortcuts(for: ref)
         }
+        for ref in refs where ref.projectType.isWebPagesBacked {
+            refreshWebPages(for: ref)
+        }
     }
 
     private static func projectCapabilityIndex(
@@ -425,7 +481,7 @@ extension EngineViewModel {
     }
 
     private static func projectTypeSupportsResumableSessions(_ projectType: ProjectType) async -> Bool {
-        if projectType.isFolderBacked { return false }
+        if !projectType.isAgentBacked { return false }
         if case .mixed = projectType {
             let adapters = await AdapterRegistry.shared.all()
             return adapters.contains { $0.capabilities.contains(.resumableSessions) }
@@ -437,7 +493,7 @@ extension EngineViewModel {
     }
 
     private static func adapterSupportsOverviewDashboard(_ projectType: ProjectType) async -> Bool {
-        if projectType.isFolderBacked { return false }
+        if !projectType.isAgentBacked { return false }
         if case .mixed(let defaultAgent) = projectType {
             if let defaultAgent,
                let adapter = await AdapterRegistry.shared.adapter(for: defaultAgent) {

@@ -22,11 +22,14 @@ public enum DetailPanePresentation: Equatable {
     /// (sidebar pin opened directly into a file). Always has a concrete
     /// path — there is nothing to preview otherwise.
     case folderPreviewOnly(kind: FolderProjectKind, relativePath: String)
+    /// Embedded external web page for a `ProjectType.webPages` project.
+    /// `nil` pageID is the empty / select-a-page landing.
+    case webPage(pageID: UUID?)
 
     var isFolderBrowser: Bool {
         switch self {
         case .folderBrowser, .folderPreviewOnly: return true
-        case .conversation, .dashboard: return false
+        case .conversation, .dashboard, .webPage: return false
         }
     }
 
@@ -35,10 +38,15 @@ public enum DetailPanePresentation: Equatable {
         return false
     }
 
+    var isWebPage: Bool {
+        if case .webPage = self { return true }
+        return false
+    }
+
     var folderProjectKind: FolderProjectKind? {
         switch self {
         case .folderBrowser(let kind, _, _), .folderPreviewOnly(let kind, _): return kind
-        case .conversation, .dashboard: return nil
+        case .conversation, .dashboard, .webPage: return nil
         }
     }
 
@@ -46,8 +54,13 @@ public enum DetailPanePresentation: Equatable {
         switch self {
         case .folderBrowser(_, let selected, _): return selected
         case .folderPreviewOnly(_, let path): return path
-        case .conversation, .dashboard: return nil
+        case .conversation, .dashboard, .webPage: return nil
         }
+    }
+
+    var activeWebPageID: UUID? {
+        if case .webPage(let pageID) = self { return pageID }
+        return nil
     }
 }
 
@@ -155,6 +168,8 @@ public final class EngineViewModel {
     public var showsOverviewDashboard: Bool { detailPane == .dashboard }
     /// True while the detail pane shows a non-agent folder browser.
     public var showsFolderBrowser: Bool { detailPane.isFolderBrowser }
+    /// True while the detail pane shows a web-pages project surface.
+    public var showsWebPages: Bool { detailPane.isWebPage }
     /// Active folder project kind when `showsFolderBrowser` is true.
     public var activeFolderProjectKind: FolderProjectKind? { detailPane.folderProjectKind }
     /// Relative path to preselect when opening a folder shortcut from the sidebar.
@@ -170,12 +185,20 @@ public final class EngineViewModel {
     }
     /// Currently selected file in the folder browser (drives sidebar active marker).
     public var activeFolderSelectionRelativePath: String? { detailPane.activeFolderSelectionRelativePath }
+    /// Currently selected web page id (drives sidebar active marker).
+    public var activeWebPageID: UUID? { detailPane.activeWebPageID }
     /// When true, the folder detail pane shows only the file preview (sidebar pin open).
     public var showsPreviewOnly: Bool { detailPane.isFolderPreviewOnly }
     /// Pinned relative paths keyed by project path (pin-capable folder kinds).
     public internal(set) var folderPinnedPathsByProject: [String: [String]] = [:]
     /// Automatic newest-log shortcuts keyed by project path.
     public internal(set) var folderAutomaticShortcutsByProject: [String: [FolderSidebarShortcut]] = [:]
+    /// Named web pages keyed by project path.
+    public internal(set) var webPagesByProject: [String: [WebPageEntry]] = [:]
+    /// Session-store identifiers keyed by project path (web-pages projects).
+    public internal(set) var webPageSessionStoreIDsByProject: [String: UUID] = [:]
+    /// Bumped when web session data is cleared so representables reload.
+    public internal(set) var webPageReloadGeneration: Int = 0
     /// Bumped when the dual-folder project title is selected so an already-visible
     /// `DualFolderTreeView` resets to trees-only (SwiftUI may keep the same identity).
     public internal(set) var dualFolderOverviewResetGeneration: Int = 0
@@ -281,6 +304,18 @@ public final class EngineViewModel {
 
     /// Agent-agnostic Workspace→Projects store, injected by the app shell.
     public var workspaceProjects: WorkspaceProjectsStore?
+
+    /// Filesystem used for project-local `.codemixer/project.json` reads/writes
+    /// from the navigator (pins, web pages). Defaults to the real disk; tests
+    /// inject `InMemoryFileSystem` to match the store under test.
+    public var projectLocalFileSystem: any FileSystem = SystemFileSystem()
+
+    /// Wipes cookies / localStorage for a web-pages project's session store.
+    /// Injected so tests can observe the wipe without touching real WebKit
+    /// on-disk data stores.
+    public var webSessionDataCleaner: @MainActor (UUID) -> Void = { identifier in
+        WebPageViewStore.shared.clearData(sessionStoreIdentifier: identifier)
+    }
 
     /// The just-removed project, surfaced as an undo toast until it expires.
     public internal(set) var removedProjectUndo: WorkspaceProjectsStore.RemovedProject?

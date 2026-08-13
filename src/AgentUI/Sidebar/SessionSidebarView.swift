@@ -25,6 +25,16 @@ public struct SessionSidebarView: View {
     @State private var showRenamePrompt = false
     @State private var infoTarget: WorkspaceProjectsStore.ProjectRef?
     @State private var hoveredProjectPath: String?
+    @State private var webPageEditorTarget: WebPageEditorTarget?
+
+    private struct WebPageEditorTarget: Identifiable {
+        enum Mode {
+            case add(projectPath: String)
+            case edit(projectPath: String, entry: WebPageEntry)
+        }
+        let id = UUID()
+        let mode: Mode
+    }
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -60,7 +70,9 @@ public struct SessionSidebarView: View {
                 }
                 .help("New chat in current project")
                 .accessibilityLabel("New chat in current project")
-                .disabled(model.workspace == nil || model.showsFolderBrowser)
+                .disabled(model.workspace == nil
+                          || model.showsFolderBrowser
+                          || model.showsWebPages)
             }
         }
         .sheet(isPresented: $showRenamePrompt) {
@@ -78,6 +90,29 @@ public struct SessionSidebarView: View {
                     await model.setProjectWorkingDirectory(path: project.path, to: url)
                 }
             )
+        }
+        .sheet(item: $webPageEditorTarget) { target in
+            switch target.mode {
+            case .add(let projectPath):
+                WebPageEditorSheet(
+                    title: "Add Web Page",
+                    onSave: { entry in
+                        model.addWebPage(entry, in: projectPath)
+                        webPageEditorTarget = nil
+                    },
+                    onCancel: { webPageEditorTarget = nil }
+                )
+            case .edit(let projectPath, let entry):
+                WebPageEditorSheet(
+                    title: "Edit Web Page",
+                    entry: entry,
+                    onSave: { updated in
+                        model.updateWebPage(updated, in: projectPath)
+                        webPageEditorTarget = nil
+                    },
+                    onCancel: { webPageEditorTarget = nil }
+                )
+            }
         }
         .animation(Theme.motion.resolve(Theme.motion.changing, reduceMotion: reduceMotion),
                    value: focusMode)
@@ -200,10 +235,13 @@ public struct SessionSidebarView: View {
     private func projectSection(_ project: WorkspaceProjectsStore.ProjectRef) -> some View {
         let isExpanded = expandedProjects.contains(project.path)
         let isFolder = model.isFolderProject(project)
+        let isWebPages = model.isWebPagesProject(project)
         VStack(alignment: .leading, spacing: Theme.spacing.s4) {
             projectRow(project, isExpanded: isExpanded)
             if isFolder {
                 folderShortcutRows(for: project)
+            } else if isWebPages {
+                webPageRows(for: project)
             } else if isExpanded {
                 if model.supportsOverviewDashboard(forProjectPath: project.path) {
                     overviewRow(for: project)
@@ -220,8 +258,12 @@ public struct SessionSidebarView: View {
                             isExpanded: Bool) -> some View {
         let isHovering = hoveredProjectPath == project.path
         let isCurrent = model.workspace?.path == project.path
-        let attention = model.isFolderProject(project) ? 0 : attentionSessionCount(for: project.path)
+        let attention = (model.isFolderProject(project) || model.isWebPagesProject(project))
+            ? 0
+            : attentionSessionCount(for: project.path)
         let isFolder = model.isFolderProject(project)
+        let isWebPages = model.isWebPagesProject(project)
+        let hidesChevron = isFolder || isWebPages
         return HStack(spacing: Theme.spacing.s8) {
             Text(project.displayName)
                 .font(Theme.typography.body)
@@ -235,7 +277,7 @@ public struct SessionSidebarView: View {
             if attention > 0 {
                 attentionCountBadge(attention)
             }
-            if !isFolder {
+            if !hidesChevron {
                 Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                     .font(Theme.typography.iconSmall)
                     .foregroundStyle(Theme.text.tertiary)
@@ -255,16 +297,24 @@ public struct SessionSidebarView: View {
                 ? "Project \(project.displayName), \(attention) sessions need attention"
                 : "Project \(project.displayName)"
         )
-        .accessibilityHint(isFolder
-                           ? "Open folder view"
+        .accessibilityHint(hidesChevron
+                           ? (isWebPages ? "Open web pages" : "Open folder view")
                            : (isExpanded ? "Collapse project" : "Expand project"))
         .accessibilityAddTraits(isCurrent ? [.isSelected] : [])
         .onHover { hovering in
             hoveredProjectPath = hovering ? project.path : nil
         }
         .contextMenu {
-            if !isFolder {
+            if !hidesChevron {
                 Button("New Chat") { model.newChat(in: project.path) }
+            }
+            if isWebPages {
+                Button("Add Web Page…") {
+                    webPageEditorTarget = WebPageEditorTarget(mode: .add(projectPath: project.path))
+                }
+                Button("Clear Web Session Data") {
+                    model.clearWebSessionData(projectPath: project.path)
+                }
             }
             Button("Reveal in Finder") { revealInFinder(project.path) }
             Button("Project Info…") { infoTarget = project }
@@ -379,6 +429,74 @@ public struct SessionSidebarView: View {
                 let url = URL(fileURLWithPath: project.path)
                     .appendingPathComponent(shortcut.relativePath)
                 revealInFinder(url.path)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func webPageRows(for project: WorkspaceProjectsStore.ProjectRef) -> some View {
+        let pages = model.webPages(for: project)
+        ForEach(pages) { page in
+            webPageRow(page, project: project)
+        }
+    }
+
+    private func webPageRow(_ page: WebPageEntry,
+                            project: WorkspaceProjectsStore.ProjectRef) -> some View {
+        let isCurrent = model.workspace?.path == project.path
+            && model.showsWebPages
+            && model.activeWebPageID == page.id
+        return Button {
+            model.openWebPage(projectPath: project.path, pageID: page.id)
+        } label: {
+            HStack(spacing: Theme.spacing.s8) {
+                if isCurrent {
+                    Circle()
+                        .fill(Theme.signal.success)
+                        .frame(width: 6, height: 6)
+                        .accessibilityHidden(true)
+                }
+                Image(systemName: "globe")
+                    .imageScale(.small)
+                    .foregroundStyle(Theme.text.tertiary)
+                    .accessibilityHidden(true)
+                Text(page.displayName)
+                    .font(Theme.typography.body)
+                    .foregroundStyle(isCurrent ? Theme.text.primary : Theme.text.secondary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+            .padding(.vertical, Theme.spacing.s4)
+            .padding(.leading, Theme.spacing.s16)
+            .padding(.trailing, Theme.spacing.s8)
+            .background(selectionWash(isCurrent: isCurrent))
+        }
+        .buttonStyle(.plain)
+        .help(page.urlString)
+        .accessibilityLabel(page.displayName)
+        .accessibilityAddTraits(isCurrent ? [.isSelected] : [])
+        .contextMenu {
+            Button("Open") {
+                model.openWebPage(projectPath: project.path, pageID: page.id)
+            }
+            if let url = page.url {
+                Button("Open in Browser") { DesktopActions.openURL(url) }
+                Button("Copy URL") { DesktopActions.copyToPasteboard(url.absoluteString) }
+            }
+            Button("Edit…") {
+                webPageEditorTarget = WebPageEditorTarget(
+                    mode: .edit(projectPath: project.path, entry: page)
+                )
+            }
+            Button("Move Up") {
+                model.moveWebPage(pageID: page.id, in: project.path, direction: -1)
+            }
+            Button("Move Down") {
+                model.moveWebPage(pageID: page.id, in: project.path, direction: 1)
+            }
+            Button("Remove", role: .destructive) {
+                model.removeWebPage(pageID: page.id, in: project.path)
             }
         }
     }
@@ -542,7 +660,7 @@ public struct SessionSidebarView: View {
     /// already-current expanded project collapses it. Folder projects always open
     /// the browser and never expand/collapse.
     private func handleProjectTap(_ project: WorkspaceProjectsStore.ProjectRef) {
-        if model.isFolderProject(project) {
+        if model.isFolderProject(project) || model.isWebPagesProject(project) {
             model.selectProject(path: project.path)
             return
         }

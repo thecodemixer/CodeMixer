@@ -538,6 +538,93 @@ struct WorkspaceProjectsStoreTests {
         #expect(projects.contains { $0.path == ref.path && $0.projectType == .folder(.folderTree) })
     }
 
+    @Test("Web pages project persists pages and session store id")
+    func webPagesProjectRoundTrip() async throws {
+        let fs = InMemoryFileSystem()
+        let store = makeStore(fs: fs)
+        let storeID = UUID()
+        let config = WebPagesProjectConfig(
+            pages: [
+                WebPageEntry(displayName: "App", urlString: "https://app.example.com"),
+                WebPageEntry(displayName: "Docs", urlString: "docs.example.com"),
+            ],
+            sessionStoreIdentifier: storeID
+        )
+        let ref = try await store.createProject(
+            name: "webapps",
+            projectType: .webPages,
+            webPages: config,
+            in: workspace
+        )
+        #expect(ref.projectType == .webPages)
+        let local = ProjectLocalStateStore.load(from: URL(fileURLWithPath: ref.path), fileSystem: fs)
+        #expect(local?.projectType == .webPages)
+        #expect(local?.webPages?.sessionStoreIdentifier == storeID)
+        #expect(local?.webPages?.pages.count == 2)
+        #expect(local?.webPages?.pages[1].urlString.hasPrefix("https://") == true)
+        #expect(local?.folderView == nil)
+        #expect(local?.workingDirectoryPath == nil)
+
+        let updated = try ProjectLocalStateStore.updateWebPages(
+            [WebPageEntry(displayName: "Only", urlString: "https://only.example.com")],
+            in: URL(fileURLWithPath: ref.path),
+            fileSystem: fs
+        )
+        #expect(updated?.pages.count == 1)
+        #expect(updated?.sessionStoreIdentifier == storeID)
+
+        let fresh = makeStore(fs: fs)
+        await fresh.load()
+        let projects = await fresh.projects(for: workspace)
+        #expect(projects.contains { $0.path == ref.path && $0.projectType == .webPages })
+        let reloaded = ProjectLocalStateStore.load(from: URL(fileURLWithPath: ref.path), fileSystem: fs)
+        #expect(reloaded?.webPages?.sessionStoreIdentifier == storeID)
+    }
+
+    @Test("Web pages project without a configuration is rejected before the folder exists")
+    func webPagesProjectRequiresConfiguration() async throws {
+        let fs = InMemoryFileSystem()
+        let store = makeStore(fs: fs)
+        await #expect(throws: WorkspaceProjectsStore.StoreError.missingWebPagesConfiguration(name: "webapps")) {
+            try await store.createProject(name: "webapps", projectType: .webPages, in: workspace)
+        }
+        #expect(!fs.isDirectory(at: workspace.appendingPathComponent("webapps", isDirectory: true)))
+        #expect(await store.projects(for: workspace).isEmpty)
+    }
+
+    @Test("v6 project.json without webPages still loads under the current schema")
+    func legacyProjectJSONWithoutWebPagesLoads() async throws {
+        let fs = InMemoryFileSystem()
+        let store = makeStore(fs: fs)
+        let ref = try await store.createProject(
+            name: "legacy tree",
+            projectType: .folder(.folderTree),
+            folderView: FolderViewState(pinnedRelativePaths: ["notes.md"]),
+            in: workspace
+        )
+        // Rewrite the file as a pre-web-pages v6 document.
+        let root = URL(fileURLWithPath: ref.path)
+        let url = ProjectPaths.projectStateURL(in: root)
+        var raw = try #require(
+            try JSONSerialization.jsonObject(with: fs.readData(at: url)) as? [String: Any]
+        )
+        raw["schemaVersion"] = 6
+        raw.removeValue(forKey: "webPages")
+        try fs.writeAtomically(try JSONSerialization.data(withJSONObject: raw), to: url)
+
+        let loaded = ProjectLocalStateStore.load(from: root, fileSystem: fs)
+        #expect(loaded?.displayName == "legacy tree")
+        #expect(loaded?.projectType == .folder(.folderTree))
+        #expect(loaded?.webPages == nil)
+        #expect(loaded?.folderView?.pinnedRelativePaths == ["notes.md"])
+
+        // Rewriting a legacy file upgrades it to the web-pages-aware schema.
+        try ProjectLocalStateStore.save(try #require(loaded), to: root, fileSystem: fs)
+        let upgraded = ProjectLocalStateStore.load(from: root, fileSystem: fs)
+        #expect(upgraded?.schemaVersion == ProjectLocalState.currentSchemaVersion)
+        #expect(upgraded?.webPages == nil)
+    }
+
     @Test("Dual folder tree persists secondary root and drops it for other kinds")
     func dualFolderTreeSecondaryRootRoundTrip() async throws {
         let fs = InMemoryFileSystem()

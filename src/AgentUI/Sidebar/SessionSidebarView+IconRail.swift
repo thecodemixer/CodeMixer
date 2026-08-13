@@ -17,7 +17,9 @@ extension SessionSidebarView {
             .foregroundStyle(Theme.text.secondary)
             .help("New chat in current project")
             .accessibilityLabel("New chat in current project")
-            .disabled(model.workspace == nil || model.showsFolderBrowser)
+            .disabled(model.workspace == nil
+                      || model.showsFolderBrowser
+                      || model.showsWebPages)
 
             Divider().overlay(Theme.surface.divider).padding(.horizontal, Theme.spacing.s8)
 
@@ -51,9 +53,10 @@ extension SessionSidebarView {
     private func railProjectButton(_ project: WorkspaceProjectsStore.ProjectRef) -> some View {
         let isCurrent = model.workspace?.path == project.path
         let attention = attentionSessionCount(for: project.path)
+        let icon = model.isWebPagesProject(project) ? "globe" : "folder"
         return Button { model.selectProject(path: project.path) } label: {
             ZStack(alignment: .topTrailing) {
-                Image(systemName: "folder")
+                Image(systemName: icon)
                     .accessibilityHidden(true)
                     .imageScale(.medium)
                     .foregroundStyle(isCurrent ? Theme.text.primary : Theme.text.tertiary)

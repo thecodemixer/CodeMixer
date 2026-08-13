@@ -1,11 +1,11 @@
 import Foundation
 
 /// How a project chooses which agent CLI(s) drive chats — or which non-agent
-/// folder browser surface to show.
+/// surface to show (folder browser / web pages).
 ///
 /// This is a *project type* (Claude-only, Codex-only, Cursor-only, mixed,
-/// custom, folder) — not an in-session agent mode. Agent modes (Cursor
-/// agent/plan/ask, Claude Think/Review, …) come from
+/// custom, folder, web pages) — not an in-session agent mode. Agent modes
+/// (Cursor agent/plan/ask, Claude Think/Review, …) come from
 /// `AgentAdapter.availableAgentModes()`.
 ///
 /// Required at project creation — there is no unset/nil type and no silent
@@ -17,11 +17,12 @@ public enum ProjectType: Sendable, Codable, Hashable {
     case mixed(defaultAgent: AgentID?)
     case custom(CustomAgentRef)
     case folder(FolderProjectKind)
+    case webPages
 
     /// Primary agent used for a new chat when the type does not require a
     /// fresh choice. Mixed types return their default (or nil). Custom
     /// returns `.other` because custom adapters are not in `AgentID.shipping`.
-    /// Folder projects return `nil` — they are not agent-backed.
+    /// Folder and web-pages projects return `nil` — they are not agent-backed.
     ///
     /// Pinned built-ins resolve through `SupportedBuiltInAgent` so adding a
     /// shipping CLI does not require a third parallel switch here.
@@ -31,7 +32,7 @@ public enum ProjectType: Sendable, Codable, Hashable {
             return defaultAgent
         case .custom:
             return .other
-        case .folder:
+        case .folder, .webPages:
             return nil
         case .claudeCode, .codex, .cursorCLI:
             return SupportedBuiltInAgent.shipping.first { $0.projectType == self }?.id
@@ -46,6 +47,8 @@ public enum ProjectType: Sendable, Codable, Hashable {
             return ref.displayName
         case .folder(let kind):
             return kind.shortLabel
+        case .webPages:
+            return "Web"
         case .claudeCode, .codex, .cursorCLI:
             return SupportedBuiltInAgent.shipping.first { $0.projectType == self }?.shortLabel
                 ?? "Agent"
@@ -55,7 +58,7 @@ public enum ProjectType: Sendable, Codable, Hashable {
     /// True for projects that spawn / resume an agent CLI.
     public var isAgentBacked: Bool {
         switch self {
-        case .folder: return false
+        case .folder, .webPages: return false
         case .claudeCode, .codex, .cursorCLI, .mixed, .custom: return true
         }
     }
@@ -63,6 +66,12 @@ public enum ProjectType: Sendable, Codable, Hashable {
     /// True for projects that open a folder browser instead of a chat session.
     public var isFolderBacked: Bool {
         if case .folder = self { return true }
+        return false
+    }
+
+    /// True for projects that open embedded external web pages.
+    public var isWebPagesBacked: Bool {
+        if case .webPages = self { return true }
         return false
     }
 
@@ -76,7 +85,7 @@ public enum ProjectType: Sendable, Codable, Hashable {
     public var showsSidebarTypeCapsule: Bool {
         switch self {
         case .claudeCode, .codex, .cursorCLI: return true
-        case .mixed, .custom, .folder: return false
+        case .mixed, .custom, .folder, .webPages: return false
         }
     }
 }

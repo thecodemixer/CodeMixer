@@ -47,6 +47,10 @@ extension EngineViewModel {
             openFolderProject(project, relativePath: nil)
             return
         }
+        if let project = projectRef(at: projectPath), project.projectType.isWebPagesBacked {
+            openWebPagesProject(project)
+            return
+        }
         if rejectIfModelCatalogUnavailable(forProjectPath: projectPath) { return }
         if isCurrentSession(projectPath: projectPath, sessionID: id) {
             detailPane = .conversation
@@ -86,6 +90,10 @@ extension EngineViewModel {
             openFolderProject(project, relativePath: nil)
             return
         }
+        if let project = projectRef(at: projectPath), project.projectType.isWebPagesBacked {
+            openWebPagesProject(project)
+            return
+        }
         if rejectIfModelCatalogUnavailable(forProjectPath: projectPath) { return }
         guard projectPath != workspace?.path else {
             // Re-clicking the active overview project re-focuses the dashboard.
@@ -95,7 +103,7 @@ extension EngineViewModel {
             return
         }
         applyAdapterCapabilities(forProjectPath: projectPath)
-        clearFolderBrowserSurface()
+        clearNonConversationSurfaces()
         if supportsOverviewDashboard(forProjectPath: projectPath) {
             openOverview(projectPath: projectPath)
             return
@@ -114,25 +122,25 @@ extension EngineViewModel {
     }
 
     /// After adopting a workspace shell with projects but no active project,
-    /// open the first ready concrete agent project (else first folder project)
-    /// so the workbench is not stuck on "No workspace open". Projects whose
-    /// model catalogs failed stay under Not loaded.
+    /// open the first ready concrete agent project (else first folder / web
+    /// project) so the workbench is not stuck on "No workspace open". Projects
+    /// whose model catalogs failed stay under Not loaded.
     public func activateDefaultProjectIfNeeded() {
         guard workspace == nil, !projects.isEmpty else { return }
         if let agent = projects.first(where: {
-            !$0.projectType.isFolderBacked && isProjectModelCatalogReady($0)
+            $0.projectType.isAgentBacked && isProjectModelCatalogReady($0)
         }) {
             selectProject(path: agent.path)
             return
         }
-        if let folder = projects.first(where: { $0.projectType.isFolderBacked }) {
-            selectProject(path: folder.path)
+        if let nonAgent = projects.first(where: { !$0.projectType.isAgentBacked }) {
+            selectProject(path: nonAgent.path)
         }
     }
 
     public func newChatInCurrentProject() {
         guard let path = workspace?.path, !path.isEmpty else { return }
-        if let project = projectRef(at: path), project.projectType.isFolderBacked {
+        if let project = projectRef(at: path), !project.projectType.isAgentBacked {
             return
         }
         newChat(in: path)
@@ -149,6 +157,10 @@ extension EngineViewModel {
         if rejectIfModelCatalogUnavailable(forProjectPath: projectPath) { return }
         if let project = projectRef(at: projectPath), project.projectType.isFolderBacked {
             openFolderProject(project, relativePath: nil)
+            return
+        }
+        if let project = projectRef(at: projectPath), project.projectType.isWebPagesBacked {
+            openWebPagesProject(project)
             return
         }
         let target = URL(fileURLWithPath: projectPath).standardizedFileURL

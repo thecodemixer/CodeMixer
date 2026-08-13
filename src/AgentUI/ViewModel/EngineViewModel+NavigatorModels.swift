@@ -419,7 +419,7 @@ extension EngineViewModel {
             return []
         case .mixed:
             return SupportedBuiltInAgent.shippingIDs()
-        case .custom, .folder:
+        case .custom, .folder, .webPages:
             return []
         }
     }

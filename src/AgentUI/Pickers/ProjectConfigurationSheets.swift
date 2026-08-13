@@ -18,6 +18,7 @@ struct ProjectTypeForm: View {
     @Binding var folderKind: FolderProjectKind
     @Binding var secondaryFolderURL: URL?
     @Binding var workingDirectoryURL: URL?
+    @Binding var webPages: [WebPageEntry]
     /// Shown when no override is chosen (New Project: upcoming subfolder path).
     var workingDirectoryFallbackCaption: String? = nil
 
@@ -65,6 +66,8 @@ struct ProjectTypeForm: View {
                 if folderKind.usesDualTreeNavigation {
                     dualSecondaryFolderChooser
                 }
+            case .webPages:
+                WebPageListEditor(pages: $webPages)
             case .custom:
                 customFields
                 workingDirectoryChooser
@@ -204,6 +207,7 @@ enum ProjectTypeCategory: String, CaseIterable, Hashable, Identifiable {
     case singleAgent
     case mixed
     case folder
+    case webPages
     case custom
 
     var id: String { rawValue }
@@ -213,6 +217,7 @@ enum ProjectTypeCategory: String, CaseIterable, Hashable, Identifiable {
         case .singleAgent: return "Single agent"
         case .mixed: return "Mixed"
         case .folder: return "Folder"
+        case .webPages: return "Web Pages"
         case .custom: return "Custom"
         }
     }
@@ -226,6 +231,7 @@ enum ProjectTypeKind: Hashable, Identifiable {
     case builtIn(AgentID)
     case mixed
     case folder(FolderProjectKind)
+    case webPages
     case custom
 
     var id: String {
@@ -233,6 +239,7 @@ enum ProjectTypeKind: Hashable, Identifiable {
         case .builtIn(let id): return "builtin-\(id.rawValue)"
         case .mixed: return "mixed"
         case .folder(let kind): return "folder-\(kind.rawValue)"
+        case .webPages: return "webPages"
         case .custom: return "custom"
         }
     }
@@ -242,6 +249,7 @@ enum ProjectTypeKind: Hashable, Identifiable {
         case .builtIn: return .singleAgent
         case .mixed: return .mixed
         case .folder: return .folder
+        case .webPages: return .webPages
         case .custom: return .custom
         }
     }
@@ -258,6 +266,7 @@ enum ProjectTypeKind: Hashable, Identifiable {
         case .singleAgent: return .builtIn(builtInAgent)
         case .mixed: return .mixed
         case .folder: return .folder(folderKind)
+        case .webPages: return .webPages
         case .custom: return .custom
         }
     }
@@ -268,6 +277,7 @@ enum ProjectTypeKind: Hashable, Identifiable {
             return SupportedBuiltInAgent.entry(for: id)?.displayLabel ?? id.rawValue
         case .mixed: return "Mixed"
         case .folder(let kind): return kind.displayLabel
+        case .webPages: return "Web Pages"
         case .custom: return "Custom"
         }
     }
@@ -276,6 +286,7 @@ enum ProjectTypeKind: Hashable, Identifiable {
         SupportedBuiltInAgent.shipping.map { .builtIn($0.id) }
             + [.mixed]
             + FolderProjectKind.allCases.map { .folder($0) }
+            + [.webPages]
             + [.custom]
     }
 
@@ -292,6 +303,8 @@ enum ProjectTypeKind: Hashable, Identifiable {
             return .mixed(defaultAgent: mixedDefault)
         case .folder(let kind):
             return .folder(kind)
+        case .webPages:
+            return .webPages
         case .custom:
             // Same label as Claude/Codex/Cursor: the project name, not a
             // separate custom-agent nickname.
@@ -453,6 +466,7 @@ public struct NewProjectSheet: View {
     @State private var customArguments: String = ""
     @State private var customTransport: AgentTransportKind = .agentClientProtocol
     @State private var preferFreshAgentProcess = false
+    @State private var webPages: [WebPageEntry] = []
     @State private var isCreating = false
     @State private var createError: String?
 
@@ -516,7 +530,14 @@ public struct NewProjectSheet: View {
                 return false
             }
         }
-        if category != .folder, let cwd = workingDirectoryURL {
+        if category == .webPages {
+            for page in webPages {
+                let raw = page.urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+                if raw.isEmpty { continue }
+                guard WebPageEntry.isValidDraftURL(raw) else { return false }
+            }
+        }
+        if category != .folder, category != .webPages, let cwd = workingDirectoryURL {
             guard fileSystem.isDirectory(at: cwd.standardizedFileURL) else { return false }
         }
         if category == .folder, folderLocationMode == .chooseExisting {
@@ -526,7 +547,7 @@ public struct NewProjectSheet: View {
     }
 
     private var workingDirectoryFallbackCaption: String? {
-        guard category != .folder, !trimmedName.isEmpty else { return nil }
+        guard category != .folder, category != .webPages, !trimmedName.isEmpty else { return nil }
         return workspaceURL.appendingPathComponent(trimmedName, isDirectory: true).path
     }
 
@@ -534,6 +555,8 @@ public struct NewProjectSheet: View {
         switch category {
         case .folder:
             return "Browse files, logs, docs, modelhike, a folder tree, or a dual folder tree. Create an empty folder in this workspace or point at an existing directory."
+        case .webPages:
+            return "Embed external webapps as sidebar URLs. Creates a project folder that stores the page list in `.codemixer/project.json`."
         case .singleAgent, .mixed, .custom:
             return "Creates a subfolder in the current workspace and writes project type to `.codemixer/project.json`."
         }
@@ -556,6 +579,7 @@ public struct NewProjectSheet: View {
                 folderKind: $folderKind,
                 secondaryFolderURL: $secondaryFolderURL,
                 workingDirectoryURL: $workingDirectoryURL,
+                webPages: $webPages,
                 workingDirectoryFallbackCaption: workingDirectoryFallbackCaption
             )
             .disabled(isCreating)
@@ -564,8 +588,12 @@ public struct NewProjectSheet: View {
                     folderLocation = nil
                     folderLocationMode = .createInWorkspace
                     secondaryFolderURL = nil
-                } else {
+                }
+                if newCategory == .folder || newCategory == .webPages {
                     workingDirectoryURL = nil
+                }
+                if newCategory != .webPages {
+                    webPages = []
                 }
                 createError = nil
             }
@@ -575,14 +603,14 @@ public struct NewProjectSheet: View {
             }
 
             VStack(alignment: .leading, spacing: Theme.spacing.s4) {
-                Text(category == .folder ? "Display name" : "Project name")
+                Text(category == .folder || category == .webPages ? "Display name" : "Project name")
                     .font(Theme.typography.caption)
                     .foregroundStyle(Theme.text.secondary)
-                TextField(category == .folder ? "docs" : "api", text: $name)
+                TextField(category == .folder || category == .webPages ? "docs" : "api", text: $name)
                     .textFieldStyle(.roundedBorder)
                     .font(Theme.typography.body)
                     .disabled(isCreating)
-                    .accessibilityLabel(category == .folder ? "Display name" : "Project name")
+                    .accessibilityLabel(category == .folder || category == .webPages ? "Display name" : "Project name")
                     .onChange(of: name) { _, _ in createError = nil }
                 if category == .folder, folderLocationMode == .createInWorkspace {
                     Text("Creates an empty folder with this name inside the current workspace.")
@@ -599,7 +627,7 @@ public struct NewProjectSheet: View {
                 }
             }
 
-            if category != .folder {
+            if category != .folder, category != .webPages {
                 ProjectAdvancedOptions(preferFreshAgentProcess: $preferFreshAgentProcess)
                     .disabled(isCreating)
             }
@@ -629,7 +657,7 @@ public struct NewProjectSheet: View {
                         return
                     }
                 }
-                if category != .folder, let cwd = workingDirectoryURL,
+                if category != .folder, category != .webPages, let cwd = workingDirectoryURL,
                    !fileSystem.isDirectory(at: cwd.standardizedFileURL) {
                     createError = "Working directory \(cwd.path) is missing or not a folder."
                     return
@@ -640,7 +668,10 @@ public struct NewProjectSheet: View {
                     preferFreshAgentProcess: preferFreshAgentProcess,
                     existingFolderURL: folderURL,
                     secondaryFolderURL: folderKind.usesDualTreeNavigation ? secondaryFolderURL : nil,
-                    workingDirectoryURL: category == .folder ? nil : workingDirectoryURL
+                    workingDirectoryURL: (category == .folder || category == .webPages)
+                        ? nil
+                        : workingDirectoryURL,
+                    webPages: category == .webPages ? webPages : []
                 ))
                 if let createdError {
                     createError = createdError
@@ -720,6 +751,7 @@ public struct ConfigureProjectSheet: View {
     @State private var customArguments: String = ""
     @State private var customTransport: AgentTransportKind = .agentClientProtocol
     @State private var preferFreshAgentProcess = false
+    @State private var webPages: [WebPageEntry] = []
     @State private var configureError: String?
 
     public init(projectURL: URL,
@@ -753,6 +785,14 @@ public struct ConfigureProjectSheet: View {
             guard let secondary = secondaryFolderURL else { return false }
             return secondary.standardizedFileURL.path != projectURL.standardizedFileURL.path
         }
+        if category == .webPages {
+            for page in webPages {
+                let raw = page.urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+                if raw.isEmpty { continue }
+                guard WebPageEntry.isValidDraftURL(raw) else { return false }
+            }
+            return true
+        }
         if category != .folder, let cwd = workingDirectoryURL {
             return SystemFileSystem().isDirectory(at: cwd.standardizedFileURL)
         }
@@ -776,17 +816,21 @@ public struct ConfigureProjectSheet: View {
                 folderKind: $folderKind,
                 secondaryFolderURL: $secondaryFolderURL,
                 workingDirectoryURL: $workingDirectoryURL,
+                webPages: $webPages,
                 workingDirectoryFallbackCaption: projectURL.path
             )
             .onChange(of: category) { _, newCategory in
-                if newCategory == .folder {
+                if newCategory == .folder || newCategory == .webPages {
                     workingDirectoryURL = nil
                 } else if workingDirectoryURL == nil {
                     workingDirectoryURL = projectURL
                 }
+                if newCategory != .webPages {
+                    webPages = []
+                }
             }
 
-            if category != .folder {
+            if category != .folder, category != .webPages {
                 ProjectAdvancedOptions(preferFreshAgentProcess: $preferFreshAgentProcess)
             }
 
@@ -810,7 +854,7 @@ public struct ConfigureProjectSheet: View {
                         return
                     }
                 }
-                if category != .folder, let cwd = workingDirectoryURL,
+                if category != .folder, category != .webPages, let cwd = workingDirectoryURL,
                    !SystemFileSystem().isDirectory(at: cwd.standardizedFileURL) {
                     configureError = "Working directory \(cwd.path) is missing or not a folder."
                     return
@@ -821,7 +865,10 @@ public struct ConfigureProjectSheet: View {
                     preferFreshAgentProcess: preferFreshAgentProcess,
                     existingFolderURL: projectURL,
                     secondaryFolderURL: folderKind.usesDualTreeNavigation ? secondaryFolderURL : nil,
-                    workingDirectoryURL: category == .folder ? nil : workingDirectoryURL
+                    workingDirectoryURL: (category == .folder || category == .webPages)
+                        ? nil
+                        : workingDirectoryURL,
+                    webPages: category == .webPages ? webPages : []
                 ))
             }
         }

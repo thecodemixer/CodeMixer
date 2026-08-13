@@ -64,6 +64,22 @@ struct ProjectInfoPresentationTests {
         #expect(info.preferFreshAgentProcess == nil)
     }
 
+    @Test("A web pages project shows Pages and hides Advanced")
+    func webPagesProject() {
+        let info = ProjectInfoPresentation.make(
+            displayName: "apps",
+            path: "/workspace/apps",
+            projectType: .webPages,
+            preferFreshAgentProcess: true
+        )
+        #expect(info.categoryLabel == "Web Pages")
+        #expect(info.detailRows == [
+            .init(label: "Pages", value: "Configured in sidebar"),
+        ])
+        #expect(info.preferFreshAgentProcess == nil)
+        #expect(ProjectTypeKind.from(projectType: .webPages) == .webPages)
+    }
+
     @Test("A custom ACP project surfaces every launch field")
     func customProject() {
         let ref = CustomAgentRef(
@@ -107,6 +123,7 @@ struct ProjectInfoPresentationTests {
         #expect(ProjectTypeKind.from(projectType: .cursorCLI) == .builtIn(.cursorCLI))
         #expect(ProjectTypeKind.from(projectType: .mixed(defaultAgent: .claudeCode)) == .mixed)
         #expect(ProjectTypeKind.from(projectType: .folder(.files)) == .folder(.files))
+        #expect(ProjectTypeKind.from(projectType: .webPages) == .webPages)
         let custom = CustomAgentRef(
             id: "x",
             displayName: "X",

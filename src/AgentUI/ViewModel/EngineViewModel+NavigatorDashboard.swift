@@ -11,9 +11,13 @@ extension EngineViewModel {
             openFolderProject(project, relativePath: nil)
             return
         }
+        if let project = projectRef(at: projectPath), project.projectType.isWebPagesBacked {
+            openWebPagesProject(project)
+            return
+        }
         if rejectIfModelCatalogUnavailable(forProjectPath: projectPath) { return }
         applyAdapterCapabilities(forProjectPath: projectPath)
-        clearFolderBrowserSurface()
+        clearNonConversationSurfaces()
         let sameProject = workspace.map {
             URL(fileURLWithPath: $0.path).standardizedFileURL.path
         } == URL(fileURLWithPath: projectPath).standardizedFileURL.path
@@ -41,7 +45,7 @@ extension EngineViewModel {
         clearSessionActivation()
         status = .idle
         activity = .idle
-        clearFolderBrowserSurface()
+        clearNonConversationSurfaces()
         detailPane = .dashboard
         restoreDashboardURLIfNeeded(projectPath: projectPath)
         // WKWebView is torn down while a file chat is selected; bump so the

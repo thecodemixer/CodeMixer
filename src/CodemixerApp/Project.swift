@@ -66,6 +66,9 @@ let project = Project(
                 "NSAppleEventsUsageDescription":
                     "Codemixer uses Reveal in Finder to show changed files in the diff panel.",
                 "NSBonjourServices": ["_codemixer._tcp"],
+                "NSAppTransportSecurity": [
+                    "NSAllowsLocalNetworking": true,
+                ],
             ]),
             sources: [
                 .glob("**/*.swift", excluding: ["Project.swift"]),

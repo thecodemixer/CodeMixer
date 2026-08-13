@@ -10,6 +10,7 @@ extension WorkspaceProjectsStore {
                               projectType: ProjectType,
                               preferFreshAgentProcess: Bool = false,
                               folderView: FolderViewState? = nil,
+                              webPages: WebPagesProjectConfig? = nil,
                               workingDirectory: URL? = nil,
                               in workspace: URL) async throws -> ProjectRef {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -25,6 +26,15 @@ extension WorkspaceProjectsStore {
             _ = try ProjectLocalStateStore.validatedDualFolderView(folderView,
                                                                    primaryRoot: folder,
                                                                    fileSystem: fileSystem)
+        }
+        let resolvedWebPages: WebPagesProjectConfig?
+        if projectType.isWebPagesBacked {
+            guard let webPages else {
+                throw StoreError.missingWebPagesConfiguration(name: trimmed)
+            }
+            resolvedWebPages = webPages
+        } else {
+            resolvedWebPages = nil
         }
         let cwdPath = try ProjectLocalStateStore.validateWorkingDirectory(
             workingDirectory,
@@ -51,7 +61,10 @@ extension WorkspaceProjectsStore {
                              agentInstanceIdentity: identity,
                              workingDirectoryPath: cwdPath)
         try await register(ref, in: workspace, rootProjectType: projectType)
-        try ProjectLocalStateStore.save(ref: ref, fileSystem: fileSystem, folderView: folderView)
+        try ProjectLocalStateStore.save(ref: ref,
+                                        fileSystem: fileSystem,
+                                        folderView: folderView,
+                                        webPages: resolvedWebPages)
         return ref
     }
 
@@ -62,6 +75,7 @@ extension WorkspaceProjectsStore {
                                    displayName: String? = nil,
                                    preferFreshAgentProcess: Bool = false,
                                    folderView: FolderViewState? = nil,
+                                   webPages: WebPagesProjectConfig? = nil,
                                    workingDirectory: URL? = nil,
                                    in workspace: URL) async throws -> ProjectRef {
         let key = Self.key(for: workspace)
@@ -79,6 +93,20 @@ extension WorkspaceProjectsStore {
         let identity: AgentInstanceIdentity = preferFreshAgentProcess
             ? .dedicated(UUID())
             : .shared
+        // Preserve on-disk session store when re-adding a web-pages project.
+        let resolvedWebPages: WebPagesProjectConfig?
+        if projectType.isWebPagesBacked {
+            if let webPages {
+                resolvedWebPages = webPages
+            } else if let existing = ProjectLocalStateStore.load(from: projectURL,
+                                                                 fileSystem: fileSystem)?.webPages {
+                resolvedWebPages = existing
+            } else {
+                throw StoreError.missingWebPagesConfiguration(name: resolvedName)
+            }
+        } else {
+            resolvedWebPages = nil
+        }
         if let existing = workspaces[key]?.first(where: { $0.path == projectURL.path }) {
             let cwdPath: String?
             if workingDirectory != nil {
@@ -98,7 +126,10 @@ extension WorkspaceProjectsStore {
                                      agentInstanceIdentity: identity,
                                      workingDirectoryPath: cwdPath)
             try await register(updated, in: workspace, rootProjectType: projectType)
-            try ProjectLocalStateStore.save(ref: updated, fileSystem: fileSystem, folderView: folderView)
+            try ProjectLocalStateStore.save(ref: updated,
+                                            fileSystem: fileSystem,
+                                            folderView: folderView,
+                                            webPages: resolvedWebPages)
             return updated
         }
         let cwdPath = try ProjectLocalStateStore.validateWorkingDirectory(
@@ -114,7 +145,10 @@ extension WorkspaceProjectsStore {
                              agentInstanceIdentity: identity,
                              workingDirectoryPath: cwdPath)
         try await register(ref, in: workspace, rootProjectType: projectType)
-        try ProjectLocalStateStore.save(ref: ref, fileSystem: fileSystem, folderView: folderView)
+        try ProjectLocalStateStore.save(ref: ref,
+                                        fileSystem: fileSystem,
+                                        folderView: folderView,
+                                        webPages: resolvedWebPages)
         return ref
     }
 

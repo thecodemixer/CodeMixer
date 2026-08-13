@@ -16,8 +16,9 @@ import OSLog
 /// `FolderViewState.secondaryRootPath`.
 /// Schema v6 adds optional `workingDirectoryPath` for agent projects whose
 /// CLI cwd differs from the project folder (`ProjectRef.path`).
+/// Schema v7 adds optional `webPages` for `ProjectType.webPages`.
 public struct ProjectLocalState: Sendable, Codable, Hashable {
-    public static let currentSchemaVersion = 6
+    public static let currentSchemaVersion = 7
 
     public var schemaVersion: Int
     public var displayName: String
@@ -25,16 +26,20 @@ public struct ProjectLocalState: Sendable, Codable, Hashable {
     /// Pinned sidebar shortcuts for pin-capable folder kinds. Ignored for
     /// agent projects and `logs` (automatic shortcuts).
     public var folderView: FolderViewState?
+    /// Named URL list + session-store id for `ProjectType.webPages`.
+    public var webPages: WebPagesProjectConfig?
     public var preferFreshAgentProcess: Bool
     public var agentInstanceIdentity: AgentInstanceIdentity
     /// Absolute agent working directory when it differs from the project folder.
-    /// `nil` means cwd is the project folder itself. Always `nil` for folder projects.
+    /// `nil` means cwd is the project folder itself. Always `nil` for folder /
+    /// web-pages projects.
     public var workingDirectoryPath: String?
 
     public init(schemaVersion: Int = Self.currentSchemaVersion,
                 displayName: String,
                 projectType: ProjectType,
                 folderView: FolderViewState? = nil,
+                webPages: WebPagesProjectConfig? = nil,
                 preferFreshAgentProcess: Bool = false,
                 agentInstanceIdentity: AgentInstanceIdentity = .shared,
                 workingDirectoryPath: String? = nil,
@@ -43,6 +48,7 @@ public struct ProjectLocalState: Sendable, Codable, Hashable {
         self.displayName = displayName
         self.projectType = projectType
         self.folderView = Self.normalizedFolderView(folderView, for: projectType)
+        self.webPages = Self.normalizedWebPages(webPages, for: projectType)
         self.preferFreshAgentProcess = preferFreshAgentProcess
         self.agentInstanceIdentity = agentInstanceIdentity
         self.workingDirectoryPath = Self.normalizedWorkingDirectoryPath(
@@ -53,10 +59,12 @@ public struct ProjectLocalState: Sendable, Codable, Hashable {
     }
 
     public init(ref: WorkspaceProjectsStore.ProjectRef,
-                folderView: FolderViewState? = nil) {
+                folderView: FolderViewState? = nil,
+                webPages: WebPagesProjectConfig? = nil) {
         self.init(displayName: ref.displayName,
                   projectType: ref.projectType,
                   folderView: folderView,
+                  webPages: webPages,
                   preferFreshAgentProcess: ref.preferFreshAgentProcess,
                   agentInstanceIdentity: ref.agentInstanceIdentity,
                   workingDirectoryPath: ref.workingDirectoryPath,
@@ -64,7 +72,7 @@ public struct ProjectLocalState: Sendable, Codable, Hashable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case schemaVersion, displayName, folderView
+        case schemaVersion, displayName, folderView, webPages
         case projectType = "agentMode"
         case preferFreshAgentProcess, agentInstanceIdentity, workingDirectoryPath
     }
@@ -75,6 +83,7 @@ public struct ProjectLocalState: Sendable, Codable, Hashable {
         displayName = try c.decode(String.self, forKey: .displayName)
         projectType = try c.decode(ProjectType.self, forKey: .projectType)
         folderView = try c.decodeIfPresent(FolderViewState.self, forKey: .folderView)
+        webPages = try c.decodeIfPresent(WebPagesProjectConfig.self, forKey: .webPages)
         preferFreshAgentProcess = try c.decodeIfPresent(Bool.self, forKey: .preferFreshAgentProcess) ?? false
         agentInstanceIdentity = try c.decodeIfPresent(AgentInstanceIdentity.self,
                                                       forKey: .agentInstanceIdentity) ?? .shared
@@ -104,6 +113,16 @@ public struct ProjectLocalState: Sendable, Codable, Hashable {
         return nil
     }
 
+    public static func normalizedWebPages(_ config: WebPagesProjectConfig?,
+                                          for projectType: ProjectType) -> WebPagesProjectConfig? {
+        guard projectType.isWebPagesBacked else { return nil }
+        guard let config else { return nil }
+        return WebPagesProjectConfig(
+            pages: WebPageEntry.normalized(config.pages),
+            sessionStoreIdentifier: config.sessionStoreIdentifier
+        )
+    }
+
     /// Trims and keeps absolute secondary roots; relative / empty values become nil.
     public static func normalizedSecondaryRootPath(_ path: String?) -> String? {
         guard let path else { return nil }
@@ -113,7 +132,7 @@ public struct ProjectLocalState: Sendable, Codable, Hashable {
     }
 
     /// Absolute working-directory override for agent projects. Relative / empty
-    /// values, folder-backed types, and paths equal to the project root become nil.
+    /// values, non-agent types, and paths equal to the project root become nil.
     public static func normalizedWorkingDirectoryPath(_ path: String?,
                                                       projectRootPath: String?,
                                                       projectType: ProjectType) -> String? {
@@ -154,6 +173,8 @@ public enum ProjectLocalStateStore {
             var state = try PersistenceJSON.decode(ProjectLocalState.self, from: data)
             state.folderView = ProjectLocalState.normalizedFolderView(state.folderView,
                                                                       for: state.projectType)
+            state.webPages = ProjectLocalState.normalizedWebPages(state.webPages,
+                                                                  for: state.projectType)
             state.workingDirectoryPath = ProjectLocalState.normalizedWorkingDirectoryPath(
                 state.workingDirectoryPath,
                 projectRootPath: projectRoot.path,
@@ -174,6 +195,8 @@ public enum ProjectLocalStateStore {
         normalized.schemaVersion = ProjectLocalState.currentSchemaVersion
         normalized.folderView = ProjectLocalState.normalizedFolderView(normalized.folderView,
                                                                        for: normalized.projectType)
+        normalized.webPages = ProjectLocalState.normalizedWebPages(normalized.webPages,
+                                                                   for: normalized.projectType)
         normalized.workingDirectoryPath = ProjectLocalState.normalizedWorkingDirectoryPath(
             normalized.workingDirectoryPath,
             projectRootPath: projectRoot.path,
@@ -186,24 +209,46 @@ public enum ProjectLocalStateStore {
     }
 
     /// Writes membership metadata while preserving any existing pin list /
-    /// dual secondary root when the project type still carries that state.
+    /// dual secondary root / web-pages config when the project type still
+    /// carries that state.
     ///
     /// An explicit `folderView` is caller-supplied input (project creation), so a
     /// dual compare root is validated here and rejected before it reaches disk.
+    /// An explicit `webPages` is required for new `.webPages` projects; when
+    /// omitted, an existing on-disk config is preserved (re-add / rename).
     /// State already on disk is passed through untouched: a compare folder on an
     /// unmounted volume must not make rename or reconcile fail.
     public static func save(ref: WorkspaceProjectsStore.ProjectRef,
                             fileSystem: any FileSystem,
-                            folderView: FolderViewState? = nil) throws {
+                            folderView: FolderViewState? = nil,
+                            webPages: WebPagesProjectConfig? = nil) throws {
         let root = URL(fileURLWithPath: ref.path)
-        let existing = folderView ?? load(from: root, fileSystem: fileSystem)?.folderView
-        var preserved = ProjectLocalState.normalizedFolderView(existing, for: ref.projectType)
+        let existing = load(from: root, fileSystem: fileSystem)
+        let resolvedFolderView = folderView ?? existing?.folderView
+        var preservedFolder = ProjectLocalState.normalizedFolderView(resolvedFolderView,
+                                                                     for: ref.projectType)
         if folderView != nil, ref.projectType.folderKind?.usesDualTreeNavigation == true {
-            preserved = try validatedDualFolderView(preserved,
-                                                    primaryRoot: root,
-                                                    fileSystem: fileSystem)
+            preservedFolder = try validatedDualFolderView(preservedFolder,
+                                                          primaryRoot: root,
+                                                          fileSystem: fileSystem)
         }
-        try save(ProjectLocalState(ref: ref, folderView: preserved),
+        let resolvedWebPages: WebPagesProjectConfig?
+        if ref.projectType.isWebPagesBacked {
+            if let webPages {
+                resolvedWebPages = ProjectLocalState.normalizedWebPages(webPages,
+                                                                        for: ref.projectType)
+            } else if let existing = existing?.webPages {
+                resolvedWebPages = ProjectLocalState.normalizedWebPages(existing,
+                                                                        for: ref.projectType)
+            } else {
+                resolvedWebPages = WebPagesProjectConfig(pages: [], sessionStoreIdentifier: UUID())
+            }
+        } else {
+            resolvedWebPages = nil
+        }
+        try save(ProjectLocalState(ref: ref,
+                                   folderView: preservedFolder,
+                                   webPages: resolvedWebPages),
                  to: root,
                  fileSystem: fileSystem)
     }
@@ -233,6 +278,28 @@ public enum ProjectLocalStateStore {
         )
         try save(state, to: projectRoot, fileSystem: fileSystem)
         return state.folderView
+    }
+
+    /// Merge-safe web-pages list update. Preserves `sessionStoreIdentifier`.
+    @discardableResult
+    public static func updateWebPages(_ pages: [WebPageEntry],
+                                      in projectRoot: URL,
+                                      fileSystem: any FileSystem) throws -> WebPagesProjectConfig? {
+        guard var state = load(from: projectRoot, fileSystem: fileSystem) else {
+            throw FileSystemError.notFound(path: ProjectPaths.projectStateURL(in: projectRoot).path)
+        }
+        guard state.projectType.isWebPagesBacked else {
+            state.webPages = nil
+            try save(state, to: projectRoot, fileSystem: fileSystem)
+            return nil
+        }
+        let storeID = state.webPages?.sessionStoreIdentifier ?? UUID()
+        state.webPages = WebPagesProjectConfig(
+            pages: WebPageEntry.normalized(pages),
+            sessionStoreIdentifier: storeID
+        )
+        try save(state, to: projectRoot, fileSystem: fileSystem)
+        return state.webPages
     }
 
     /// Merge-safe secondary-root update for dual folder trees.

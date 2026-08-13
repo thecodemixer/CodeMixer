@@ -25,19 +25,23 @@ public struct ProjectDraft: Sendable, Hashable {
     public var secondaryFolderURL: URL?
     /// Absolute agent working directory when it differs from the project folder.
     public var workingDirectoryURL: URL?
+    /// Named URLs for `ProjectType.webPages`.
+    public var webPages: [WebPageEntry]
 
     public init(name: String,
                 projectType: ProjectType? = nil,
                 preferFreshAgentProcess: Bool = false,
                 existingFolderURL: URL? = nil,
                 secondaryFolderURL: URL? = nil,
-                workingDirectoryURL: URL? = nil) {
+                workingDirectoryURL: URL? = nil,
+                webPages: [WebPageEntry] = []) {
         self.name = name
         self.projectType = projectType
         self.preferFreshAgentProcess = preferFreshAgentProcess
         self.existingFolderURL = existingFolderURL
         self.secondaryFolderURL = secondaryFolderURL
         self.workingDirectoryURL = workingDirectoryURL
+        self.webPages = webPages
     }
 
     /// Open / Add Existing: folder chosen, type may still be unknown.

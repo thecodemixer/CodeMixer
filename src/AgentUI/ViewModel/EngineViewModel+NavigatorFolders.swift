@@ -55,7 +55,7 @@ extension EngineViewModel {
             } else {
                 detailPane = .folderBrowser(kind: kind, selectedRelativePath: nil, pendingRelativePath: nil)
             }
-        case .conversation, .dashboard:
+        case .conversation, .dashboard, .webPage:
             break
         }
     }
@@ -191,12 +191,12 @@ extension EngineViewModel {
         }
     }
 
-    /// Leaves the folder browser for the plain conversation surface. A no-op
-    /// when the folder browser isn't the active surface (in particular, it
-    /// never touches an already-active dashboard).
-    func clearFolderBrowserSurface() {
+    /// Leaves the folder browser / web-pages surface for the plain conversation
+    /// surface. A no-op when neither is active (in particular, it never touches
+    /// an already-active dashboard).
+    func clearNonConversationSurfaces() {
         switch detailPane {
-        case .folderBrowser, .folderPreviewOnly:
+        case .folderBrowser, .folderPreviewOnly, .webPage:
             detailPane = .conversation
         case .conversation, .dashboard:
             break

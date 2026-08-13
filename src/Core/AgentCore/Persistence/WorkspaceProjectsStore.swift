@@ -104,6 +104,10 @@ public actor WorkspaceProjectsStore {
         /// (e.g. missing required `projectType`). Surfaced for repair — never
         /// silently reset or auto-assigned to Claude.
         case undecodableProject(path: String, detail: String)
+        /// A `.webPages` project was registered without a page configuration.
+        /// The list may be empty, but the config (and its session-store id)
+        /// must exist before the folder is created.
+        case missingWebPagesConfiguration(name: String)
 
         public var errorDescription: String? {
             switch self {
@@ -115,6 +119,8 @@ public actor WorkspaceProjectsStore {
                 "The workspace root folder cannot be renamed from the project navigator."
             case .undecodableProject(let path, let detail):
                 "Project at \(path) could not be decoded: \(detail)."
+            case .missingWebPagesConfiguration(let name):
+                "Web pages project \(name) needs a page configuration."
             }
         }
     }
@@ -139,7 +145,8 @@ public actor WorkspaceProjectsStore {
     /// - v6: `FolderProjectKind.folderTree`
     /// - v7: `FolderProjectKind.dualFolderTree`
     /// - v8: optional `workingDirectoryPath` on agent projects
-    public static let currentSchemaVersion = 8
+    /// - v9: `ProjectType.webPages`
+    public static let currentSchemaVersion = 9
 
     struct WorkspaceEntry: Codable, Hashable {
         var workspacePath: String

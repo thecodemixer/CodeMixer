@@ -22,13 +22,28 @@ struct ProjectInfoPresentation: Equatable, Sendable {
     let preferFreshAgentProcess: Bool?
 
     static func make(from project: WorkspaceProjectsStore.ProjectRef) -> ProjectInfoPresentation {
-        make(
+        var presentation = make(
             displayName: project.displayName,
             path: project.path,
             workingDirectoryPath: project.workingDirectoryPath,
             projectType: project.projectType,
             preferFreshAgentProcess: project.preferFreshAgentProcess
         )
+        if project.projectType.isWebPagesBacked {
+            let count = ProjectLocalStateStore.load(
+                from: URL(fileURLWithPath: project.path),
+                fileSystem: SystemFileSystem()
+            )?.webPages?.pages.count ?? 0
+            presentation = ProjectInfoPresentation(
+                projectName: presentation.projectName,
+                path: presentation.path,
+                workingDirectoryPath: presentation.workingDirectoryPath,
+                categoryLabel: presentation.categoryLabel,
+                detailRows: [Row(label: "Pages", value: "\(count)")],
+                preferFreshAgentProcess: presentation.preferFreshAgentProcess
+            )
+        }
+        return presentation
     }
 
     static func make(displayName: String,
@@ -60,6 +75,8 @@ struct ProjectInfoPresentation: Equatable, Sendable {
             return [Row(label: "Default agent for new chats", value: label)]
         case .folder(let kind):
             return [Row(label: "Folder view", value: kind.displayLabel)]
+        case .webPages:
+            return [Row(label: "Pages", value: "Configured in sidebar")]
         case .custom(let ref):
             return [
                 Row(label: "Executable path", value: ref.executablePath),
@@ -103,6 +120,7 @@ extension ProjectTypeKind {
         case .cursorCLI: return .builtIn(.cursorCLI)
         case .mixed: return .mixed
         case .folder(let kind): return .folder(kind)
+        case .webPages: return .webPages
         case .custom: return .custom
         }
     }

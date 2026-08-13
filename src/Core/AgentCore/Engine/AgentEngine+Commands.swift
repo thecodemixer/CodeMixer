@@ -295,6 +295,11 @@ extension AgentEngine {
                     detail: "Folder project \(path) is opened in the folder browser, not as an agent session."
                 )
             }
+            if project.projectType.isWebPagesBacked {
+                throw AgentError.unsupportedOperation(
+                    detail: "Web pages project \(path) is opened in the web viewer, not as an agent session."
+                )
+            }
             throw AgentError.unsupportedOperation(
                 detail: "Project \(path) needs a concrete registered agent before it can be opened."
             )
@@ -516,7 +521,7 @@ extension AgentEngine {
                 return [adapter]
             }
             return []
-        case .folder:
+        case .folder, .webPages:
             return []
         case .claudeCode, .codex, .cursorCLI:
             guard let id = projectType.primaryAgentID,

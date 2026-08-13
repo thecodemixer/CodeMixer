@@ -52,7 +52,7 @@ public struct ProjectInfoSheet: View {
 
             VStack(alignment: .leading, spacing: Theme.spacing.s16) {
                 labeledValue(
-                    project.projectType.isFolderBacked ? "Display name" : "Project name",
+                    project.projectType.isAgentBacked ? "Project name" : "Display name",
                     info.projectName
                 )
                 labeledValue("Location", info.path)

@@ -198,8 +198,9 @@ extension Bootstrap {
         isPreparingWorkspace = true
         defer { isPreparingWorkspace = false }
 
-        // Folder projects are non-agent: register membership and open the browser.
-        if projectType.isFolderBacked {
+        // Folder / web-pages projects are non-agent: register membership and open
+        // the matching surface.
+        if projectType.isFolderBacked || projectType.isWebPagesBacked {
             guard let lifecycle = workspaceLifecycle else { return }
             await lifecycle.loadModelCatalogs(at: url, rootProjectType: projectType)
             let projectsStore = viewModel?.workspaceProjects
@@ -213,7 +214,18 @@ extension Bootstrap {
                     URL(fileURLWithPath: $0.path).standardizedFileURL.path
                         == url.standardizedFileURL.path
                 }) {
-                viewModel?.openFolderProject(ref, relativePath: nil)
+                if projectType.isWebPagesBacked {
+                    viewModel?.openWebPagesProject(ref)
+                } else {
+                    viewModel?.openFolderProject(ref, relativePath: nil)
+                }
+            } else if projectType.isWebPagesBacked {
+                let ref = WorkspaceProjectsStore.ProjectRef(
+                    path: url.path,
+                    displayName: url.lastPathComponent,
+                    projectType: .webPages
+                )
+                viewModel?.openWebPagesProject(ref)
             } else if let kind = projectType.folderKind {
                 let ref = WorkspaceProjectsStore.ProjectRef(
                     path: url.path,
@@ -315,9 +327,9 @@ extension Bootstrap {
     }
 
     /// Whether the project being opened has a usable model catalog. Custom /
-    /// folder projects never require a shipping catalog.
+    /// folder / web-pages projects never require a shipping catalog.
     private func isTargetProjectModelCatalogReady(url: URL, projectType: ProjectType) -> Bool {
-        guard !projectType.isFolderBacked else { return true }
+        guard projectType.isAgentBacked else { return true }
         if case .custom = projectType { return true }
         if let ref = viewModel?.projects.first(where: {
             URL(fileURLWithPath: $0.path).standardizedFileURL.path == url.standardizedFileURL.path
