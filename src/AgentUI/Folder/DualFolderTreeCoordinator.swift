@@ -20,6 +20,21 @@ enum DualFolderTreeSide: Equatable {
     case none
 }
 
+/// Whether the compare tree mirrors the primary tree's file selection.
+enum DualFolderFollowMode: Equatable {
+    case independent
+    case followPrimary
+}
+
+/// Outcome of the last mirror attempt. A path that exists on only one side is
+/// the interesting case in a compare workflow, so it gets its own state rather
+/// than collapsing into "nothing selected".
+enum DualFolderFollowStatus: Equatable {
+    case idle
+    case mirrored(String)
+    case noCounterpart(String)
+}
+
 /// Owns two independent `FolderTreeViewModel`s and the dual-surface layout.
 @MainActor
 @Observable
@@ -34,6 +49,8 @@ final class DualFolderTreeCoordinator {
     var focusedSide: DualFolderTreeSide = .none
     /// Set when the secondary root is missing / unreadable so the view can recover.
     private(set) var secondaryRootError: String?
+    private(set) var followMode: DualFolderFollowMode = .independent
+    private(set) var followStatus: DualFolderFollowStatus = .idle
 
     var layout: DualFolderTreeLayout {
         DualFolderTreeLayout.resolve(
@@ -71,7 +88,49 @@ final class DualFolderTreeCoordinator {
     func closePreviews() {
         leftModel?.select(nil)
         rightModel?.select(nil)
+        followStatus = .idle
         focusedSide = .none
+    }
+
+    func toggleFollowMode() {
+        setFollowMode(followMode == .followPrimary ? .independent : .followPrimary)
+    }
+
+    func setFollowMode(_ mode: DualFolderFollowMode) {
+        guard mode != followMode else { return }
+        followMode = mode
+        switch mode {
+        case .independent:
+            followStatus = .idle
+        case .followPrimary:
+            syncFollowedSelection()
+        }
+    }
+
+    /// Opens the primary selection's counterpart in the compare tree.
+    ///
+    /// Existence is checked on disk rather than against the compare tree's
+    /// scanned entries: the scanner truncates very large roots, and a file the
+    /// user can see on the left should still open on the right when it is
+    /// there. Ancestors are expanded so the mirrored row is actually visible.
+    func syncFollowedSelection() {
+        guard followMode == .followPrimary, let rightModel else { return }
+        guard let path = leftModel?.selectedRelativePath,
+              leftModel?.selectedEntry?.isDirectory != true else {
+            rightModel.select(nil)
+            followStatus = .idle
+            return
+        }
+        let counterpart = rightModel.absoluteURL(for: path)
+        guard fileSystem.fileExists(at: counterpart),
+              !fileSystem.isDirectory(at: counterpart) else {
+            rightModel.select(nil)
+            followStatus = .noCounterpart(path)
+            return
+        }
+        rightModel.revealPath(path)
+        rightModel.select(path)
+        followStatus = .mirrored(path)
     }
 
     /// Escape in preview mode always exits previews; in trees-only it clears

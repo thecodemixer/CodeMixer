@@ -1012,6 +1012,9 @@ struct DualFolderTreeCoordinatorTests {
             "doc.text.magnifyingglass",
             "folder",
             "magnifyingglass",
+            "link.circle",
+            "link.circle.fill",
+            "doc.badge.ellipsis",
         ]
         for symbol in chrome {
             #expect(
@@ -1086,6 +1089,110 @@ struct DualFolderTreeCoordinatorTests {
         #expect(coordinator.layout == .treesOnly)
         left.select("src/a.txt")
         #expect(coordinator.layout == .previews)
+    }
+
+    @Test("Follow mode opens the same relative path on the compare side")
+    func followMirrorsPrimarySelection() throws {
+        let fs = InMemoryFileSystem()
+        let leftRoot = TestPaths.workspace("dual-follow-left")
+        let rightRoot = TestPaths.workspace("dual-follow-right")
+        for root in [leftRoot, rightRoot] {
+            try fs.createDirectory(at: root, withIntermediates: true)
+            try fs.createDirectory(at: root.appendingPathComponent("src"),
+                                   withIntermediates: true)
+            try fs.createDirectory(at: root.appendingPathComponent("src/api"),
+                                   withIntermediates: true)
+        }
+        try fs.writeAtomically(Data("old".utf8),
+                               to: leftRoot.appendingPathComponent("src/api/client.swift"))
+        try fs.writeAtomically(Data("new".utf8),
+                               to: rightRoot.appendingPathComponent("src/api/client.swift"))
+
+        let coordinator = DualFolderTreeCoordinator(
+            primaryRoot: leftRoot,
+            secondaryRoot: rightRoot,
+            fileSystem: fs,
+            clock: FakeClock()
+        )
+        coordinator.start()
+        defer { coordinator.stop() }
+        let left = try #require(coordinator.leftModel)
+        let right = try #require(coordinator.rightModel)
+        left.entries = try FolderScanner.scan(root: leftRoot, fileSystem: fs)
+        left.rebuildTree()
+        right.entries = try FolderScanner.scan(root: rightRoot, fileSystem: fs)
+        right.rebuildTree()
+
+        // Off by default: the compare side stays where the user left it.
+        left.select("src/api/client.swift")
+        coordinator.syncFollowedSelection()
+        #expect(right.selectedRelativePath == nil)
+
+        coordinator.toggleFollowMode()
+        #expect(coordinator.followMode == .followPrimary)
+        #expect(right.selectedRelativePath == "src/api/client.swift")
+        #expect(coordinator.followStatus == .mirrored("src/api/client.swift"))
+        // Ancestors are expanded so the mirrored row is on screen.
+        #expect(right.isExpanded("src"))
+        #expect(right.isExpanded("src/api"))
+
+        coordinator.toggleFollowMode()
+        #expect(coordinator.followStatus == .idle)
+        left.select(nil)
+        left.select("src/api/client.swift")
+        coordinator.syncFollowedSelection()
+        #expect(coordinator.followStatus == .idle)
+    }
+
+    @Test("Follow mode reports a primary file with no counterpart instead of mirroring")
+    func followReportsMissingCounterpart() throws {
+        let fs = InMemoryFileSystem()
+        let leftRoot = TestPaths.workspace("dual-follow-miss-left")
+        let rightRoot = TestPaths.workspace("dual-follow-miss-right")
+        for root in [leftRoot, rightRoot] {
+            try fs.createDirectory(at: root, withIntermediates: true)
+            try fs.createDirectory(at: root.appendingPathComponent("src"),
+                                   withIntermediates: true)
+        }
+        try fs.writeAtomically(Data("only".utf8),
+                               to: leftRoot.appendingPathComponent("src/added.swift"))
+        try fs.writeAtomically(Data("both".utf8),
+                               to: leftRoot.appendingPathComponent("src/shared.swift"))
+        try fs.writeAtomically(Data("both".utf8),
+                               to: rightRoot.appendingPathComponent("src/shared.swift"))
+
+        let coordinator = DualFolderTreeCoordinator(
+            primaryRoot: leftRoot,
+            secondaryRoot: rightRoot,
+            fileSystem: fs,
+            clock: FakeClock()
+        )
+        coordinator.start()
+        defer { coordinator.stop() }
+        let left = try #require(coordinator.leftModel)
+        let right = try #require(coordinator.rightModel)
+        left.entries = try FolderScanner.scan(root: leftRoot, fileSystem: fs)
+        left.rebuildTree()
+        right.entries = try FolderScanner.scan(root: rightRoot, fileSystem: fs)
+        right.rebuildTree()
+
+        coordinator.setFollowMode(.followPrimary)
+        left.select("src/shared.swift")
+        coordinator.syncFollowedSelection()
+        #expect(right.selectedRelativePath == "src/shared.swift")
+
+        // A file that exists on one side only must not leave the previous
+        // counterpart open, which would read as a false match.
+        left.select("src/added.swift")
+        coordinator.syncFollowedSelection()
+        #expect(right.selectedRelativePath == nil)
+        #expect(coordinator.followStatus == .noCounterpart("src/added.swift"))
+
+        // A directory on the primary side is not a preview target either way.
+        left.select("src")
+        coordinator.syncFollowedSelection()
+        #expect(coordinator.followStatus == .idle)
+        #expect(coordinator.layout == .treesOnly)
     }
 
     @Test("Replacing the compare root rejects the primary root and persists a valid one")

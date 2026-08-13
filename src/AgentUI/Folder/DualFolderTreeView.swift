@@ -80,6 +80,7 @@ struct DualFolderTreeView: View {
                 .hidden()
         }
         .onChange(of: coordinator.leftModel?.selectedRelativePath) { _, _ in
+            coordinator.syncFollowedSelection()
             suppressSidebarForPreviews = (coordinator.layout == .previews)
         }
         .onChange(of: coordinator.rightModel?.selectedRelativePath) { _, _ in
@@ -366,7 +367,17 @@ struct DualFolderTreeView: View {
                              treeModel: FolderTreeViewModel,
                              minWidth: CGFloat = Theme.layout.dualFolderPreviewMinWidth) -> some View {
         let rootName = treeModel.root.lastPathComponent
-        if treeModel.selectedRelativePath == nil || treeModel.selectedEntry?.isDirectory == true {
+        if side == .right, case let .noCounterpart(path) = coordinator.followStatus {
+            ContentUnavailableView(
+                "Not in \(rootName)",
+                systemImage: "doc.badge.ellipsis",
+                description: Text("\(path) has no counterpart in \(rootName).")
+            )
+            .frame(minWidth: minWidth)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .layoutPriority(1)
+            .accessibilityLabel("\(path) has no counterpart in \(rootName)")
+        } else if treeModel.selectedRelativePath == nil || treeModel.selectedEntry?.isDirectory == true {
             ContentUnavailableView(
                 "Select a file",
                 systemImage: "doc.text.magnifyingglass",
@@ -421,6 +432,9 @@ struct DualFolderTreeView: View {
             Text("\(treeModel.filterMatchCount) of \(treeModel.fileCount)")
                 .font(Theme.typography.caption)
                 .foregroundStyle(Theme.text.tertiary)
+            if side == .right {
+                followToggle(coordinator)
+            }
             Button {
                 coordinator.focus(side)
                 treeModel.showFilters.toggle()
@@ -443,6 +457,25 @@ struct DualFolderTreeView: View {
             .accessibilityLabel(side == .left ? "Refresh primary folder" : "Refresh compare folder")
         }
         .panelHeaderChrome(verticalPadding: Theme.spacing.s8)
+    }
+
+    /// Only the compare side offers this: the primary tree is the one the user
+    /// navigates, so following is a property of the side that tags along.
+    private func followToggle(_ coordinator: DualFolderTreeCoordinator) -> some View {
+        let following = coordinator.followMode == .followPrimary
+        return Button {
+            coordinator.focus(.right)
+            coordinator.toggleFollowMode()
+        } label: {
+            Image(systemName: following ? "link.circle.fill" : "link.circle")
+                .foregroundStyle(following ? Theme.accent.solid : Theme.text.secondary)
+        }
+        .buttonStyle(.plain)
+        .help(following
+              ? "Following the primary tree — click a file on the left to open it here"
+              : "Follow the primary tree's selection")
+        .accessibilityLabel("Follow primary folder selection")
+        .accessibilityAddTraits(following ? [.isSelected] : [])
     }
 
     private func searchBar(_ treeModel: FolderTreeViewModel,
