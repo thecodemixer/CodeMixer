@@ -24,7 +24,7 @@ private struct FakeCustomACPServer: ACPTwinServer {
     var sessionID = UUID().uuidString
     var workspacePath: String?
     var pendingPromptID: JSONValue?
-    var currentModeID = "migrate"
+    var currentModeID = "implement"
     var sentReverseSessionNew = false
 
     init(scenario: ACPTwinScenario) {
@@ -62,7 +62,7 @@ private struct FakeCustomACPServer: ACPTwinServer {
         case "session/new":
             workspacePath = params["cwd"]?.stringValue
             sessionID = UUID().uuidString
-            currentModeID = "migrate"
+            currentModeID = "implement"
             var replies: [Data] = [ACPRPCCodec.response(
                 id: id,
                 result: .object([
@@ -119,7 +119,7 @@ private struct FakeCustomACPServer: ACPTwinServer {
                     sessionInfoUpdate(meta: [
                         "needsAttention": .bool(true),
                         "archived": .bool(false),
-                        "codemixer.dev/overviewSession": .bool(true),
+                        CodemixerACPKeys.overviewSession: .bool(true),
                     ]),
                 ] + completePrompt(reply: Self.defaultReply)
             case .degradedArchived:
@@ -172,9 +172,9 @@ private struct FakeCustomACPServer: ACPTwinServer {
             "currentModeId": .string(currentModeID),
             "availableModes": .array([
                 .object([
-                    "id": .string("migrate"),
-                    "name": .string("Migrate"),
-                    "description": .string("Run schema and data migrations"),
+                    "id": .string("implement"),
+                    "name": .string("Implement"),
+                    "description": .string("Apply planned changes across the project"),
                 ]),
                 .object([
                     "id": .string("document"),
@@ -219,8 +219,8 @@ private struct FakeCustomACPServer: ACPTwinServer {
         ]
         if scenario.advertisesDashboard {
             result["_meta"] = .object([
-                "codemixer.dev/dashboardUrl": .string("http://127.0.0.1:8423/dashboard"),
-                "codemixer.dev/dashboardTitle": .string("Fake Migration Dashboard"),
+                CodemixerACPKeys.dashboardUrl: .string("http://127.0.0.1:8423/dashboard"),
+                CodemixerACPKeys.dashboardTitle: .string("Fake Custom Dashboard"),
             ])
         }
         if scenario == .auth || scenario == .authFail, !authenticated {

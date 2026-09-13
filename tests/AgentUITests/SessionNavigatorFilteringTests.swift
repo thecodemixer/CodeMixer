@@ -14,7 +14,7 @@ struct SessionNavigatorFilteringTests {
                 id: "control-new",
                 agentID: .other,
                 workspace: workspace,
-                title: "Migration Dashboard",
+                title: "Agent Dashboard",
                 lastActivity: Date(timeIntervalSince1970: 2),
                 messageCount: 1,
                 isOverview: true,
@@ -24,7 +24,7 @@ struct SessionNavigatorFilteringTests {
                 id: "control-old",
                 agentID: .other,
                 workspace: workspace,
-                title: "Migration Dashboard",
+                title: "Agent Dashboard",
                 lastActivity: Date(timeIntervalSince1970: 1),
                 messageCount: 1,
                 isOverview: false
@@ -42,7 +42,7 @@ struct SessionNavigatorFilteringTests {
         #expect(chats.map(\.id) == ["file:Orders.cs"])
     }
 
-    @Test("chat list drops archived rows so a migration Restart clears the navigator")
+    @Test("chat list drops archived rows so a dashboard Restart clears the navigator")
     func hidesArchivedSessions() {
         let workspace = URL(fileURLWithPath: "/tmp/mig")
         let sessions = [
@@ -77,7 +77,7 @@ struct SessionNavigatorFilteringTests {
                 id: "a",
                 agentID: .other,
                 workspace: workspace,
-                title: "Migration Dashboard",
+                title: "Agent Dashboard",
                 lastActivity: Date(timeIntervalSince1970: 2),
                 messageCount: 1,
                 isOverview: true
@@ -86,7 +86,7 @@ struct SessionNavigatorFilteringTests {
                 id: "b",
                 agentID: .other,
                 workspace: workspace,
-                title: "Migration Dashboard",
+                title: "Agent Dashboard",
                 lastActivity: Date(timeIntervalSince1970: 1),
                 messageCount: 1,
                 isOverview: true,

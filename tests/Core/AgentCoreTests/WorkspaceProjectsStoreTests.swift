@@ -913,6 +913,49 @@ struct WorkspaceProjectsStoreTests {
         #expect(catalog?.projects.first?.workingDirectoryPath == source.path)
     }
 
+    @Test("setCustomAgentExecutable writes project.json and syncs workspace index")
+    func setCustomAgentExecutablePersists() async throws {
+        let fs = InMemoryFileSystem()
+        let store = makeStore(fs: fs)
+        let exe = TestPaths.workspace("bin/custom-acp")
+        try fs.createDirectory(at: exe.deletingLastPathComponent(), withIntermediates: true)
+        try fs.writeAtomically(Data("stub".utf8), to: exe)
+        let custom = CustomAgentRef(
+            id: UUID().uuidString,
+            displayName: "Mixer",
+            transport: .agentClientProtocol,
+            executablePath: "/old/custom-acp",
+            arguments: ["acp"]
+        )
+        let ref = try await store.createProject(
+            name: "convert",
+            projectType: .custom(custom),
+            in: workspace
+        )
+        let updated = try await store.setCustomAgentExecutable(
+            path: ref.path,
+            executablePath: exe.path,
+            in: workspace
+        )
+        guard case .custom(let saved) = updated.projectType else {
+            Issue.record("expected custom project type")
+            return
+        }
+        #expect(saved.executablePath == exe.path)
+        let loaded = ProjectLocalStateStore.load(from: URL(fileURLWithPath: ref.path), fileSystem: fs)
+        guard case .custom(let disk) = loaded?.projectType else {
+            Issue.record("expected custom project type on disk")
+            return
+        }
+        #expect(disk.executablePath == exe.path)
+        let catalog = WorkspaceLocalStateStore.load(from: workspace, fileSystem: fs)
+        guard case .custom(let indexed) = catalog?.projects.first?.projectType else {
+            Issue.record("expected custom project type in workspace index")
+            return
+        }
+        #expect(indexed.executablePath == exe.path)
+    }
+
     @Test("old project.json without workingDirectoryPath still loads")
     func oldProjectJSONWithoutWorkingDirectoryLoads() throws {
         let fs = InMemoryFileSystem()

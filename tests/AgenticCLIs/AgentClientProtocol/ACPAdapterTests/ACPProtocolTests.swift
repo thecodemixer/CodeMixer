@@ -1,4 +1,5 @@
 @testable import AgentClientProtocol
+import AgentProtocol
 import Foundation
 import Testing
 
@@ -139,8 +140,8 @@ struct ACPProtocolTests {
         let parsed = ACPInitializeResult.parse(.object([
             "agentInfo": .object([
                 "_meta": .object([
-                    "codemixer.dev/dashboardUrl": .string("http://127.0.0.1:8423/dashboard"),
-                    "codemixer.dev/dashboardTitle": .string("Dashboard"),
+                    CodemixerACPKeys.dashboardUrl: .string("http://127.0.0.1:8423/dashboard"),
+                    CodemixerACPKeys.dashboardTitle: .string("Dashboard"),
                 ]),
             ]),
             "authMethods": .array([
@@ -151,5 +152,19 @@ struct ACPProtocolTests {
         #expect(parsed.dashboardURL?.absoluteString == "http://127.0.0.1:8423/dashboard")
         #expect(parsed.dashboardTitle == "Dashboard")
         #expect(parsed.authMethodID == "device")
+    }
+
+    @Test("legacy dashboard metadata does not activate the dashboard")
+    func legacyDashboardMetadataIsRejected() {
+        let legacyPrefix = "codemixer" + ".dev"
+        let parsed = ACPInitializeResult.parse(.object([
+            "_meta": .object([
+                "\(legacyPrefix)/dashboardUrl": .string("http://127.0.0.1:8423/dashboard"),
+                "\(legacyPrefix)/dashboardTitle": .string("Dashboard"),
+            ]),
+        ]))
+
+        #expect(parsed.dashboardURL == nil)
+        #expect(parsed.dashboardTitle == nil)
     }
 }

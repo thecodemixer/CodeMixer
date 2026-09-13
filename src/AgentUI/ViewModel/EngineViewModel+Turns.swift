@@ -2,8 +2,8 @@ import Foundation
 import AgentCore
 
 /// Derives the chat workbench's turn / phase model from the flat `messages`
-/// array. Nothing here is stored — `conversationTurns` is a computed
-/// projection so it can never drift from the source of truth.
+/// array. Hot projections are revision-keyed so repeated SwiftUI reads reuse
+/// their result without letting cached values drift from source state.
 public extension EngineViewModel {
 
     /// One user prompt through its agent reply — the index rail's row unit.
@@ -46,7 +46,7 @@ public extension EngineViewModel {
     }
 
     /// One concrete occurrence of a native phase marker in the rail. `phase.id`
-    /// is the migration status (`reviewing`, `fixing`, …) and can repeat across
+    /// is the pipeline status (`reviewing`, `fixing`, …) and can repeat across
     /// rounds, so rail selection uses this occurrence id instead.
     struct RailPhaseOccurrence: Sendable, Identifiable, Hashable {
         public let id: String
@@ -56,11 +56,20 @@ public extension EngineViewModel {
         public let isLive: Bool
     }
 
-    /// Splits `messages` on `.user` boundaries. O(messages.count) per access:
-    /// sessions stay in the hundreds of rows, well under a frame budget, so
-    /// this trades a small, easily-verified linear scan for the complexity of
-    /// tracking turn boundaries incrementally at every append site.
+    /// Splits `messages` on `.user` boundaries. Reuses the prior projection
+    /// until messages, tool state, activity, or phase markers change.
     var conversationTurns: [ConversationTurn] {
+        if let cachedConversationTurns,
+           cachedConversationTurns.revision == conversationTurnsRevision {
+            return cachedConversationTurns.value
+        }
+        let turns = projectConversationTurns()
+        cachedConversationTurns = (conversationTurnsRevision, turns)
+        conversationTurnsProjectionCount += 1
+        return turns
+    }
+
+    private func projectConversationTurns() -> [ConversationTurn] {
         guard !messages.isEmpty else { return [] }
         var turns: [ConversationTurn] = []
         var start = 0
@@ -122,7 +131,7 @@ public extension EngineViewModel {
     ///
     /// Uses the phase's native message-index span. Never anchors on
     /// `messages[nextPhaseStart]` for an empty span — that index belongs to
-    /// the *next* phase (common for completion statuses like `migrated` that
+    /// the *next* phase (common for completion statuses like `implemented` that
     /// share an index with `reviewing`).
     func anchorMessageID(forPhaseID id: String) -> String? {
         guard let span = phaseMessageSpan(forPhaseID: id) else { return nil }
@@ -231,7 +240,7 @@ public extension EngineViewModel {
     /// Turns that belong to a phase by native message-index span.
     ///
     /// A real user turn appears under every phase its message range overlaps
-    /// (so clicking Migrating still shows a pipeline turn that started in Plan).
+    /// (so clicking Implementing still shows a pipeline turn that started in Plan).
     /// Custom ACP file sessions often have only a synthetic leading turn — those
     /// are clipped into a phase-local row from the messages inside the span so
     /// expanding a phase is never empty when that phase produced work.
@@ -273,6 +282,17 @@ public extension EngineViewModel {
     /// work lane so clicking a phase refreshes tools on the right, not just
     /// prose.
     var effectiveWorkToolCalls: [ToolCallEntry] {
+        if let cachedEffectiveWorkToolCalls,
+           cachedEffectiveWorkToolCalls.revision == effectiveWorkToolCallsRevision {
+            return cachedEffectiveWorkToolCalls.value
+        }
+        let toolCalls = projectEffectiveWorkToolCalls()
+        cachedEffectiveWorkToolCalls = (effectiveWorkToolCallsRevision, toolCalls)
+        effectiveWorkToolCallsProjectionCount += 1
+        return toolCalls
+    }
+
+    private func projectEffectiveWorkToolCalls() -> [ToolCallEntry] {
         if hasPhaseData, let id = effectiveSelectedPhaseID {
             return toolCalls(forPhaseID: id)
         }
@@ -363,12 +383,12 @@ public extension EngineViewModel {
     }
 
     /// 0...1 fill fraction for the rail's edge hairline, positioned by the
-    /// current phase's *group* (Plan/Migrate/Review/Fix/Verify) rather than
+    /// current phase's *group* (Plan/Implement/Review/Fix/Verify) rather than
     /// the vendor's finer-grained status — keeps the hairline agent-agnostic
     /// instead of overfitting to one Custom ACP tool's status count.
     var currentPhaseProgressFraction: Double? {
         guard let group = phaseMarkers.last?.phase.group else { return nil }
-        let order: [SessionPhase.Group] = [.plan, .migrate, .review, .fix, .verify]
+        let order: [SessionPhase.Group] = [.plan, .implement, .review, .fix, .verify]
         guard let idx = order.firstIndex(of: group) else { return nil }
         return Double(idx) / Double(order.count - 1)
     }

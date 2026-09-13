@@ -218,7 +218,7 @@ extension EngineViewModel {
     }
 
     func updateSessionAttention(sessionID: String, needsAttention: Bool) {
-        // Migration Restart / resolved reviews clear attention — drop the live
+        // Dashboard Restart / resolved reviews clear attention — drop the live
         // composer card even if the sidebar row was already archived away.
         if !needsAttention {
             pendingPermissionsBySession.removeValue(forKey: sessionID)

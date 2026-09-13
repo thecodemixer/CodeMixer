@@ -79,7 +79,6 @@ struct ProjectInfoPresentation: Equatable, Sendable {
             return [Row(label: "Pages", value: "Configured in sidebar")]
         case .custom(let ref):
             return [
-                Row(label: "Executable path", value: ref.executablePath),
                 Row(label: "Arguments", value: displayArguments(ref.arguments)),
                 Row(label: "Transport", value: transportLabel(ref.transport.kind)),
             ]

@@ -17,6 +17,7 @@ public final class RecordingMockAdapter: AgentAdapter, @unchecked Sendable {
         case permissionResponse(PermissionDecision, promptID: PermissionPromptID)
         case a2uiAction(surfaceID: String, eventName: String)
         case a2uiClientError(surfaceID: String, code: String)
+        case persistedParkedSessionWork(sessionID: String)
     }
 
     public let id: AgentID = .other
@@ -89,6 +90,16 @@ public final class RecordingMockAdapter: AgentAdapter, @unchecked Sendable {
                 self.lock.unlock()
             }
         }
+    }
+
+    public func persistParkedSessionWork(sessionID: String) async {
+        record(.persistedParkedSessionWork(sessionID: sessionID))
+    }
+
+    private func record(_ event: Recorded) {
+        lock.lock()
+        _recorded.append(event)
+        lock.unlock()
     }
 
     public func encodeUserPrompt(_ text: String) -> Data {

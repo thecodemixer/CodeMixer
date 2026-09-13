@@ -173,6 +173,9 @@ public protocol AgentAdapter: Sendable {
 
     /// Stable directory namespace for Codemixer-owned history.
     var historyNamespace: String { get }
+    /// Flush coalesced work for a parked session before the engine restores
+    /// that session's project-local transcript.
+    func persistParkedSessionWork(sessionID: String) async
     /// One-shot vendor catalog import used only when an existing project is
     /// added to a workspace.
     func importSessionCatalog(
@@ -251,6 +254,8 @@ public protocol AgentAdapter: Sendable {
 
 public extension AgentAdapter {
     var historyNamespace: String { id.rawValue }
+
+    func persistParkedSessionWork(sessionID: String) async {}
 
     func importSessionCatalog(
         workspace: URL,

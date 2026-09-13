@@ -170,15 +170,15 @@ struct CustomACPAdapterTests {
             continuation: outputContinuation,
             sessionID: "composer-sess",
             modes: [
-                ["id": "migrate", "name": "Migrate", "description": "Migrations"],
+                ["id": "implement", "name": "Implement", "description": "Implement changes"],
                 ["id": "document", "name": "Document", "description": "Docs"],
                 ["id": "agent", "name": "Agent"],
             ],
-            currentModeID: "migrate"
+            currentModeID: "implement"
         )
 
         let sawModes = await pollUntil(timeout: .seconds(2)) {
-            Set(adapter.availableAgentModes().map(\.id)) == Set(["migrate", "document", "agent"])
+            Set(adapter.availableAgentModes().map(\.id)) == Set(["implement", "document", "agent"])
         }
         #expect(sawModes)
 
@@ -186,8 +186,8 @@ struct CustomACPAdapterTests {
         let cached = factory.makeAdapter(for: ref) as? CustomACPAdapter
         #expect(cached != nil)
         #expect(ObjectIdentifier(adapter) == ObjectIdentifier(cached!))
-        #expect(Set(cached!.availableAgentModes().map(\.id)) == Set(["migrate", "document", "agent"]))
-        #expect(cached!.availableAgentModes().first?.id == "migrate")
+        #expect(Set(cached!.availableAgentModes().map(\.id)) == Set(["implement", "document", "agent"]))
+        #expect(cached!.availableAgentModes().first?.id == "implement")
     }
 
     @Test("encodeCommand remaps /document slash to session/set_mode after session modes load")
@@ -227,18 +227,18 @@ struct CustomACPAdapterTests {
             continuation: outputContinuation,
             sessionID: "wire-sess",
             modes: [
-                ["id": "migrate", "name": "Migrate", "description": "Migrations"],
+                ["id": "implement", "name": "Implement", "description": "Implement changes"],
                 ["id": "document", "name": "Document", "description": "Docs"],
                 ["id": "agent", "name": "Agent"],
             ],
-            currentModeID: "migrate"
+            currentModeID: "implement"
         )
 
         let sawModes = await pollUntil(timeout: .seconds(2)) {
-            Set(adapter.availableAgentModes().map(\.id)) == Set(["migrate", "document", "agent"])
+            Set(adapter.availableAgentModes().map(\.id)) == Set(["implement", "document", "agent"])
         }
         #expect(sawModes)
-        #expect(adapter.availableAgentModes().first?.id == "migrate")
+        #expect(adapter.availableAgentModes().first?.id == "implement")
         #expect(adapter.slashCommandCatalog.contains {
             $0.name == "/document" && $0.summary == "Docs"
         })

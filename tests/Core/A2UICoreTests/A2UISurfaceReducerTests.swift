@@ -16,7 +16,7 @@ struct A2UISurfaceReducerTests {
         A2UIServerBatch(
             agentID: agentID,
             transcriptKey: .init(projectRootPath: "/tmp/project", namespace: "custom-acp", sessionID: "s1"),
-            resourceURI: "a2ui://migration/plan/example",
+            resourceURI: "a2ui://surface/plan/example",
             items: items,
             recordedAt: date
         )
@@ -103,8 +103,8 @@ struct A2UISurfaceReducerTests {
         #expect(result.surfaces["s"] != nil)
     }
 
-    @Test("Migration review-duel wire JSON reduces to a renderable Codemixer surface")
-    func migrationReviewDuelWireIsRenderable() throws {
+    @Test("Review-duel wire JSON reduces to a renderable Codemixer surface")
+    func reviewDuelWireIsRenderable() throws {
         // Exact shape a reference Custom ACP review-duel surface emits
         // (including historical Material-style variants that must still map).
         let wire = """
@@ -112,7 +112,7 @@ struct A2UISurfaceReducerTests {
           {
             "version": "v0.9.1",
             "createSurface": {
-              "surfaceId": "migration.review-duel.src_Order.cs",
+              "surfaceId": "review-duel.src_Order.cs",
               "catalogId": "\(A2UISchemaProfile.testScopedCatalogID)",
               "sendDataModel": false
             }
@@ -120,7 +120,7 @@ struct A2UISurfaceReducerTests {
           {
             "version": "v0.9.1",
             "updateComponents": {
-              "surfaceId": "migration.review-duel.src_Order.cs",
+              "surfaceId": "review-duel.src_Order.cs",
               "components": [
                 { "id": "root", "component": "Card", "child": "outer" },
                 { "id": "outer", "component": "Column", "children": ["title", "row"] },
@@ -142,7 +142,7 @@ struct A2UISurfaceReducerTests {
         let items = messages.enumerated().map { A2UIServerBatch.Item(index: $0.offset, message: $0.element) }
         let result = A2UISurfaceReducer.apply(batch(items: items), to: [:], at: Date())
         #expect(result.outcomes.allSatisfy { $0.applied })
-        let surface = try #require(result.surfaces["migration.review-duel.src_Order.cs"])
+        let surface = try #require(result.surfaces["review-duel.src_Order.cs"])
         #expect(surface.isRenderable)
         #expect(surface.rootComponentID == "root")
         guard case .text(let titleProps) = surface.components["title"]?.body else {
@@ -158,7 +158,7 @@ struct A2UISurfaceReducerTests {
     }
 
     @Test("the review duel's severity glyphs and column rule survive the wire")
-    func migrationReviewDuelSeverityWireIsRenderable() throws {
+    func reviewDuelSeverityWireIsRenderable() throws {
         // The scannable shape `reviewDuelSurface` emits today: a vertical rule
         // between the two reviewer columns, and each finding behind a severity
         // icon whose name is what CodeMixer tints.

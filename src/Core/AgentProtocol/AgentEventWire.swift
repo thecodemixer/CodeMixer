@@ -52,6 +52,10 @@ public enum AgentEventWire: Sendable, Codable, Hashable {
     case agentDashboard(url: String, title: String?)
     case sessionAttentionChanged(sessionID: String, title: String, needsAttention: Bool)
     case sessionHistoryRestored(sessionID: String)
+    indirect case sessionHistoryReplayChunk(sessionID: String,
+                                            index: Int,
+                                            total: Int,
+                                            events: [AgentEventWire])
     case sessionPromptReady(sessionID: String)
     case sessionsListed(projectPath: String, sessions: [WireSessionSummary])
     case historyImportProgress(projectPath: String, completed: Int, total: Int)

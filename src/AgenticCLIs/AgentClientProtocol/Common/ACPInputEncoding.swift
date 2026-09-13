@@ -29,12 +29,12 @@ public enum ACPInputEncoding {
                     ]),
                     "terminal": .bool(true),
                     "_meta": .object([
-                        "codemixer.dev/sessionNew": .bool(true),
+                        CodemixerACPKeys.sessionNew: .bool(true),
                         // Test-scoped catalog id only: the official Basic
                         // Catalog id is not advertised in production until
                         // the complete component/a11y/security matrix passes
                         // (plan §1/§5 "no partial-component claim").
-                        A2UISchemaProfile.clientCapabilitiesMetaKey: .object([
+                        CodemixerACPKeys.a2ui: .object([
                             "supportedVersions": .array(
                                 A2UISchemaProfile.supportedVersions.sorted().map(JSONValue.string)
                             ),

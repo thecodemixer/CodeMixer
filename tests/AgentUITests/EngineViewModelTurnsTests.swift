@@ -89,12 +89,12 @@ struct EngineViewModelTurnsTests {
         await bus.publish(.sessionStarted(sessionID: "file-1", model: nil, cwd: TestPaths.underTemporary("proj")))
         #expect(!vm.hasPhaseData)
 
-        await bus.publish(.sessionPhaseChanged(sessionID: "file-1", phase: .fixture("migrating", "Migrate", 2, .migrate)))
-        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: UUID().uuidString), text: "migrate orders.ts"))
+        await bus.publish(.sessionPhaseChanged(sessionID: "file-1", phase: .fixture("implementing", "Implement", 2, .implement)))
+        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: UUID().uuidString), text: "implement orders.ts"))
         await drain()
 
         #expect(vm.hasPhaseData)
-        #expect(vm.conversationTurns.last?.phase?.id == "migrating")
+        #expect(vm.conversationTurns.last?.phase?.id == "implementing")
 
         await bus.shutdown()
     }
@@ -111,9 +111,9 @@ struct EngineViewModelTurnsTests {
         await bus.publish(.assistantText(id: UUID().uuidString, blockID: "a",
                                          text: #"{"plan":"x"}"#, isFinal: true))
         await bus.publish(.sessionPhaseChanged(sessionID: "file-1",
-                                               phase: .fixture("migrating", "Migrate", 1, .migrate)))
+                                               phase: .fixture("implementing", "Implement", 1, .implement)))
         await bus.publish(.assistantText(id: UUID().uuidString, blockID: "b",
-                                         text: "export const migrated = true;", isFinal: true))
+                                         text: "export const implemented = true;", isFinal: true))
         await bus.publish(.sessionPhaseChanged(sessionID: "file-1",
                                                phase: .fixture("reviewing", "Review", 2, .review)))
         await bus.publish(.assistantText(id: UUID().uuidString, blockID: "c",
@@ -121,23 +121,23 @@ struct EngineViewModelTurnsTests {
         await drain()
 
         let phaseIDs = vm.phaseMarkers.map(\.phase.id)
-        #expect(phaseIDs == ["planned", "migrating", "reviewing"])
+        #expect(phaseIDs == ["planned", "implementing", "reviewing"])
         #expect(vm.hasPhaseData)
         // Rail is phase-native from markers — not a turn-grouping projection.
-        #expect(vm.railPhases.map(\.id) == ["planned", "migrating", "reviewing"])
-        #expect(vm.railPhaseOccurrences.map(\.phase.id) == ["planned", "migrating", "reviewing"])
+        #expect(vm.railPhases.map(\.id) == ["planned", "implementing", "reviewing"])
+        #expect(vm.railPhaseOccurrences.map(\.phase.id) == ["planned", "implementing", "reviewing"])
         #expect(vm.railPhaseOccurrence(for: vm.effectiveSelectedPhaseID ?? "")?.phase.id == "reviewing")
         // Assistant-only spans still expose a phase-local row when expanded.
         #expect(!vm.turnsForEffectivePhase.isEmpty)
         #expect(vm.turnsForEffectivePhase.first?.promptText?.contains("review") == true)
-        #expect(Set(vm.phaseMarkers.map(\.phase.label)) == ["Plan", "Migrate", "Review"])
+        #expect(Set(vm.phaseMarkers.map(\.phase.label)) == ["Plan", "Implement", "Review"])
 
-        vm.selectPhase("migrating")
-        #expect(vm.railPhaseOccurrence(for: vm.effectiveSelectedPhaseID ?? "")?.phase.id == "migrating")
-        #expect(vm.turnsForEffectivePhase.first?.promptText?.contains("migrated") == true)
-        let migratingMessageText = vm.messageIndices(forPhaseID: vm.effectiveSelectedPhaseID ?? "")
+        vm.selectPhase("implementing")
+        #expect(vm.railPhaseOccurrence(for: vm.effectiveSelectedPhaseID ?? "")?.phase.id == "implementing")
+        #expect(vm.turnsForEffectivePhase.first?.promptText?.contains("implemented") == true)
+        let implementingMessageText = vm.messageIndices(forPhaseID: vm.effectiveSelectedPhaseID ?? "")
             .compactMap { vm.messages[$0].textContent }
-        #expect(migratingMessageText == ["export const migrated = true;"])
+        #expect(implementingMessageText == ["export const implemented = true;"])
 
         await bus.shutdown()
     }
@@ -151,24 +151,24 @@ struct EngineViewModelTurnsTests {
         await bus.publish(.sessionStarted(sessionID: "file-1", model: nil, cwd: TestPaths.underTemporary("proj")))
         await bus.publish(.sessionPhaseChanged(sessionID: "file-1",
                                                phase: .fixture("planned", "Plan", 0, .plan)))
-        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: UUID().uuidString), text: "plan the migration"))
+        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: UUID().uuidString), text: "plan the change"))
         await bus.publish(.sessionPhaseChanged(sessionID: "file-1",
-                                               phase: .fixture("migrating", "Migrate", 1, .migrate)))
-        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: UUID().uuidString), text: "migrate orders.ts"))
+                                               phase: .fixture("implementing", "Implement", 1, .implement)))
+        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: UUID().uuidString), text: "implement orders.ts"))
         await bus.publish(.sessionPhaseChanged(sessionID: "file-1",
                                                phase: .fixture("reviewing", "Review", 2, .review)))
         await bus.publish(.userTurn(id: AdapterTurnID(rawValue: UUID().uuidString), text: "review the diff"))
         await drain()
 
-        #expect(vm.railPhases.map(\.id) == ["planned", "migrating", "reviewing"])
+        #expect(vm.railPhases.map(\.id) == ["planned", "implementing", "reviewing"])
         #expect(vm.railPhaseOccurrence(for: vm.effectiveSelectedPhaseID ?? "")?.phase.id == "reviewing")
         #expect(vm.turnsForEffectivePhase.map(\.promptText) == ["review the diff"])
-        #expect(vm.turns(forPhaseID: "planned").map(\.promptText) == ["plan the migration"])
-        #expect(vm.turns(forPhaseID: "migrating").map(\.promptText) == ["migrate orders.ts"])
+        #expect(vm.turns(forPhaseID: "planned").map(\.promptText) == ["plan the change"])
+        #expect(vm.turns(forPhaseID: "implementing").map(\.promptText) == ["implement orders.ts"])
 
         vm.selectPhase("planned")
         #expect(vm.railPhaseOccurrence(for: vm.effectiveSelectedPhaseID ?? "")?.phase.id == "planned")
-        #expect(vm.turnsForEffectivePhase.map(\.promptText) == ["plan the migration"])
+        #expect(vm.turnsForEffectivePhase.map(\.promptText) == ["plan the change"])
 
         let liveAnchor = vm.selectPhase("reviewing")
         #expect(vm.isFollowingLivePhase)
@@ -194,18 +194,18 @@ struct EngineViewModelTurnsTests {
         await bus.publish(.assistantText(id: UUID().uuidString, blockID: "a",
                                          text: "planning…", isFinal: false))
         await bus.publish(.sessionPhaseChanged(sessionID: "file-1",
-                                               phase: .fixture("migrating", "Migrate", 1, .migrate)))
+                                               phase: .fixture("implementing", "Implement", 1, .implement)))
         await bus.publish(.assistantText(id: UUID().uuidString, blockID: "a",
-                                         text: "planning… migrating…", isFinal: false))
+                                         text: "planning… implementing…", isFinal: false))
         await drain()
 
         #expect(vm.phaseMessageSpan(forPhaseID: "planned") != nil)
-        #expect(vm.phaseMessageSpan(forPhaseID: "migrating") != nil)
+        #expect(vm.phaseMessageSpan(forPhaseID: "implementing") != nil)
         // Prompt started in Plan.
         #expect(vm.turns(forPhaseID: "planned").map(\.promptText) == ["run the pipeline"])
-        // Same running turn still appears under the live Migrate phase.
-        #expect(vm.railPhaseOccurrence(for: vm.livePhaseID ?? "")?.phase.id == "migrating")
-        #expect(vm.turns(forPhaseID: "migrating").map(\.id) == [turnID])
+        // Same running turn still appears under the live Implement phase.
+        #expect(vm.railPhaseOccurrence(for: vm.livePhaseID ?? "")?.phase.id == "implementing")
+        #expect(vm.turns(forPhaseID: "implementing").map(\.id) == [turnID])
         #expect(vm.turnsForEffectivePhase.map(\.id) == [turnID])
 
         await bus.shutdown()
@@ -219,14 +219,14 @@ struct EngineViewModelTurnsTests {
 
         await bus.publish(.sessionStarted(sessionID: "file-1", model: nil, cwd: TestPaths.underTemporary("proj")))
         await bus.publish(.sessionPhaseChanged(sessionID: "file-1",
-                                               phase: .fixture("migrating", "Migrating", 2, .migrate)))
-        let migrateBubble = UUID()
-        await bus.publish(.assistantText(id: migrateBubble.uuidString, blockID: "m",
-                                         text: "migrated code", isFinal: true))
+                                               phase: .fixture("implementing", "Implementing", 2, .implement)))
+        let implementBubble = UUID()
+        await bus.publish(.assistantText(id: implementBubble.uuidString, blockID: "m",
+                                         text: "implemented code", isFinal: true))
         // Completion status shares the next phase's start index when no messages
-        // land between `migrated` and `reviewing` — classic off-by-one scroll.
+        // land between `implemented` and `reviewing` — classic off-by-one scroll.
         await bus.publish(.sessionPhaseChanged(sessionID: "file-1",
-                                               phase: .fixture("migrated", "Migrated", 3, .migrate)))
+                                               phase: .fixture("implemented", "Implemented", 3, .implement)))
         await bus.publish(.sessionPhaseChanged(sessionID: "file-1",
                                                phase: .fixture("reviewing", "Reviewing", 4, .review)))
         let reviewBubble = UUID()
@@ -234,14 +234,14 @@ struct EngineViewModelTurnsTests {
                                          text: "reviewer verdict", isFinal: true))
         await drain()
 
-        let migratedAnchor = vm.anchorMessageID(forPhaseID: "migrated")
+        let implementedAnchor = vm.anchorMessageID(forPhaseID: "implemented")
         let reviewingAnchor = vm.anchorMessageID(forPhaseID: "reviewing")
-        let migratingAnchor = vm.anchorMessageID(forPhaseID: "migrating")
+        let implementingAnchor = vm.anchorMessageID(forPhaseID: "implementing")
 
-        #expect(migratingAnchor == "asst-\(migrateBubble)")
-        #expect(migratedAnchor == "asst-\(migrateBubble)")
+        #expect(implementingAnchor == "asst-\(implementBubble)")
+        #expect(implementedAnchor == "asst-\(implementBubble)")
         #expect(reviewingAnchor == "asst-\(reviewBubble)")
-        #expect(migratedAnchor != reviewingAnchor)
+        #expect(implementedAnchor != reviewingAnchor)
 
         await bus.shutdown()
     }
@@ -254,23 +254,23 @@ struct EngineViewModelTurnsTests {
 
         await bus.publish(.sessionStarted(sessionID: "file-1", model: nil, cwd: TestPaths.underTemporary("proj")))
         let planned = SessionPhase.fixture("planned", "Plan", 0, .plan)
-        let migrating = SessionPhase.fixture("migrating", "Migrate", 1, .migrate)
+        let implementing = SessionPhase.fixture("implementing", "Implement", 1, .implement)
         let reviewing = SessionPhase.fixture("reviewing", "Review", 2, .review)
         let fixing = SessionPhase.fixture("fixing", "Fix", 3, .fix)
 
-        for phase in [planned, migrating, reviewing] {
+        for phase in [planned, implementing, reviewing] {
             await bus.publish(.sessionPhaseChanged(sessionID: "file-1", phase: phase))
         }
         await drain()
-        #expect(vm.phaseMarkers.map(\.phase.id) == ["planned", "migrating", "reviewing"])
+        #expect(vm.phaseMarkers.map(\.phase.id) == ["planned", "implementing", "reviewing"])
 
-        for phase in [planned, migrating, reviewing] {
+        for phase in [planned, implementing, reviewing] {
             await bus.publish(.sessionPhaseChanged(sessionID: "file-1", phase: phase))
         }
         await bus.publish(.sessionPhaseChanged(sessionID: "file-1", phase: fixing))
         await drain()
 
-        #expect(vm.phaseMarkers.map(\.phase.id) == ["planned", "migrating", "reviewing", "fixing"])
+        #expect(vm.phaseMarkers.map(\.phase.id) == ["planned", "implementing", "reviewing", "fixing"])
 
         await bus.shutdown()
     }
@@ -283,20 +283,20 @@ struct EngineViewModelTurnsTests {
 
         let cwd = TestPaths.underTemporary("proj")
         await bus.publish(.sessionStarted(sessionID: "file-1", model: nil, cwd: cwd))
-        await bus.publish(.sessionPhaseChanged(sessionID: "file-other", phase: .fixture("migrating", "Migrate", 2, .migrate)))
+        await bus.publish(.sessionPhaseChanged(sessionID: "file-other", phase: .fixture("implementing", "Implement", 2, .implement)))
         await drain()
 
         #expect(!vm.hasPhaseData)
         let pendingKey = vm.pendingPhaseKey(sessionID: "file-other", projectPath: cwd.path)
-        #expect(vm.pendingPhaseMarkersBySession[pendingKey]?.last?.phase.id == "migrating")
+        #expect(vm.pendingPhaseMarkersBySession[pendingKey]?.last?.phase.id == "implementing")
 
         vm.beginSessionSwitch(projectPath: cwd.path, sessionID: "file-other")
-        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: UUID().uuidString), text: "migrate orders.ts"))
+        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: UUID().uuidString), text: "implement orders.ts"))
         await drain()
 
         #expect(vm.hasPhaseData)
         #expect(vm.pendingPhaseMarkersBySession[pendingKey] == nil)
-        #expect(vm.conversationTurns.last?.phase?.id == "migrating")
+        #expect(vm.conversationTurns.last?.phase?.id == "implementing")
 
         await bus.shutdown()
     }
@@ -450,13 +450,13 @@ struct EngineViewModelTurnsTests {
         await bus.publish(.sessionStarted(sessionID: "file-1", model: nil, cwd: TestPaths.underTemporary("proj")))
         await bus.publish(.sessionPhaseChanged(sessionID: "file-1",
                                                phase: .fixture("planned", "Plan", 0, .plan)))
-        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: UUID().uuidString), text: "plan the migration"))
+        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: UUID().uuidString), text: "plan the change"))
         await bus.publish(.toolStart(id: "plan-tool", name: "read_file",
                                      input: ToolInput(summary: "orders.ts"), startedAt: Date()))
         await bus.publish(.sessionPhaseChanged(sessionID: "file-1",
-                                               phase: .fixture("migrating", "Migrate", 1, .migrate)))
-        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: UUID().uuidString), text: "migrate orders.ts"))
-        await bus.publish(.toolStart(id: "migrate-tool", name: "edit_file",
+                                               phase: .fixture("implementing", "Implement", 1, .implement)))
+        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: UUID().uuidString), text: "implement orders.ts"))
+        await bus.publish(.toolStart(id: "implement-tool", name: "edit_file",
                                      input: ToolInput(summary: "orders.ts"), startedAt: Date()))
         await bus.publish(.sessionPhaseChanged(sessionID: "file-1",
                                                phase: .fixture("reviewing", "Review", 2, .review)))
@@ -466,14 +466,14 @@ struct EngineViewModelTurnsTests {
         // Live phase has no tools yet.
         #expect(vm.effectiveWorkToolCalls.map(\.id) == [])
         #expect(vm.toolCalls(forPhaseID: "planned").map(\.id) == ["plan-tool"])
-        #expect(vm.toolCalls(forPhaseID: "migrating").map(\.id) == ["migrate-tool"])
+        #expect(vm.toolCalls(forPhaseID: "implementing").map(\.id) == ["implement-tool"])
 
         vm.selectPhase("planned")
         #expect(vm.effectiveWorkToolCalls.map(\.id) == ["plan-tool"])
         #expect(vm.effectiveWorkToolCalls.map(\.name) == ["read_file"])
 
-        vm.selectPhase("migrating")
-        #expect(vm.effectiveWorkToolCalls.map(\.id) == ["migrate-tool"])
+        vm.selectPhase("implementing")
+        #expect(vm.effectiveWorkToolCalls.map(\.id) == ["implement-tool"])
         #expect(WorkLaneView.hasContent(model: vm))
 
         await bus.shutdown()
@@ -484,17 +484,17 @@ struct EngineViewModelTurnsTests {
         let vm = EngineViewModel.previewCustomACPPhases
 
         #expect(vm.hasPhaseData)
-        #expect(vm.railPhases.map(\.id) == ["migrating", "reviewing", "fixing"])
+        #expect(vm.railPhases.map(\.id) == ["implementing", "reviewing", "fixing"])
         #expect(WorkLaneView.hasContent(model: vm))
 
-        vm.selectPhase("migrating")
-        #expect(vm.railPhaseOccurrence(for: vm.effectiveSelectedPhaseID ?? "")?.phase.id == "migrating")
+        vm.selectPhase("implementing")
+        #expect(vm.railPhaseOccurrence(for: vm.effectiveSelectedPhaseID ?? "")?.phase.id == "implementing")
         #expect(vm.effectiveWorkToolCalls.map(\.id) == ["tool-1"])
         #expect(vm.effectiveWorkToolCalls.map(\.name) == ["edit_file"])
-        let migratingText = vm.messageIndices(forPhaseID: vm.effectiveSelectedPhaseID ?? "")
+        let implementingText = vm.messageIndices(forPhaseID: vm.effectiveSelectedPhaseID ?? "")
             .compactMap { vm.messages[$0].textContent }
-        #expect(migratingText.contains { $0.contains("Replaced 4 call sites") })
-        #expect(!migratingText.contains { $0.contains("retry parameter") })
+        #expect(implementingText.contains { $0.contains("Replaced 4 call sites") })
+        #expect(!implementingText.contains { $0.contains("retry parameter") })
 
         vm.selectPhase("reviewing")
         #expect(vm.effectiveWorkToolCalls.isEmpty)
@@ -533,6 +533,115 @@ struct EngineViewModelTurnsTests {
         #expect(vm.currentPhaseProgressFraction != nil)
 
         await bus.shutdown()
+    }
+
+    @Test("conversationTurns reuses its projection until a source changes")
+    func conversationTurnsMemoizationInvalidatesFromEverySource() throws {
+        let (vm, _) = makeTurnsModel()
+        let turnID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000001"))
+        let thinkingID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000002"))
+        vm.messages = [
+            .user(bubbleID: turnID, text: "Convert the project"),
+            .thinkingChunk(blockID: thinkingID, delta: "Planning"),
+        ]
+
+        #expect(vm.conversationTurns.last?.status == .done)
+        _ = vm.conversationTurns
+        #expect(vm.conversationTurnsProjectionCount == 1)
+
+        vm.activity = .thinking
+        #expect(vm.conversationTurns.last?.status == .running)
+        #expect(vm.conversationTurnsProjectionCount == 2)
+
+        vm.phaseMarkers = [
+            .init(messageIndex: 0,
+                  phase: .fixture("planned", "Plan", 0, .plan),
+                  at: vm.clock.now()),
+        ]
+        #expect(vm.conversationTurns.last?.phase?.id == "planned")
+        #expect(vm.conversationTurnsProjectionCount == 3)
+
+        let callID = ToolCallID(rawValue: "tool-1")
+        vm.messages.append(.toolCall(callID: callID))
+        vm.activeToolCalls = [
+            .init(id: callID,
+                  name: "read_file",
+                  input: ToolInput(summary: "project"),
+                  finished: true,
+                  success: false),
+        ]
+        #expect(vm.conversationTurns.last?.status == .failed)
+        #expect(vm.conversationTurnsProjectionCount == 4)
+    }
+
+    @Test("effectiveWorkToolCalls reuses its projection and invalidates selection changes")
+    func effectiveWorkToolCallsMemoizationTracksSourcesAndSelection() throws {
+        let (vm, _) = makeTurnsModel()
+        let firstTurnID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000011"))
+        let secondTurnID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000012"))
+        let firstCallID = ToolCallID(rawValue: "tool-1")
+        let secondCallID = ToolCallID(rawValue: "tool-2")
+        vm.messages = [
+            .user(bubbleID: firstTurnID, text: "Plan"),
+            .toolCall(callID: firstCallID),
+            .user(bubbleID: secondTurnID, text: "Implement"),
+            .toolCall(callID: secondCallID),
+        ]
+        vm.activeToolCalls = [
+            .init(id: firstCallID, name: "read_file", input: ToolInput(summary: "source"), finished: false),
+            .init(id: secondCallID, name: "edit_file", input: ToolInput(summary: "target"), finished: false),
+        ]
+
+        #expect(vm.effectiveWorkToolCalls.map(\.id) == [secondCallID])
+        _ = vm.effectiveWorkToolCalls
+        #expect(vm.effectiveWorkToolCallsProjectionCount == 1)
+
+        vm.selectedTurnID = firstTurnID
+        #expect(vm.effectiveWorkToolCalls.map(\.id) == [firstCallID])
+        #expect(vm.effectiveWorkToolCallsProjectionCount == 2)
+
+        vm.activeToolCalls[0].finished = true
+        #expect(vm.effectiveWorkToolCalls.first?.finished == true)
+        #expect(vm.effectiveWorkToolCallsProjectionCount == 3)
+
+        vm.phaseMarkers = [
+            .init(messageIndex: 0, phase: .fixture("planned", "Plan", 0, .plan), at: vm.clock.now()),
+            .init(messageIndex: 2, phase: .fixture("implementing", "Implement", 1, .implement), at: vm.clock.now()),
+        ]
+        vm.selectedPhaseID = "phase-0-planned"
+        #expect(vm.effectiveWorkToolCalls.map(\.id) == [firstCallID])
+        #expect(vm.effectiveWorkToolCallsProjectionCount == 4)
+    }
+
+    @Test("history replay chunks become visible as one restored projection")
+    func historyReplayChunksCommitAtRestoreBoundary() throws {
+        let (vm, _) = makeTurnsModel()
+        let firstTurnID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000021"))
+        let secondTurnID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000022"))
+        vm.beginSessionSwitch(projectPath: "/workspace/project", sessionID: "saved-session")
+
+        vm.apply(.sessionHistoryReplayChunk(
+            sessionID: "saved-session",
+            index: 1,
+            total: 2,
+            events: [.userTurn(id: AdapterTurnID(rawValue: secondTurnID.uuidString), text: "Second")]
+        ))
+        vm.apply(.sessionHistoryReplayChunk(
+            sessionID: "saved-session",
+            index: 0,
+            total: 2,
+            events: [.userTurn(id: AdapterTurnID(rawValue: firstTurnID.uuidString), text: "First")]
+        ))
+
+        #expect(vm.messages.isEmpty)
+        #expect(vm.conversationTurnsProjectionCount == 0)
+
+        vm.apply(.sessionHistoryRestored(sessionID: "saved-session"))
+
+        #expect(vm.messages.map(\.id) == ["user-\(firstTurnID)", "user-\(secondTurnID)"])
+        #expect(vm.conversationTurns.map(\.promptText) == ["First", "Second"])
+        #expect(vm.conversationTurnsProjectionCount == 1)
+        #expect(!vm.isSwitchingSession)
     }
 }
 

@@ -50,7 +50,7 @@ public struct A2UIServerBatch: Sendable, Hashable, Codable {
     }
 
     /// Rawvalue of the `AgentID` that produced this batch (the adapter, not
-    /// the migration role) — every surface a batch creates is owned by this
+    /// the agent role) — every surface a batch creates is owned by this
     /// agent for the lifetime of the surface.
     public let agentID: String
     public let transcriptKey: A2UITranscriptKeyRef

@@ -55,7 +55,7 @@ extension ACPEventDecoder {
                 await updateSessionMetadata(.unarchived(sessionID: sessionID))
             }
             if archived {
-                // Migration Restart archives file sessions — drop parked reviews
+                // Dashboard Restart archives file sessions — drop parked reviews
                 // and cancel any open permission RPCs so timeouts cannot auto-deny
                 // into a restarted pipeline.
                 let dropped = state.clearParkedPermissions(sessionID: sessionID)
@@ -98,10 +98,9 @@ extension ACPEventDecoder {
                 needsAttention: needsAttention
             ))
         }
-        if let isOverview = meta?["codemixer.dev/overviewSession"]?.boolValue
-            ?? meta?["overviewSession"]?.boolValue {
+        if let isOverview = meta?[CodemixerACPKeys.overviewSession]?.boolValue {
             if isOverview {
-                let overviewURL = meta?["codemixer.dev/dashboardUrl"]?.stringValue
+                let overviewURL = meta?[CodemixerACPKeys.dashboardUrl]?.stringValue
                     .flatMap(URL.init(string:))
                 await updateSessionMetadata(.markAsOverview(sessionID: sessionID,
                                                             url: overviewURL))

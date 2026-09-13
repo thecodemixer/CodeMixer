@@ -85,6 +85,7 @@ extension AgentEngine {
         await startFSWatcher(workspace: runtime.workingDirectory)
 
         if let targetSession {
+            await runtime.adapter.persistParkedSessionWork(sessionID: targetSession)
             await restoreHistory(for: SessionTranscriptKey(
                 projectRoot: runtime.workspace,
                 namespace: runtime.adapter.historyNamespace,
@@ -120,6 +121,10 @@ extension AgentEngine {
             await markSessionPromptReady(targetSession)
         }
         await publishRuntimePoolChanged()
+        if runtime.adapter.capabilities.contains(.overviewDashboard),
+           let url = runtime.advertisedDashboardURL {
+            await bus.publish(.agentDashboard(url: url, title: runtime.advertisedDashboardTitle))
+        }
         return true
     }
 
@@ -163,6 +168,7 @@ extension AgentEngine {
     private func applyInProcessSessionSwitch(resumeSessionID: String?) async -> Bool {
         guard let key = activeKey, var runtime = runtimes[key] else { return false }
         guard let resumeSessionID else { return true }
+        await runtime.adapter.persistParkedSessionWork(sessionID: resumeSessionID)
         await restoreHistory(for: SessionTranscriptKey(
             projectRoot: runtime.workspace,
             namespace: runtime.adapter.historyNamespace,
@@ -197,6 +203,10 @@ extension AgentEngine {
 
     func shutdownAll(reason: AgentProtocol.StopReason) async {
         state = .stopping
+        for task in catalogPublishTasks.values {
+            task.cancel()
+        }
+        catalogPublishTasks.removeAll()
         let keys = Array(runtimes.keys)
         for key in keys {
             await shutdownSlot(key, publishStopped: false, reason: reason)

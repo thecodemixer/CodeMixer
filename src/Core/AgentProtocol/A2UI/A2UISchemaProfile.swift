@@ -31,21 +31,14 @@ public enum A2UISchemaProfile {
     public static let embeddedResourceMIMEType = "application/a2ui+json"
 
     /// Official Basic Catalog id (schema-backed v0.9 id; v0.9.1 has no
-    /// separate alias in the pinned schemas, so both capability keys below
-    /// advertise the same id per the spec's per-version capability shape).
+    /// separate alias in the pinned schemas, so the capability advertisement
+    /// uses this id for both supported protocol versions).
     public static let basicCatalogID = "https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json"
 
     /// Test-only catalog id used by digital twins / fixtures while the
     /// production Basic Catalog gate (§5 of the plan) has not yet passed.
     /// Never advertised outside test builds.
     public static let testScopedCatalogID = "com.codecave.codemixer.test/basic-catalog-v0_9_1"
-
-    /// Namespaced `_meta` key CodeMixer emits for its ACP capability
-    /// advertisement. `_meta.a2ui` is accepted as an inbound compatibility
-    /// alias (some early Custom ACP servers used the bare key) but CodeMixer
-    /// never emits the alias itself.
-    public static let clientCapabilitiesMetaKey = "com.codecave.codemixer/a2ui"
-    public static let clientCapabilitiesMetaKeyAlias = "a2ui"
 
     /// A2A/ACP metadata key servers read client-owned surface data models
     /// from (`client_data_model.json`).

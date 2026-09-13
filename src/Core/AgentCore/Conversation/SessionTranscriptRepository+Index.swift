@@ -6,7 +6,7 @@ extension SessionTranscriptRepository {
     func sessions(inProject root: URL,
                   attentionSessionIDs: Set<String> = []) throws -> [SessionSummary] {
         try indexRecords(in: root)
-            .sorted { $0.lastActivity > $1.lastActivity }
+            .sorted(by: sessionRecordOrder)
             .map {
                 $0.summary(in: root.standardizedFileURL,
                            needsAttention: attentionSessionIDs.contains($0.sessionID)
@@ -18,7 +18,7 @@ extension SessionTranscriptRepository {
                  inProject root: URL) throws -> [StoredSessionRecord] {
         try indexRecords(in: root)
             .filter { $0.sessionID == sessionID }
-            .sorted { $0.lastActivity > $1.lastActivity }
+            .sorted(by: sessionRecordOrder)
     }
 
     func registerSession(_ id: String,
@@ -210,7 +210,7 @@ extension SessionTranscriptRepository {
     }
 
     private func persist(_ records: [StoredSessionRecord], in root: URL) throws {
-        let sorted = records.sorted { $0.lastActivity > $1.lastActivity }
+        let sorted = records.sorted(by: sessionRecordOrder)
         indexes[standardizedPath(root)] = sorted
         try store.writeIndex(sorted, in: root)
     }
@@ -259,5 +259,16 @@ extension SessionTranscriptRepository {
 
     private func standardizedPath(_ root: URL) -> String {
         root.standardizedFileURL.path
+    }
+
+    private func sessionRecordOrder(_ lhs: StoredSessionRecord,
+                                    _ rhs: StoredSessionRecord) -> Bool {
+        if lhs.lastActivity != rhs.lastActivity {
+            return lhs.lastActivity > rhs.lastActivity
+        }
+        if lhs.sessionID != rhs.sessionID {
+            return lhs.sessionID < rhs.sessionID
+        }
+        return lhs.namespace < rhs.namespace
     }
 }

@@ -77,6 +77,13 @@ public enum WireCodec {
             )
         case .sessionHistoryRestored(let sessionID):
             return .sessionHistoryRestored(sessionID: sessionID)
+        case .sessionHistoryReplayChunk(let sessionID, let index, let total, let events):
+            return .sessionHistoryReplayChunk(
+                sessionID: sessionID,
+                index: index,
+                total: total,
+                events: events.map(encode)
+            )
         case .sessionPromptReady(let sessionID):
             return .sessionPromptReady(sessionID: sessionID)
         case .sessionsListed(let projectPath, let sessions):
@@ -174,6 +181,13 @@ public enum WireCodec {
             )
         case .sessionHistoryRestored(let sessionID):
             return .sessionHistoryRestored(sessionID: sessionID)
+        case .sessionHistoryReplayChunk(let sessionID, let index, let total, let events):
+            return .sessionHistoryReplayChunk(
+                sessionID: sessionID,
+                index: index,
+                total: total,
+                events: events.map(decode)
+            )
         case .sessionPromptReady(let sessionID):
             return .sessionPromptReady(sessionID: sessionID)
         case .sessionsListed(let projectPath, let sessions):

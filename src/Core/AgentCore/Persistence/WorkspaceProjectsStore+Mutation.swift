@@ -272,6 +272,62 @@ extension WorkspaceProjectsStore {
         return list[idx]
     }
 
+    /// Persist a new executable path for a custom-agent project.
+    ///
+    /// Writes `.codemixer/project.json` (authoritative) and syncs the workspace
+    /// index. Takes effect the next time that project's agent starts.
+    @discardableResult
+    public func setCustomAgentExecutable(path: String,
+                                         executablePath: String,
+                                         in workspace: URL) async throws -> ProjectRef {
+        let key = Self.key(for: workspace)
+        var list: [ProjectRef]
+        if let existing = workspaces[key] {
+            list = existing
+        } else {
+            list = await projects(for: workspace)
+        }
+        guard let idx = list.firstIndex(where: { $0.path == path }) else {
+            throw StoreError.undecodableProject(path: path, detail: "project not in workspace index")
+        }
+        let previous = list[idx]
+        guard case .custom(let ref) = previous.projectType else {
+            throw StoreError.invalidCustomAgentExecutable(
+                detail: "Only custom agent projects can change their executable path."
+            )
+        }
+        let trimmed = executablePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw StoreError.invalidCustomAgentExecutable(detail: "Executable path is required.")
+        }
+        let exeURL = URL(fileURLWithPath: trimmed)
+        guard fileSystem.fileExists(at: exeURL) else {
+            throw StoreError.invalidCustomAgentExecutable(
+                detail: "Executable not found at \(trimmed)."
+            )
+        }
+        let updatedRef = CustomAgentRef(
+            id: ref.id,
+            displayName: ref.displayName,
+            transport: ref.transport,
+            executablePath: trimmed,
+            arguments: ref.arguments
+        )
+        list[idx] = ProjectRef(
+            path: previous.path,
+            displayName: previous.displayName,
+            projectType: .custom(updatedRef),
+            preferFreshAgentProcess: previous.preferFreshAgentProcess,
+            agentInstanceIdentity: previous.agentInstanceIdentity,
+            workingDirectoryPath: previous.workingDirectoryPath
+        )
+        workspaces[key] = list
+        try await persist()
+        try ProjectLocalStateStore.save(ref: list[idx], fileSystem: fileSystem)
+        try await persistWorkspaceLocal(projects: list, for: workspace)
+        return list[idx]
+    }
+
     @discardableResult
     public func renameProject(path: String, to newName: String, in workspace: URL) async throws -> ProjectRef {
         let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)

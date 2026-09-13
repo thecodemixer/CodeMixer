@@ -21,6 +21,8 @@ public actor SilentDiagnostics {
         case enginePartialStartRollback
         case permissionDeliveryFailed
         case a2uiActionRejected
+        case acpLoadHistoryDropped
+        case acpForeignSessionRouted
         case other
     }
 

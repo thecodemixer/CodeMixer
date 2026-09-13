@@ -25,6 +25,27 @@ extension ACPEventDecoder {
         let update = params["update"] ?? params
         let kind = update["sessionUpdate"]?.stringValue
             ?? update["type"]?.stringValue
+        switch state.loadWindowRoute(for: params["sessionId"]?.stringValue) {
+        case .dropLoadedHistory:
+            await SilentDiagnostics.shared.record(
+                kind: .acpLoadHistoryDropped,
+                owner: "ACPEventDecoder",
+                summary: "Dropped vendor history during session load",
+                details: kind
+            )
+            return Batch()
+        case .persistForeign:
+            await cacheForeignStreaming(params: params, update: update, kind: kind)
+            await SilentDiagnostics.shared.record(
+                kind: .acpForeignSessionRouted,
+                owner: "ACPEventDecoder",
+                summary: "Routed foreign session update during load",
+                details: params["sessionId"]?.stringValue
+            )
+            return Batch()
+        case .ordinary:
+            break
+        }
         if isForeignStreamingSession(params: params, kind: kind) {
             await cacheForeignStreaming(params: params, update: update, kind: kind)
             return Batch()
@@ -56,7 +77,7 @@ extension ACPEventDecoder {
             return currentModelUpdate(params: params, update: update)
         case "available_commands_update":
             return Batch()
-        case "codemixer.dev/phase_update":
+        case CodemixerACPKeys.phaseUpdate:
             return phaseUpdate(params: params, update: update)
         default:
             await SilentDiagnostics.shared.record(
@@ -198,6 +219,13 @@ extension ACPEventDecoder {
         }
 
         switch kind {
+        case CodemixerACPKeys.phaseUpdate:
+            guard let status = update["status"]?.stringValue else { return }
+            let phase = ACPPipelinePhaseMapping.phase(forStatus: status)
+            await recordBackgroundSessionEvents(.init(
+                sessionID: sessionID,
+                events: [.sessionPhaseChanged(sessionID: sessionID, phase: phase)]
+            ))
         case "user_message_chunk":
             if let flushed = state.appendForeignChunk(
                 sessionID: sessionID,

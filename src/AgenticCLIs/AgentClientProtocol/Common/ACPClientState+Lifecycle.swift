@@ -6,6 +6,12 @@ import AgentProtocol
 /// Session begin/prepare, the `Phase` machine, session id, and prompts
 /// queued while `phase() == .awaitingSession`.
 extension ACPClientState {
+    enum LoadWindowRoute {
+        case ordinary
+        case dropLoadedHistory
+        case persistForeign
+    }
+
     func beginSession(context: LaunchContext,
                       customAgentID: String,
                       displayName: String) {
@@ -124,6 +130,20 @@ extension ACPClientState {
             let prompts = queuedPrompts
             queuedPrompts.removeAll()
             return prompts
+        }
+    }
+
+    func loadWindowRoute(for incomingSessionID: String?) -> LoadWindowRoute {
+        withLock {
+            guard phaseStorage == .awaitingSession,
+                  let target = context?.resumeSessionID,
+                  !target.isEmpty else { return .ordinary }
+            guard let incomingSessionID, !incomingSessionID.isEmpty else {
+                return .dropLoadedHistory
+            }
+            return incomingSessionID == target
+                ? .dropLoadedHistory
+                : .persistForeign
         }
     }
 }

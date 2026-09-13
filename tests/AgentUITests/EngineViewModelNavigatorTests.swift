@@ -202,17 +202,17 @@ struct EngineViewModelNavigatorTests {
         await bus.shutdown()
     }
 
-    @Test("openOverview with known dashboard URL selects dashboard without session load")
-    func openOverviewKnownDashboardSkipsSessionLoad() async {
+    @Test("openOverview from a file chat warm-opens the project for a fresh dashboard")
+    func openOverviewFromFileChatWarmOpensProject() async {
         let port = RecordingPort()
         let bus = MulticastEventBus()
         let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
-        let project = TestPaths.workspace("ws/migration")
+        let project = TestPaths.workspace("ws/custom-acp")
         let dashboardURL = URL(string: "http://127.0.0.1:9422/")!
         vm.workspace = project
         vm.sessionID = "file:Orders.cs"
         vm.dashboardURL = dashboardURL
-        vm.dashboardTitle = "Migration Dashboard"
+        vm.dashboardTitle = "Agent Dashboard"
         vm.messages = [.assistant(bubbleID: UUID(), text: "file chat")]
         vm.supportsResumableSessions = true
         vm.projectCapabilities[project.path] = .init(
@@ -224,7 +224,7 @@ struct EngineViewModelNavigatorTests {
                 id: "control",
                 agentID: .other,
                 workspace: project,
-                title: "Migration Dashboard",
+                title: "Agent Dashboard",
                 lastActivity: .distantPast,
                 messageCount: 0,
                 isOverview: true,
@@ -248,8 +248,10 @@ struct EngineViewModelNavigatorTests {
         #expect(vm.sessionID == nil)
         #expect(vm.dashboardURL == dashboardURL)
         #expect(vm.messages.isEmpty)
-        #expect(!port.commands.contains {
-            if case .openProject = $0 { return true }
+        #expect(port.commands.contains {
+            if case .openProject(let path, let resume) = $0 {
+                return path == project.path && resume == "control"
+            }
             return false
         })
 
@@ -262,20 +264,20 @@ struct EngineViewModelNavigatorTests {
         let bus = MulticastEventBus()
         let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
         let other = TestPaths.workspace("ws/other")
-        let migration = TestPaths.workspace("ws/migration")
+        let customProject = TestPaths.workspace("ws/custom-acp")
         let dashboardURL = URL(string: "http://127.0.0.1:9422/")!
         vm.workspace = other
         vm.sessionID = "other-chat"
-        vm.projectCapabilities[migration.path] = .init(
+        vm.projectCapabilities[customProject.path] = .init(
             supportsResumableSessions: true,
             supportsOverviewDashboard: true
         )
-        vm.sessionsByProject[migration.path] = [
+        vm.sessionsByProject[customProject.path] = [
             SessionSummary(
                 id: "control",
                 agentID: .other,
-                workspace: migration,
-                title: "Migration Dashboard",
+                workspace: customProject,
+                title: "Agent Dashboard",
                 lastActivity: .distantPast,
                 messageCount: 0,
                 isOverview: true,
@@ -283,16 +285,16 @@ struct EngineViewModelNavigatorTests {
             ),
         ]
 
-        vm.selectProject(path: migration.path)
+        vm.selectProject(path: customProject.path)
         await drain()
 
-        #expect(vm.workspace?.path == migration.path)
+        #expect(vm.workspace?.path == customProject.path)
         #expect(vm.showsOverviewDashboard)
         #expect(vm.sessionID == nil)
         #expect(vm.dashboardURL == dashboardURL)
         #expect(port.commands.contains {
             if case .openProject(let path, let resume) = $0 {
-                return path == migration.path && resume == nil
+                return path == customProject.path && resume == "control"
             }
             return false
         })
@@ -593,7 +595,7 @@ struct EngineViewModelNavigatorTests {
         vm.sessionID = "overview"
         vm.dashboardURL = URL(string: "http://127.0.0.1:9/")
         vm.projects = [
-            .init(path: project.path, displayName: "Migration", projectType: .cursorCLI),
+            .init(path: project.path, displayName: "Custom ACP", projectType: .cursorCLI),
         ]
         vm.projectCapabilities[project.path] = .init(
             supportsResumableSessions: true,
@@ -1476,7 +1478,7 @@ struct EngineViewModelNavigatorTests {
 
         let customRef = CustomAgentRef(
             id: "mig",
-            displayName: "Migrator",
+            displayName: "Custom Tool",
             transport: .agentClientProtocol,
             executablePath: "/usr/bin/env",
             arguments: ["bun", "run", "src/main.ts"]
@@ -1497,7 +1499,7 @@ struct EngineViewModelNavigatorTests {
             supportsOverviewDashboard: true
         )
         vm.dashboardURL = URL(string: "http://127.0.0.1:9/")
-        vm.dashboardTitle = "Migration Dashboard"
+        vm.dashboardTitle = "Agent Dashboard"
         vm.messages = [.user(bubbleID: UUID(), text: "stale")]
         vm.detailPane = .dashboard
         let reviewPrompt = PermissionPrompt(toolName: "Review",
@@ -1566,7 +1568,7 @@ struct EngineViewModelNavigatorTests {
         #expect(vm.customACPRestartAwaitingDashboard)
         #expect(vm.workspace?.path == custom.path)
 
-        await bus.publish(.agentDashboard(url: URL(string: "http://127.0.0.1:99/")!, title: "Migration Dashboard"))
+        await bus.publish(.agentDashboard(url: URL(string: "http://127.0.0.1:99/")!, title: "Agent Dashboard"))
         await drain()
         #expect(!vm.isRestartingCustomACPCLI)
         #expect(vm.dashboardURL?.absoluteString == "http://127.0.0.1:99/")

@@ -63,6 +63,16 @@ public enum AgentEvent: Sendable {
     /// the adapter is ready to accept a prompt.
     case sessionHistoryRestored(sessionID: String)
 
+    /// One bounded segment of a project-local history replay.
+    ///
+    /// Chunks are published contiguously in a bus transaction and become
+    /// visible only when the matching `sessionHistoryRestored` arrives.
+    /// Nested replay/lifecycle events are invalid payloads.
+    indirect case sessionHistoryReplayChunk(sessionID: String,
+                                            index: Int,
+                                            total: Int,
+                                            events: [AgentEvent])
+
     /// The live adapter has bound the session and can accept user input.
     case sessionPromptReady(sessionID: String)
 

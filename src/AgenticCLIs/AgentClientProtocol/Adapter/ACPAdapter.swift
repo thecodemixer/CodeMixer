@@ -61,6 +61,7 @@ public final class ACPAdapter: AgentAdapter {
     }
 
     public func makeEventStream(inputs: AgentInputs) -> AsyncStream<AgentEvent> {
+        state.setBackgroundSessionRecorder(inputs.recordBackgroundSessionEvents)
         let fileAccess = ACPFileAccess(workspace: inputs.workspace, fileSystem: fileSystem)
         let terminals = ACPTerminalSession(workspace: inputs.workspace, random: random)
         let decoder = ACPEventDecoder(
@@ -162,6 +163,15 @@ public final class ACPAdapter: AgentAdapter {
         return data.isEmpty ? nil : data
     }
 
+    public func persistParkedSessionWork(sessionID: String) async {
+        guard let pending = state.flushForeignBuffer(sessionID: sessionID),
+              let recorder = state.backgroundSessionRecorder() else { return }
+        await recorder(.init(
+            sessionID: sessionID,
+            events: persistedEvents(for: pending)
+        ))
+    }
+
     /// Encodes ACP `session/set_mode` for agents that advertise `availableModes`.
     public func encodeSessionMode(_ modeID: String) -> Data {
         ACPInputEncoding.setMode(modeID: modeID, state: state)
@@ -224,4 +234,25 @@ public final class ACPAdapter: AgentAdapter {
     }
 
     public func resumeArgvAddition(sessionID: String) -> [String] { [] }
+
+    private func persistedEvents(
+        for pending: (role: ACPTurnRole, text: String)
+    ) -> [AgentEvent] {
+        switch pending.role.stored {
+        case .user:
+            return [.userTurn(
+                id: AdapterTurnID(rawValue: random.uuid().uuidString),
+                text: pending.text
+            )]
+        case .thinking:
+            let id = random.uuid()
+            return [
+                .thinkingChunk(blockID: id, delta: pending.text),
+                .thinkingComplete(blockID: id, duration: .zero),
+            ]
+        default:
+            let id = random.uuid().uuidString
+            return [.assistantText(id: id, blockID: id, text: pending.text, isFinal: true)]
+        }
+    }
 }

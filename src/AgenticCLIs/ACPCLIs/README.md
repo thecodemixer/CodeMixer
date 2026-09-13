@@ -71,7 +71,7 @@ register `CustomACPAdapterFactory` (caches by `CustomAgentRef`).
 | Modes | Dynamic from `session/new` `availableModes` (id + name + description); composer lists them; slash `/<id>` remaps to `session/set_mode` |
 | Models | From ACP session (`availableModels`) |
 | Sessions | AgentCore store under `<project>/.codemixer/history/`; old ACP project stores are one-shot import sources |
-| Twin | `fake-custom-acp` advertises `migrate` / `document` / `agent` (not Cursor’s plan/ask) |
+| Twin | `fake-custom-acp` advertises `implement` / `document` / `agent` (not Cursor’s plan/ask) |
 
 ### Retired project store import
 
@@ -88,14 +88,18 @@ from AgentCore's `SessionTranscriptRepository`.
 
 ### Dashboard URL, reverse session/new, archive & attention
 
-Custom ACP agents may advertise extensions via `_meta` (additive; unknown keys are ignored):
+Custom ACP agents may advertise extensions via `_meta` (additive; unknown keys are ignored).
+All CodeMixer-owned keys use the lowercase `com.codecave.codemixer` prefix from
+`CodemixerACPKeys`, which is distinct from the macOS bundle identifier:
 
 | Key | Direction | Effect |
 | --- | --- | --- |
-| `codemixer.dev/dashboardUrl` | agent → client on `initialize` | Emits `AgentEvent.agentDashboard`. Adapters with `.overviewDashboard` show that page when the **project** is selected (no Chat/Dashboard tab). File sessions stay chat-only. |
-| `codemixer.dev/dashboardTitle` | agent → client on `initialize` | Agent-owned visible title for the sidebar overview row; never hardcoded by Codemixer |
-| `codemixer.dev/overviewSession` | `session/new` reverse RPC or `session_info_update` `_meta` | Marks a session as the project overview/control session (`SessionSummary.isOverview`) |
-| `codemixer.dev/sessionNew` | client → agent on `initialize` | Agent may reverse-RPC `session/new` to register sidebar sessions |
+| `com.codecave.codemixer/a2ui` | client → agent on `initialize` | Advertises the supported A2UI versions and catalogs. The bare `a2ui` alias is rejected. |
+| `com.codecave.codemixer/sessionNew` | client → agent on `initialize` | Agent may reverse-RPC `session/new` to register sidebar sessions. |
+| `com.codecave.codemixer/phase_update` | agent → client `session/update` | Emits an ordered `sessionPhaseChanged` event. |
+| `com.codecave.codemixer/overviewSession` | `session/new` reverse RPC or `session_info_update` `_meta` | Marks a session as the project overview/control session (`SessionSummary.isOverview`). |
+| `com.codecave.codemixer/dashboardUrl` | agent → client on `initialize` | Emits `AgentEvent.agentDashboard`. Adapters with `.overviewDashboard` show that page when the **project** is selected (no Chat/Dashboard tab). File sessions stay chat-only. |
+| `com.codecave.codemixer/dashboardTitle` | agent → client on `initialize` | Agent-owned visible title for the sidebar overview row; never hardcoded by Codemixer. |
 | `_meta.archived` | `session_info_update` | Session hidden from sidebar summaries |
 | `_meta.needsAttention` | `session_info_update` | Per-session sidebar badge; project-row attention count rollup; `sessionAttentionChanged` → macOS notification (agent display name / `"<title> needs human review"`) |
 

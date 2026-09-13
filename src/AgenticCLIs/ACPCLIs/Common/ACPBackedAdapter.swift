@@ -43,6 +43,10 @@ extension ACPBackedAdapter {
         inner.encodeResumeSession(sessionID: sessionID)
     }
 
+    public func persistParkedSessionWork(sessionID: String) async {
+        await inner.persistParkedSessionWork(sessionID: sessionID)
+    }
+
     public func encodePermissionResponse(_ decision: PermissionDecision,
                                          for prompt: PermissionPrompt) -> PermissionResponseDelivery {
         inner.encodePermissionResponse(decision, for: prompt)

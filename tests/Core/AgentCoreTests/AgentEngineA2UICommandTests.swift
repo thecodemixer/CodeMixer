@@ -29,13 +29,13 @@ struct AgentEngineA2UICommandTests {
         try await Task.sleep(for: .milliseconds(40))
 
         #expect(h.adapter.recorded.contains {
-            if case .a2uiAction(surfaceID: "review", eventName: "migrationReviewDecision") = $0 {
+            if case .a2uiAction(surfaceID: "review", eventName: "reviewDecision") = $0 {
                 return true
             }
             return false
         })
         #expect(await transport.writtenTexts().contains {
-            $0.contains("a2ui-action:review:migrationReviewDecision")
+            $0.contains("a2ui-action:review:reviewDecision")
         })
         await h.shutdown()
     }
@@ -144,7 +144,7 @@ struct AgentEngineA2UICommandTests {
             "child": .string("btn-label"),
             "action": .object([
                 "event": .object([
-                    "name": .string("migrationReviewDecision"),
+                    "name": .string("reviewDecision"),
                     "context": .object([
                         "optionId": .string("accept_a"),
                         "nonce": .string("n1"),

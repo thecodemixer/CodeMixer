@@ -41,4 +41,9 @@ struct AgentRuntime {
     var bellTask: Task<Void, Never>?
     var sessionIDContinuation: AsyncStream<String>.Continuation?
     var lastActivatedAt: Date
+    /// Loopback dashboard advertised at ACP `initialize`. Re-published on warm
+    /// pool activate so overview selection recovers the live port without a
+    /// cold respawn.
+    var advertisedDashboardURL: URL?
+    var advertisedDashboardTitle: String?
 }

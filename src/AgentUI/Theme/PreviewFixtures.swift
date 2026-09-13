@@ -88,7 +88,7 @@ enum PreviewFixtures {
         let thinking3 = UUID(uuidString: "00000000-0000-0000-0000-000000000016")!
 
         let messages: [EngineViewModel.Message] = [
-            .user(bubbleID: user1, text: "Migrate orders.ts to the new billing client."),
+            .user(bubbleID: user1, text: "Implement orders.ts against the new billing client."),
             .thinkingComplete(blockID: thinking1, text: "Scanning call sites for the legacy billing client.", duration: .seconds(3)),
             .toolCall(callID: "tool-1"),
             .assistant(bubbleID: asst1, text: "Replaced 4 call sites with `BillingClientV2`."),
@@ -110,7 +110,7 @@ enum PreviewFixtures {
         ]
 
         let phaseMarkers: [EngineViewModel.PhaseMarker] = [
-            .init(messageIndex: 0, phase: phase("migrating", "Migrate", 2, .migrate), at: now.addingTimeInterval(-600)),
+            .init(messageIndex: 0, phase: phase("implementing", "Implement", 2, .implement), at: now.addingTimeInterval(-600)),
             .init(messageIndex: 4, phase: phase("reviewing", "Review", 4, .review), at: now.addingTimeInterval(-300)),
             .init(messageIndex: 6, phase: phase("fixing", "Fix", 5, .fix), at: now.addingTimeInterval(-60)),
         ]

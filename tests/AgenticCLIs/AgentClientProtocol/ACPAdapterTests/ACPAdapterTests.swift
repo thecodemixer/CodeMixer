@@ -50,12 +50,14 @@ struct ACPAdapterTests {
         let data = adapter.sessionBootstrapBytes(context: context)
         let root = try JSONDecoder().decode(JSONValue.self, from: data)
         let meta = root["params"]?["clientCapabilities"]?["_meta"]
-        #expect(meta?["codemixer.dev/sessionNew"]?.boolValue == true)
-        let a2ui = meta?[A2UISchemaProfile.clientCapabilitiesMetaKey]
+        #expect(meta?[CodemixerACPKeys.sessionNew]?.boolValue == true)
+        let a2ui = meta?[CodemixerACPKeys.a2ui]
         let catalogs = a2ui?["supportedCatalogIds"]?.arrayValue?.compactMap(\.stringValue)
         #expect(catalogs?.contains(A2UISchemaProfile.testScopedCatalogID) == true)
         let versions = a2ui?["supportedVersions"]?.arrayValue?.compactMap(\.stringValue)
         #expect(versions?.contains(A2UISchemaProfile.version) == true)
+        #expect(meta?["codemixer" + ".dev/sessionNew"] == nil)
+        #expect(meta?["a2ui"] == nil)
     }
 
     @Test("framing splits newline delimited frames")

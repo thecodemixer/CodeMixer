@@ -218,6 +218,35 @@ extension EngineViewModel {
         }
     }
 
+    /// Update the custom ACP executable for an existing project.
+    ///
+    /// Persists to `<project>/.codemixer/project.json` only (workspace index
+    /// syncs from there). Takes effect the next time that project's agent starts.
+    @discardableResult
+    public func setProjectCustomAgentExecutable(path: String,
+                                                executablePath: String) async -> String? {
+        guard let workspaceRoot, let store = workspaceProjects else {
+            return "No workspace is open."
+        }
+        let normalized = CustomAgentInput.executablePath(from: executablePath)
+        do {
+            let updated = try await store.setCustomAgentExecutable(
+                path: path,
+                executablePath: normalized,
+                in: workspaceRoot
+            )
+            let refs = await store.projects(for: workspaceRoot)
+            await applyProjectList(refs)
+            if workspace?.path == updated.path {
+                bindActiveProject(updated)
+            }
+            return nil
+        } catch {
+            recordProjectError(error)
+            return projectMutationMessage(error)
+        }
+    }
+
     /// Create a new project (subfolder of the workspace) and switch to it.
     public func createProject(name: String,
                               projectType: ProjectType,

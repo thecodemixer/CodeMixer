@@ -1,7 +1,7 @@
 import Foundation
 
 /// `workspaces.json` load / persist, including the legacy (pre-v2) schema's
-/// tolerant decode. Schema versioning and the never-auto-migrate-to-Claude
+/// tolerant decode. Schema versioning and the never-coerce-to-Claude
 /// invariant are documented on `WorkspaceProjectsStore.currentSchemaVersion`.
 ///
 /// Load order is schema-first via `PersistenceJSON.schemaVersion(in:)` so a
@@ -30,7 +30,7 @@ extension WorkspaceProjectsStore {
             }
 
             // Schema v1 used optional `agentID` instead of required `projectType`.
-            // We do not migrate: decode each project strictly and surface failures.
+            // We do not rewrite types: decode each project strictly and surface failures.
             if schemaVersion < 2 {
                 let failures = try decodeLegacyOrStrict(data: data)
                 if !failures.isEmpty {
@@ -91,7 +91,7 @@ extension WorkspaceProjectsStore {
 
     /// Attempt a strict v2 decode of each project object. Legacy v1 entries
     /// without `projectType` become `undecodableProject` failures — never
-    /// auto-migrated to Claude.
+    /// coerced to Claude.
     private func decodeLegacyOrStrict(data: Data) throws -> [StoreError] {
         struct LoosePersisted: Decodable {
             var schemaVersion: Int

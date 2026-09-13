@@ -552,6 +552,59 @@ struct AgentRuntimePoolTests {
 
         await engine.shutdown(reason: .naturalExit)
     }
+
+    @Test("warm overview activate re-publishes cached agentDashboard")
+    func warmOverviewActivateRepublishesDashboard() async throws {
+        let a = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("pool-dash-a-\(UUID().uuidString)", isDirectory: true)
+        let b = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("pool-dash-b-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: a, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: b, withIntermediateDirectories: true)
+
+        let factory = ScriptedTransportFactory([ScriptedTransport(), ScriptedTransport()])
+        let fs = InMemoryFileSystem()
+        let env = FakeEnvironment(home: a)
+        let seams = Seams.fake(environment: env, fileSystem: fs)
+        let engine = AgentEngine(seams: seams, transportFactory: factory.makeTransport)
+        await engine.bootstrap()
+
+        let adapter = RecordingMockAdapter(capabilities: [.overviewDashboard])
+        let keyA = AgentRuntimeKey(projectPath: a.path, agentID: adapter.id)
+        let dashboardURL = URL(string: "http://127.0.0.1:9422/")!
+        try await engine.start(adapter: adapter, workspace: a, resumeSessionID: nil)
+        await engine.ingest(.agentDashboard(url: dashboardURL, title: "Agent Dashboard"), from: keyA)
+
+        let adapterB = RecordingMockAdapter(capabilities: [.overviewDashboard])
+        try await engine.start(adapter: adapterB, workspace: b, resumeSessionID: nil)
+
+        let sub = await engine.bus.subscribe()
+        let collector = Task<[AgentEvent], Never> {
+            var out: [AgentEvent] = []
+            for await entry in sub.stream {
+                out.append(entry.event)
+                if out.contains(where: {
+                    if case .agentDashboard = $0 { return true }
+                    return false
+                }) { break }
+            }
+            return out
+        }
+
+        let activated = await engine.activate(key: keyA, resumeSessionID: nil)
+        #expect(activated)
+
+        try? await Task.sleep(for: .milliseconds(50))
+        await engine.bus.unsubscribe(sub.id)
+        let events = await collector.value
+        let republished = events.compactMap { event -> URL? in
+            if case .agentDashboard(let url, _) = event { return url }
+            return nil
+        }
+        #expect(republished.contains(dashboardURL))
+
+        await engine.shutdown(reason: .naturalExit)
+    }
 }
 
 /// Claude-shaped adapter for fresh-process pool tests.

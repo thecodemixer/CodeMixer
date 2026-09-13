@@ -7,6 +7,17 @@ import AgentProtocol
 /// delta accumulator, tool-call metadata, and coalesced background-session
 /// (foreign) stream text.
 extension ACPClientState {
+    func setBackgroundSessionRecorder(
+        _ recorder: @escaping @Sendable (BackgroundSessionEventBatch) async -> Void
+    ) {
+        withLock { recordBackgroundSessionEvents = recorder }
+    }
+
+    func backgroundSessionRecorder()
+        -> (@Sendable (BackgroundSessionEventBatch) async -> Void)? {
+        withLock { recordBackgroundSessionEvents }
+    }
+
     func itemUUID(for itemID: String, random: any RandomSource) -> UUID {
         withLock {
             if let existing = itemIDs[itemID] { return existing }

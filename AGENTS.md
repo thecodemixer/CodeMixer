@@ -48,6 +48,8 @@ Codemixer/
 ├── scripts/                                 local automation + validation helpers — [`scripts/README.md`](scripts/README.md)
 ├── docs/                                    architecture + style + reference patterns
 ├── Package.swift, src/, tests/               the SPM package (repo root)
+├── migration-tool/                          Custom ACP monorepo (code-conversion + shared libs; Bun).
+│                                            Nested `.gitignore` excludes `node_modules/`, `dist/`, `.codemixer/`.
 
 ```
 
@@ -339,7 +341,7 @@ Use A2UI instead of hand-rolled text-sniffing in `AgentUI` — see
 `docs/architecture.md` §36 for the full wire/trust-boundary walkthrough.
 
 1. In the custom ACP server, require the client to have advertised
-   `A2UISchemaProfile.clientCapabilitiesMetaKey` at `initialize` and **fail the
+   `CodemixerACPKeys.a2ui` at `initialize` and **fail the
    handshake** when it has not. Do **not** add a plain-text fallback: a silent
    degrade surfaces later as raw JSON in chat and hides the real cause (a stale
    client) for hours. Fail at the handshake, where the message can name the
@@ -499,7 +501,8 @@ When extending the codebase after the 2026 maintainability pass:
 | `ModelCatalogTiming` | Automatic model-catalog max age (24h) before re-probe; probe timeout; retained-empty-catalog and unavailable-project messages |
 | `StreamBufferDefaults` | Named `AsyncStream` buffer sizes per layer (event history 500, etc.) |
 | `A2UILimits` | A2UI safety ceilings — payload bytes, batch items, JSON depth/nodes, surfaces/components per session, list expansion, expression depth/call-count, pointer/regex/resolved-string length |
-| `A2UISchemaProfile` | A2UI version/MIME/catalog-id/`_meta`-key constants and the pinned upstream schema manifest (URL + commit + SHA-256 per file) |
+| `CodemixerACPKeys` | Lowercase reverse-DNS keys for CodeMixer-owned ACP extensions |
+| `A2UISchemaProfile` | A2UI version/MIME/catalog-id constants and the pinned upstream schema manifest (URL + commit + SHA-256 per file) |
 | `SystemPaths` | `/usr/bin/env`, `/usr/bin/git`, `/usr/bin/openssl`, Terminal.app |
 | `AppSupportPaths` | `prefs.json`, `sessions.json`, `workspaces.json`, attachments dir, `remote-server.p12` |
 | `ProjectPaths` | per-project `.codemixer/project.json` (incl. optional `webPages` for `ProjectType.webPages`), per-workspace `.codemixer/workspace.json`, per-adapter `workspace-<AgentID>.json` |

@@ -110,6 +110,9 @@ private struct Line: Identifiable {
             (kind, body, tint) = ("attention", "\(title) (\(id)) \(flag)", Theme.signal.warning)
         case .sessionHistoryRestored(let id):
             (kind, body, tint) = ("history", id, Theme.signal.info)
+        case .sessionHistoryReplayChunk(let id, let index, let total, let events):
+            (kind, body, tint) = ("history", "\(id): \(index + 1)/\(total), \(events.count) events",
+                                  Theme.signal.info)
         case .sessionPromptReady(let id):
             (kind, body, tint) = ("ready", id, Theme.signal.success)
         case .sessionsListed(let path, let sessions):

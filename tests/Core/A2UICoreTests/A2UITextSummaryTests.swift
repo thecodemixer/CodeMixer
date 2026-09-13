@@ -12,7 +12,7 @@ struct A2UITextSummaryTests {
         let summary = A2UITextSummary.summary(for: surface)
         #expect(summary.contains("Review required"))
         #expect(summary.contains("Accept A"))
-        #expect(!summary.contains("migrationReviewDecision"))
+        #expect(!summary.contains("reviewDecision"))
     }
 
     @Test("returns a placeholder when the surface has no root yet")

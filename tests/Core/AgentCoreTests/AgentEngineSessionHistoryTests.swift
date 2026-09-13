@@ -31,8 +31,13 @@ struct AgentEngineSessionHistoryTests {
 
         let events = await engine.bus.historySnapshot.map(\.event)
 
-        let userIndex = try #require(events.firstIndex {
-            if case .userTurn(_, let text) = $0 { return text == "Restored prompt" }
+        let chunkIndex = try #require(events.firstIndex {
+            if case .sessionHistoryReplayChunk(_, 0, 1, let replay) = $0 {
+                return replay.contains {
+                    if case .userTurn(_, let text) = $0 { return text == "Restored prompt" }
+                    return false
+                }
+            }
             return false
         })
         let restoredIndex = try #require(events.firstIndex {
@@ -43,7 +48,7 @@ struct AgentEngineSessionHistoryTests {
             if case .sessionPromptReady(let id) = $0 { return id == key.sessionID }
             return false
         })
-        #expect(userIndex < restoredIndex)
+        #expect(chunkIndex < restoredIndex)
         #expect(restoredIndex < readyIndex)
         try await engine.transcriptRepository.shutdown()
     }
@@ -76,6 +81,43 @@ struct AgentEngineSessionHistoryTests {
         try await engine.transcriptRepository.shutdown()
     }
 
+    @Test("large history restoration publishes bounded contiguous chunks")
+    func largeHistoryRestorationIsChunked() async throws {
+        let engine = AgentEngine(seams: .fake())
+        let key = SessionTranscriptKey(
+            projectRoot: TestPaths.underTemporary("engine-history-chunks"),
+            namespace: AgentID.claudeCode.rawValue,
+            sessionID: "session-chunks"
+        )
+        let events = (0..<130).map {
+            AgentEvent.userTurn(
+                id: AdapterTurnID(rawValue: "user-\($0)"),
+                text: "Prompt \($0)"
+            )
+        }
+        try await engine.transcriptRepository.record(events, for: key)
+
+        await engine.restoreHistory(for: key)
+
+        let published = await engine.bus.historySnapshot.map(\.event)
+        let chunks = published.compactMap { event -> (Int, Int, Int)? in
+            if case .sessionHistoryReplayChunk(let id, let index, let total, let replay) = event,
+               id == key.sessionID {
+                return (index, total, replay.count)
+            }
+            return nil
+        }
+        #expect(chunks.map { $0.0 } == [0, 1, 2])
+        #expect(chunks.map { $0.1 } == [3, 3, 3])
+        #expect(chunks.map { $0.2 } == [64, 64, 2])
+        if case .sessionHistoryRestored(let id) = published.last {
+            #expect(id == key.sessionID)
+        } else {
+            Issue.record("Expected restoration marker after every chunk")
+        }
+        try await engine.transcriptRepository.shutdown()
+    }
+
     @Test("prompt remains blocked until the adapter binds the restored session")
     func restoredSessionWaitsForAdapter() async throws {
         let workspace = TestPaths.underTemporary("engine-history-readiness")
@@ -103,5 +145,67 @@ struct AgentEngineSessionHistoryTests {
 
         #expect(await transport.writtenTexts() == ["ready"])
         await engine.shutdown(reason: .naturalExit)
+    }
+
+    @Test("warm activation flushes parked work before restoring history")
+    func warmActivationFlushesParkedWork() async throws {
+        let workspace = TestPaths.underTemporary("engine-history-flush")
+        let engine = AgentEngine(seams: .fake()) { _, _ in ScriptedTransport() }
+        let adapter = RecordingMockAdapter(capabilities: [.resumableSessions])
+        await engine.bootstrap()
+        try await engine.start(adapter: adapter, workspace: workspace)
+
+        #expect(adapter.emit(.sessionStarted(
+            sessionID: "session-4",
+            model: nil,
+            cwd: workspace
+        )))
+        try await Task.sleep(for: .milliseconds(20))
+
+        let activated = await engine.activate(
+            key: AgentRuntimeKey(projectPath: workspace.path, agentID: adapter.id),
+            resumeSessionID: "session-4"
+        )
+
+        #expect(activated)
+        #expect(adapter.recorded.contains(
+            .persistedParkedSessionWork(sessionID: "session-4")
+        ))
+        await engine.shutdown(reason: .naturalExit)
+    }
+
+    @Test("session catalog mutations publish once after the debounce window")
+    func sessionCatalogPublishingIsDebounced() async throws {
+        let clock = FakeClock()
+        let engine = AgentEngine(seams: Seams(
+            clock: clock,
+            random: FakeRandomSource(),
+            environment: FakeEnvironment(),
+            fileSystem: InMemoryFileSystem()
+        ))
+        let root = TestPaths.underTemporary("engine-session-catalog-debounce")
+        try await engine.transcriptRepository.registerSession(
+            "session-5",
+            namespace: AgentID.claudeCode.rawValue,
+            agentID: .claudeCode,
+            in: root
+        )
+
+        await engine.scheduleStoredSessionsPublish(in: root)
+        await engine.scheduleStoredSessionsPublish(in: root)
+        for _ in 0..<20 where clock.pendingSleepCount == 0 {
+            await Task.yield()
+        }
+        #expect(clock.pendingSleepCount >= 1)
+        clock.advance(by: SessionCatalogTiming.mutationRepublishDebounce)
+        try await Task.sleep(for: .milliseconds(20))
+
+        let listedCount = await engine.bus.historySnapshot.reduce(into: 0) { count, item in
+            if case .sessionsListed = item.event {
+                count += 1
+            }
+        }
+        #expect(listedCount == 1)
+        try await engine.transcriptRepository.shutdown()
     }
 }

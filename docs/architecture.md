@@ -408,6 +408,7 @@ public enum AgentEvent: Sendable {
     case error(AgentError)
     case agentDashboard(url: URL, title: String?)
     case sessionAttentionChanged(sessionID: String, title: String, needsAttention: Bool)
+    case sessionHistoryReplayChunk(sessionID: String, index: Int, total: Int, events: [AgentEvent])
     case sessionHistoryRestored(sessionID: String)
     case sessionPromptReady(sessionID: String)
     case sessionsListed(projectPath: URL, sessions: [SessionSummary])
@@ -419,13 +420,13 @@ public enum AgentEvent: Sendable {
 }
 ```
 
-Streaming `session/update` chunks that carry a foreign `sessionId` are routed to `AgentInputs.recordBackgroundSessionEvents` and persisted without entering the foreground UI. Background `session/request_permission` prompts are parked per-session and re-emitted as `permissionRequest` after that session’s `session/load`.
+Streaming `session/update` chunks that carry a foreign `sessionId` are routed to `AgentInputs.recordBackgroundSessionEvents` and persisted without entering the foreground UI. During `session/load`, updates for the requested id (or with no id) are vendor history and are dropped; updates naming another id remain foreign and durable. Before restoring a warm session, the engine asks the adapter to `persistParkedSessionWork`, so its coalesced tail reaches the journal before replay. Background `session/request_permission` prompts are parked per-session and re-emitted as `permissionRequest` after that session’s `session/load`.
 
 ### Categorical roles
 
 | Role | Cases |
 | --- | --- |
-| **Session lifecycle** | `sessionStarted`, `sessionHistoryRestored`, `sessionPromptReady`, `sessionsListed`, `historyImportProgress`, `historyImportFinished`, `engineRestarted`, `stopped`, `error` |
+| **Session lifecycle** | `sessionStarted`, `sessionHistoryReplayChunk`, `sessionHistoryRestored`, `sessionPromptReady`, `sessionsListed`, `historyImportProgress`, `historyImportFinished`, `engineRestarted`, `stopped`, `error` |
 | **Conversation** | `userTurn`, `textDelta`, `assistantText`, `thinkingChunk`, `thinkingComplete`, `clientAction` |
 | **Tool execution** | `toolStart`, `toolProgress`, `toolEnd` |
 | **Permissions** | `permissionRequest`, `permissionAlreadyResolved` (optional `PermissionPrompt.options` for custom ACP buttons); parked until load when for a background session |
@@ -621,6 +622,7 @@ public protocol AgentAdapter: Sendable {
 
     // 5. Event ingestion
     func makeEventStream(inputs: AgentInputs) -> AsyncStream<AgentEvent>
+    func persistParkedSessionWork(sessionID: String) async
 
     // 6. Sending input
     func encodeUserPrompt(_ text: String) -> Data
@@ -933,6 +935,7 @@ public actor MulticastEventBus {
     public func subscribe(after: UUID?) -> Subscription
     public func subscribeWithOutcome(after: UUID?) -> (Subscription, SubscribeOutcome)
     @discardableResult public func publish(_ event: AgentEvent) -> UUID
+    @discardableResult public func publishTransaction(_ events: [AgentEvent]) -> [UUID]
     public func unsubscribe(_ id: UUID)
 }
 ```
@@ -944,6 +947,9 @@ public actor MulticastEventBus {
 - **Ring buffer of last 500 `HistoryEntry` values** for reconnect replay. `subscribe(after:)` replays only entries after the checkpoint; unknown or expired checkpoints replay the full buffer and report `.checkpointExpired` via `subscribeWithOutcome`.
 - **Self-cleaning subscriptions.** Each stream registers `onTermination` to call `unsubscribe`, so cancelled UI tasks and debug tails do not leak continuations.
 - **No reordering.** Events are delivered in publish order to each subscriber.
+- **Contiguous transactions.** Chunked history replay uses one
+  `publishTransaction` call, so no live event can interleave before
+  `sessionHistoryRestored`.
 
 ### Backpressure model
 
@@ -1416,7 +1422,7 @@ public enum ServerFrame: Codable, Sendable {
 }
 ```
 
-Every frame carries `"v": WireVersion.current` (today `5`). Decoders reject mismatches — there is no dual-speak across versions.
+Every frame carries `"v": WireVersion.current` (today `6`). Decoders reject mismatches — there is no dual-speak across versions.
 
 ### Pairing
 
@@ -1794,7 +1800,7 @@ The wire protocol is the most rigid part of the system because clients we don't 
 
 ### Version field
 
-Every frame carries `"v": WireVersion.current` (today `5`), declared in `Core/AgentProtocol/WireVersion.swift`. Decoders read `v` first; mismatches produce `ServerFrame.versionMismatch(supported:)` and a `SilentDiagnostics.wireVersionRejected` record. **There is no dual-speak** — servers and clients must agree on the version.
+Every frame carries `"v": WireVersion.current` (today `6`), declared in `Core/AgentProtocol/WireVersion.swift`. Decoders read `v` first; mismatches produce `ServerFrame.versionMismatch(supported:)` and a `SilentDiagnostics.wireVersionRejected` record. **There is no dual-speak** — servers and clients must agree on the version.
 
 ### Compatibility policy
 
@@ -1955,7 +1961,7 @@ IndexRailView | TranscriptLaneView | WorkLaneView
 
 Custom ACP's per-file pipeline status (a Custom ACP tool's own status enum) is bridged into `AgentEvent.sessionPhaseChanged(sessionID:phase:)`, a small `Codable` `SessionPhase { id, label, ordinal, group }` — deliberately file-scoped only; a tool's run/overall status (when it has one) stays exclusively in the Custom ACP overview dashboard WebView and is not duplicated here.
 
-The key design constraint: phase is an **ordered transcript entry**, not session-level `_meta`. A Custom ACP tool appends a `{ kind: "phase", status, wave? }` transcript chunk from the same status-commit seam that mutates per-file state, so it persists to `TranscriptStore` (JSONL) and replays in order on `session/load` for free — no special re-emit hack. `ACPEventDecoder+Streaming` decodes the resulting `codemixer.dev/phase_update` session-update into `sessionPhaseChanged` on the live path; `ACPConversationTurn` carries a `phase` field and `ACPSessionStoreCodec.events(from:)` re-derives `sessionPhaseChanged` from it on the **cached**-transcript path too, so phase grouping survives both live and reopened sessions.
+The key design constraint: phase is an **ordered transcript entry**, not session-level `_meta`. A Custom ACP tool appends a `{ kind: "phase", status, wave? }` transcript chunk from the same status-commit seam that mutates per-file state, so it persists to `TranscriptStore` (JSONL) and replays in order on `session/load` for free — no special re-emit hack. `ACPEventDecoder+Streaming` decodes the resulting `com.codecave.codemixer/phase_update` session-update into `sessionPhaseChanged` on the live path; `ACPConversationTurn` carries a `phase` field and `ACPSessionStoreCodec.events(from:)` re-derives `sessionPhaseChanged` from it on the **cached**-transcript path too, so phase grouping survives both live and reopened sessions.
 
 ### Deviations from `docs/style/visual-style.md`
 
@@ -2219,8 +2225,10 @@ rule).
 
 ### 36.6 ACP capability negotiation
 
-CodeMixer's `ACPInputEncoding.bootstrap` advertises A2UI support on
-`initialize` via a namespaced `_meta` key:
+CodeMixer's ACP extensions use the lowercase `com.codecave.codemixer` wire
+namespace owned by `CodemixerACPKeys`. It is deliberately separate from the
+capitalized macOS bundle identifier in `AppIdentity`. `ACPInputEncoding.bootstrap`
+advertises A2UI support on `initialize` via the namespaced `_meta` key:
 
 ```json
 {
@@ -2235,15 +2243,15 @@ CodeMixer's `ACPInputEncoding.bootstrap` advertises A2UI support on
 }
 ```
 
-`A2UISchemaProfile.clientCapabilitiesMetaKeyAlias` (`"a2ui"`, unnamespaced)
-is accepted as an inbound compatibility alias when reading a *server's*
-capabilities, but CodeMixer never emits the bare alias itself.
+The bare `_meta.a2ui` key is not accepted. Clients and servers fail closed when
+the namespaced capability is absent; no compatibility alias or dual emission is
+supported.
 
 A Custom ACP server that emits A2UI must **require** this capability rather
 than degrade without it. A well-behaved tool throws an
 `UnsupportedClientError`-equivalent from `initialize` when either the A2UI
-catalog capability (`A2UISchemaProfile.clientCapabilitiesMetaKey`) or
-`codemixer.dev/sessionNew` is absent. There is deliberately no plain-text
+catalog capability (`CodemixerACPKeys.a2ui`) or
+`CodemixerACPKeys.sessionNew` is absent. There is deliberately no plain-text
 fallback: a tool that degrades silently surfaces only as raw
 `Reviewer A: {"verdict":…}` JSON in chat hours into a run, with the actual
 cause (a CodeMixer build predating the capability) invisible. Failing the
@@ -2326,7 +2334,7 @@ data, not a name or diagnostic string.
 | Layer | Coverage |
 | --- | --- |
 | Schema/limit/catalog structural rules | `tests/Core/A2UICoreTests/*` |
-| Wire round-trip (`AgentEvent.a2uiBatch`, both new `AgentCommand` cases) | `tests/Remote/RemoteParityTests/WireCodecParityTests.swift`, `tests/Core/AgentProtocolTests/WireFrameRoundTripTests.swift` (`WireVersion.current == .v5`) |
+| Wire round-trip (`AgentEvent.a2uiBatch`, history replay chunks, both A2UI `AgentCommand` cases) | `tests/Remote/RemoteParityTests/WireCodecParityTests.swift`, `tests/Core/AgentProtocolTests/WireFrameRoundTripTests.swift` (`WireVersion.current == .v6`) |
 | ACP decode/encode (capability, resource extraction, action/error encoding) | `tests/AgenticCLIs/AgentClientProtocol/ACPAdapterTests/*` |
 | Durable persistence/replay | `tests/Core/AgentCoreTests/SessionTranscriptTests.swift` |
 | `EngineViewModel` reduction | `tests/AgentUITests/EngineViewModelTests.swift` |

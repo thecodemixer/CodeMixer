@@ -253,15 +253,18 @@ extension EngineViewModel {
         case .clientAction(let action):
             messages.append(.clientAction(action))
         case .agentDashboard(let url, let title):
+            let urlChanged = dashboardURL != url
             if customACPRestartPhase != .idle {
                 // Drop ads that arrive during close/teardown; only accept after
                 // cold openProject has completed.
                 guard customACPRestartPhase == .awaitingDashboard else { return }
                 customACPRestartPhase = .idle
                 status = .idle
-                dashboardLoadGeneration += 1
             }
             dashboardURL = url
+            if urlChanged {
+                dashboardLoadGeneration += 1
+            }
             if let title, !title.isEmpty {
                 dashboardTitle = title
             }
@@ -270,14 +273,21 @@ extension EngineViewModel {
         case .sessionAttentionChanged(let sessionID, _, let needsAttention):
             updateSessionAttention(sessionID: sessionID, needsAttention: needsAttention)
         case .sessionHistoryRestored(let id):
+            applyPendingHistoryReplay(sessionID: id)
             noteHistoryRestored(sessionID: id)
+        case .sessionHistoryReplayChunk(let id, let index, let total, let events):
+            stageHistoryReplayChunk(sessionID: id,
+                                    index: index,
+                                    total: total,
+                                    events: events)
         case .sessionPromptReady(let id):
             notePromptReady(sessionID: id)
         case .sessionsListed(let projectPath, let sessions):
             let path = projectPath.standardizedFileURL.path
             let filtered = SessionNavigatorFiltering.preferringSingleOverview(sessions)
-            sessionsByProject[path] = filtered
             loadingProjectPaths.remove(path)
+            guard sessionsByProject[path] != filtered else { return }
+            sessionsByProject[path] = filtered
             let liveIDs = Set(filtered.map(\.id))
             pendingPermissionsBySession = pendingPermissionsBySession.filter { key, _ in
                 key == Self.unscopedPermissionSessionKey || liveIDs.contains(key)
@@ -294,11 +304,62 @@ extension EngineViewModel {
         }
     }
 
+    /// Stages replay chunks outside observable state so SwiftUI sees one
+    /// committed history mutation when `sessionHistoryRestored` arrives.
+    func stageHistoryReplayChunk(sessionID id: String,
+                                 index: Int,
+                                 total: Int,
+                                 events: [AgentEvent]) {
+        let displayedSessionID = sessionID
+            ?? overviewSessionID(forProjectPath: workspace?.path)
+        guard displayedSessionID == id,
+              total > 0,
+              index >= 0,
+              index < total else { return }
+        if pendingHistoryReplaySessionID != id || pendingHistoryReplayTotal != total {
+            pendingHistoryReplaySessionID = id
+            pendingHistoryReplayTotal = total
+            pendingHistoryReplayChunks = [:]
+            pendingHistoryReplayIsValid = true
+        }
+        if pendingHistoryReplayChunks[index] != nil
+            || events.contains(where: { !$0.isValidHistoryReplayPayload }) {
+            pendingHistoryReplayIsValid = false
+        }
+        pendingHistoryReplayChunks[index] = events
+    }
+
+    func applyPendingHistoryReplay(sessionID id: String) {
+        guard pendingHistoryReplaySessionID == id,
+              pendingHistoryReplayIsValid,
+              pendingHistoryReplayChunks.count == pendingHistoryReplayTotal else {
+            clearPendingHistoryReplay()
+            return
+        }
+        let events = (0..<pendingHistoryReplayTotal).flatMap {
+            pendingHistoryReplayChunks[$0] ?? []
+        }
+        clearPendingHistoryReplay()
+        for event in events {
+            apply(event)
+        }
+    }
+
+    func clearPendingHistoryReplay() {
+        pendingHistoryReplaySessionID = nil
+        pendingHistoryReplayTotal = 0
+        pendingHistoryReplayChunks = [:]
+        pendingHistoryReplayIsValid = true
+    }
+
     /// Live counterpart to `SessionTranscript.applyA2UIBatch`: folds a batch
     /// into `a2uiSurfaces` through the one shared `A2UISurfaceReducer`, then
     /// creates/updates/removes the corresponding `.a2uiSurface` ordering
     /// marker in `messages` exactly like `.toolCall` does for tool calls.
     func applyA2UIBatch(_ batch: A2UIServerBatch) {
+        let displayedSessionID = sessionID
+            ?? overviewSessionID(forProjectPath: workspace?.path)
+        guard batch.transcriptKey.sessionID == displayedSessionID else { return }
         noteAgentReplyObserved()
         let result = A2UISurfaceReducer.apply(batch,
                                               to: a2uiSurfaces,
@@ -430,6 +491,7 @@ extension EngineViewModel {
     }
 
     func clearConversationState() {
+        clearPendingHistoryReplay()
         messages = []
         activeToolCalls = []
         changedFiles = []
@@ -496,6 +558,19 @@ extension EngineViewModel {
             activity = .waitingPermission
         } else if activity == .waitingPermission {
             activity = .idle
+        }
+    }
+}
+
+private extension AgentEvent {
+    var isValidHistoryReplayPayload: Bool {
+        switch self {
+        case .userTurn, .assistantText, .thinkingChunk, .thinkingComplete,
+             .toolStart, .toolProgress, .toolEnd, .fileTouched, .fileReverted,
+             .clientAction, .sessionPhaseChanged, .a2uiBatch:
+            return true
+        default:
+            return false
         }
     }
 }

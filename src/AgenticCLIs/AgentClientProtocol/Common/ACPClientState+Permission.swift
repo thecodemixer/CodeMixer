@@ -41,7 +41,7 @@ extension ACPClientState {
     }
 
     /// Drop parked background reviews when the owning session is archived
-    /// (migration Restart) so a later `session/load` cannot re-fire stale prompts.
+    /// (dashboard Restart) so a later `session/load` cannot re-fire stale prompts.
     @discardableResult
     func clearParkedPermissions(sessionID: String) -> [ParkedPermission] {
         withLock {

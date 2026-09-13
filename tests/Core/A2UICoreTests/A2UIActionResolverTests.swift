@@ -15,7 +15,7 @@ struct A2UIActionResolverTests {
             Issue.record("expected success, got \(result)")
             return
         }
-        #expect(resolution.name == "migrationReviewDecision")
+        #expect(resolution.name == "reviewDecision")
         #expect(resolution.context["optionId"]?.stringValue == "accept_a")
         #expect(resolution.context["nonce"]?.stringValue == "n1")
     }
@@ -92,7 +92,7 @@ struct A2UIActionResolverTests {
             "child": .string("btn-label"),
             "action": .object([
                 "event": .object([
-                    "name": .string("migrationReviewDecision"),
+                    "name": .string("reviewDecision"),
                     "context": .object([
                         "optionId": .string("accept_a"),
                         "nonce": .string("n1"),

@@ -9,9 +9,9 @@ struct ACPInitializeResult: Sendable, Equatable {
     static func parse(_ value: JSONValue?) -> ACPInitializeResult {
         let meta = value?["_meta"]?.objectValue
             ?? value?["agentInfo"]?.objectValue?["_meta"]?.objectValue
-        let dashboardURL = meta?["codemixer.dev/dashboardUrl"]?.stringValue
+        let dashboardURL = meta?[CodemixerACPKeys.dashboardUrl]?.stringValue
             .flatMap(URL.init(string:))
-        let dashboardTitle = meta?["codemixer.dev/dashboardTitle"]?.stringValue
+        let dashboardTitle = meta?[CodemixerACPKeys.dashboardTitle]?.stringValue
         let authMethodID = (value?["authMethods"]?.arrayValue ?? [])
             .compactMap { $0["id"]?.stringValue }
             .first

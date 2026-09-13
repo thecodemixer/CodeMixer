@@ -120,8 +120,18 @@ public final class EngineViewModel {
     /// sidebar; distinct from `workspace`, which tracks the active project.
     /// Set by the app shell when adopting / opening / closing a workspace.
     public var workspaceRoot: URL?
-    public internal(set) var messages: [Message] = []
-    public internal(set) var activeToolCalls: [ToolCallEntry] = []
+    public internal(set) var messages: [Message] = [] {
+        didSet {
+            conversationTurnsRevision &+= 1
+            effectiveWorkToolCallsRevision &+= 1
+        }
+    }
+    public internal(set) var activeToolCalls: [ToolCallEntry] = [] {
+        didSet {
+            conversationTurnsRevision &+= 1
+            effectiveWorkToolCallsRevision &+= 1
+        }
+    }
     /// Canonical, generation-keyed A2UI surfaces for the live session, keyed
     /// by surfaceId. Read live from `.a2uiSurface(surfaceID:)` message rows —
     /// this is the one generalized replacement for every vendor-specific
@@ -217,7 +227,9 @@ public final class EngineViewModel {
     public internal(set) var dashboardLoadGeneration: Int = 0
     public internal(set) var diagnostics: [DiagnosticEntry] = []
     public internal(set) var status: StatusLine = .idle
-    public internal(set) var activity: ActivitySubstate = .idle
+    public internal(set) var activity: ActivitySubstate = .idle {
+        didSet { conversationTurnsRevision &+= 1 }
+    }
     public internal(set) var changedFiles: [ChangedFile] = []
     /// WebSocket peers attached to `RemoteControlServer` (server-side count).
     /// In Mode B includes the loopback GUI; in Mode A counts external peers only.
@@ -348,21 +360,30 @@ public final class EngineViewModel {
 
     /// Pinned turn in the index rail. `nil` means "follow the live turn" —
     /// the transcript and work lane always track the newest turn.
-    public var selectedTurnID: UUID?
+    public var selectedTurnID: UUID? {
+        didSet { effectiveWorkToolCallsRevision &+= 1 }
+    }
     /// Pinned phase-group header in the index rail (Custom ACP sessions only).
-    public var selectedPhaseID: String?
+    public var selectedPhaseID: String? {
+        didSet { effectiveWorkToolCallsRevision &+= 1 }
+    }
     /// Ordered, file-level phase markers for the current session, anchored to
     /// a position in `messages` so turns can be phase-tagged retroactively —
     /// including turns already replayed before the marker arrived (durable /
     /// cached replay re-emits markers in original order). Reset on session switch.
-    var phaseMarkers: [PhaseMarker] = []
+    var phaseMarkers: [PhaseMarker] = [] {
+        didSet {
+            conversationTurnsRevision &+= 1
+            effectiveWorkToolCallsRevision &+= 1
+        }
+    }
     /// When cached background phases are promoted and `session/load` then
     /// replays the same phase prefix, this cursor suppresses the duplicate
     /// replay without hiding real later rounds.
     var phaseReplayDedupCursor: Int?
     /// Phase markers observed while another session (usually the Custom ACP
     /// overview dashboard) is foregrounded. Promoted when the matching file
-    /// session is opened so background migration progress still appears in
+    /// session is opened so background pipeline progress still appears in
     /// the rail immediately.
     var pendingPhaseMarkersBySession: [String: [PhaseMarker]] = [:]
     /// Per-session `(messageCount, Date)` snapshot captured when a session
@@ -391,6 +412,17 @@ public final class EngineViewModel {
     var dedupArmedAt: Date?
     var dedupDropsRemaining: Int = 0
     var snapshotWaiters: [SnapshotKind: CheckedContinuation<Data, any Error>] = [:]
+
+    @ObservationIgnored var conversationTurnsRevision: UInt = 0
+    @ObservationIgnored var effectiveWorkToolCallsRevision: UInt = 0
+    @ObservationIgnored var cachedConversationTurns: (revision: UInt, value: [ConversationTurn])?
+    @ObservationIgnored var cachedEffectiveWorkToolCalls: (revision: UInt, value: [ToolCallEntry])?
+    @ObservationIgnored var conversationTurnsProjectionCount = 0
+    @ObservationIgnored var effectiveWorkToolCallsProjectionCount = 0
+    @ObservationIgnored var pendingHistoryReplaySessionID: String?
+    @ObservationIgnored var pendingHistoryReplayTotal = 0
+    @ObservationIgnored var pendingHistoryReplayChunks: [Int: [AgentEvent]] = [:]
+    @ObservationIgnored var pendingHistoryReplayIsValid = true
 
     var echoWindowSeconds: TimeInterval {
         TimeInterval(ActivityTiming.userTurnEchoWindow.components.seconds)

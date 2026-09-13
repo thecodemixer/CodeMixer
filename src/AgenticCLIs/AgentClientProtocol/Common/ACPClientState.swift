@@ -89,6 +89,7 @@ public final class ACPClientState: @unchecked Sendable {
     var replayEventID: UUID?
     /// Live-turn thought accumulator (persisted on prompt finalize).
     var thoughtText = ""
+    var recordBackgroundSessionEvents: (@Sendable (BackgroundSessionEventBatch) async -> Void)?
     var parkedPermissionsBySession: [String: [ParkedPermission]] = [:]
     /// Coalesced background-session stream text (sessionId → role + text).
     var foreignBuffers: [String: (role: ACPTurnRole, text: String)] = [:]

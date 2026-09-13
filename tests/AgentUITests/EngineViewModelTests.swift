@@ -91,6 +91,51 @@ struct EngineViewModelTests {
         await bus.shutdown()
     }
 
+    @Test("history replay chunks fold into the UI only after completion")
+    func historyReplayChunksFoldAtomically() {
+        let (vm, _) = makeModel()
+        let root = TestPaths.underTemporary("history-chunks")
+        vm.beginSessionSwitch(projectPath: root.path, sessionID: "restored")
+
+        vm.apply(.sessionHistoryReplayChunk(
+            sessionID: "restored",
+            index: 0,
+            total: 2,
+            events: [.userTurn(
+                id: AdapterTurnID(rawValue: "user-1"),
+                text: "Restored prompt"
+            )]
+        ))
+        #expect(vm.messages.isEmpty)
+
+        vm.apply(.sessionHistoryReplayChunk(
+            sessionID: "restored",
+            index: 1,
+            total: 2,
+            events: [.assistantText(
+                id: "assistant-1",
+                blockID: "block-1",
+                text: "Restored reply",
+                isFinal: true
+            )]
+        ))
+        #expect(vm.messages.isEmpty)
+
+        vm.apply(.sessionHistoryRestored(sessionID: "restored"))
+
+        #expect(vm.messages.count == 2)
+        if case .user(_, let text) = vm.messages[0] {
+            #expect(text == "Restored prompt")
+        } else {
+            Issue.record("Expected restored user message")
+        }
+        if case .assistant(_, let text) = vm.messages[1] {
+            #expect(text == "Restored reply")
+        } else {
+            Issue.record("Expected restored assistant message")
+        }
+    }
+
     @Test("sessionPromptReady unlocks even when the adapter reports a different session id")
     func sessionPromptReadyUnlocksAcrossSessionIDMismatch() async {
         let (vm, bus) = makeModel()
@@ -182,6 +227,66 @@ struct EngineViewModelTests {
         #expect(vm.showsOverviewDashboard)
 
         await bus.shutdown()
+    }
+
+    @Test("A2UI batches only affect the displayed transcript owner")
+    func a2uiBatchRespectsTranscriptOwner() {
+        let (vm, _) = makeModel()
+        let workspace = TestPaths.underTemporary("a2ui-owner")
+        vm.workspace = workspace
+        vm.sessionID = "file:A.cs"
+        vm.isAwaitingFirstReplyForPrompt = true
+        let batch = A2UIServerBatch(
+            agentID: "implement",
+            transcriptKey: .init(
+                projectRootPath: workspace.path,
+                namespace: "implement",
+                sessionID: "file:B.cs"
+            ),
+            resourceURI: "a2ui://review",
+            items: [],
+            recordedAt: .distantPast
+        )
+
+        vm.apply(.a2uiBatch(batch))
+
+        #expect(vm.isAwaitingFirstReplyForPrompt)
+        #expect(vm.a2uiSurfaces.isEmpty)
+    }
+
+    @Test("A2UI batches bind to the exact overview transcript")
+    func a2uiBatchBindsToOverviewTranscript() {
+        let (vm, _) = makeModel()
+        let workspace = TestPaths.underTemporary("a2ui-overview-owner")
+        vm.workspace = workspace
+        vm.detailPane = .dashboard
+        vm.sessionsByProject[workspace.path] = [
+            SessionSummary(
+                id: "control",
+                agentID: .other,
+                workspace: workspace,
+                title: "Agent Dashboard",
+                lastActivity: .distantPast,
+                messageCount: 0,
+                isOverview: true
+            ),
+        ]
+        vm.isAwaitingFirstReplyForPrompt = true
+        let batch = A2UIServerBatch(
+            agentID: "implement",
+            transcriptKey: .init(
+                projectRootPath: workspace.path,
+                namespace: "implement",
+                sessionID: "control"
+            ),
+            resourceURI: "a2ui://overview",
+            items: [],
+            recordedAt: .distantPast
+        )
+
+        vm.apply(.a2uiBatch(batch))
+
+        #expect(!vm.isAwaitingFirstReplyForPrompt)
     }
 
     @Test("session attention updates the matching loaded session")
@@ -1414,8 +1519,8 @@ struct EngineViewModelTests {
         await bus.shutdown()
     }
 
-    @Test("returning to overview from a file chat reloads the dashboard WebView")
-    func returnToOverviewFromFileChatReloadsDashboard() async {
+    @Test("returning to overview keeps the mounted dashboard when its URL is unchanged")
+    func returnToOverviewKeepsDashboardMount() async {
         let (vm, bus) = makeModel()
         let workspace = TestPaths.underTemporary("proj")
         let overviewURL = URL(string: "http://127.0.0.1:9422/")!
@@ -1433,7 +1538,7 @@ struct EngineViewModelTests {
                 id: "control",
                 agentID: .other,
                 workspace: workspace,
-                title: "Migration Dashboard",
+                title: "Agent Dashboard",
                 lastActivity: .distantPast,
                 messageCount: 0,
                 isOverview: true,
@@ -1459,7 +1564,7 @@ struct EngineViewModelTests {
         #expect(vm.showsOverviewDashboard)
         #expect(vm.sessionID == nil)
         #expect(vm.dashboardURL == overviewURL)
-        #expect(vm.dashboardLoadGeneration == generationBeforeReturn + 1)
+        #expect(vm.dashboardLoadGeneration == generationBeforeReturn)
 
         await bus.shutdown()
     }
@@ -1481,7 +1586,7 @@ struct EngineViewModelTests {
                 id: "control",
                 agentID: .other,
                 workspace: workspace,
-                title: "Migration Dashboard",
+                title: "Agent Dashboard",
                 lastActivity: .distantPast,
                 messageCount: 0,
                 isOverview: true,
@@ -1493,6 +1598,36 @@ struct EngineViewModelTests {
         #expect(vm.showsOverviewDashboard)
         #expect(vm.sessionID == nil)
         #expect(vm.dashboardURL == overviewURL)
+
+        await bus.shutdown()
+    }
+
+    @Test("openOverview on the active project reopens when dashboard URL was cleared")
+    func openOverviewSameProjectReopensWhenDashboardMissing() async {
+        let port = RecordingCommandPort()
+        let bus = MulticastEventBus()
+        let vm = EngineViewModel(engine: port, bus: bus, clock: FakeClock(), random: FakeRandomSource())
+        let project = TestPaths.workspace("ws/custom-acp")
+        vm.workspace = project
+        vm.sessionID = "file:Orders.cs"
+        vm.dashboardURL = nil
+        vm.detailPane = .conversation
+        vm.projectCapabilities[project.path] = .init(
+            supportsResumableSessions: true,
+            supportsOverviewDashboard: true
+        )
+
+        vm.openOverview(projectPath: project.path)
+        await drain()
+
+        #expect(vm.showsOverviewDashboard)
+        #expect(vm.sessionID == nil)
+        #expect(!port.commands.contains {
+            if case .openProject(let path, let resume) = $0 {
+                return path == project.path && resume == nil
+            }
+            return false
+        })
 
         await bus.shutdown()
     }
@@ -1518,7 +1653,7 @@ struct EngineViewModelTests {
 
     @Test("openSession on an overview row routes to the dashboard without session load")
     func openSessionOverviewRowRoutesToDashboard() async {
-        let port = StubCommandPort()
+        let port = RecordingCommandPort()
         let bus = MulticastEventBus()
         let vm = EngineViewModel(engine: port, bus: bus)
         let workspace = TestPaths.underTemporary("proj")
@@ -1535,7 +1670,7 @@ struct EngineViewModelTests {
                 id: "control",
                 agentID: .other,
                 workspace: workspace,
-                title: "Migration Dashboard",
+                title: "Agent Dashboard",
                 lastActivity: .distantPast,
                 messageCount: 0,
                 isOverview: true,
@@ -1544,9 +1679,16 @@ struct EngineViewModelTests {
         ]
 
         vm.openSession(projectPath: workspace.path, id: "control")
+        await drain()
         #expect(vm.showsOverviewDashboard)
         #expect(vm.sessionID == nil)
         #expect(vm.dashboardURL == overviewURL)
+        #expect(port.commands.contains {
+            if case .openProject(let path, let resume) = $0 {
+                return path == workspace.path && resume == "control"
+            }
+            return false
+        })
 
         await bus.shutdown()
     }

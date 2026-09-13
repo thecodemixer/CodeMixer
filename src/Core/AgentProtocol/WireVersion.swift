@@ -29,6 +29,8 @@ public enum WireVersion: Int, Sendable, Codable {
     /// those are type-level changes only. `WireFrameRoundTripTests`
     /// pins the encodings.
     case v5 = 5
+    /// Adds atomic, chunked project-local session-history replay.
+    case v6 = 6
 
-    public static let current: WireVersion = .v5
+    public static let current: WireVersion = .v6
 }

@@ -37,6 +37,25 @@ struct MulticastEventBusTests {
         await bus.shutdown()
     }
 
+    @Test("publishTransaction appends and broadcasts one contiguous ordered group")
+    func transactionOrder() async {
+        let bus = MulticastEventBus(historyLimit: 8)
+        let sub = await bus.subscribe()
+        let events: [AgentEvent] = [
+            .userTurn(id: AdapterTurnID(rawValue: "u1"), text: "first"),
+            .assistantText(id: "a1", blockID: "a1", text: "second", isFinal: true),
+            .sessionHistoryRestored(sessionID: "s1"),
+        ]
+
+        let ids = await bus.publishTransaction(events)
+
+        var iterator = sub.stream.makeAsyncIterator()
+        let received = await [iterator.next(), iterator.next(), iterator.next()]
+        #expect(received.compactMap { $0?.id } == ids)
+        #expect(await bus.historySnapshot.map(\.id) == ids)
+        await bus.shutdown()
+    }
+
     @Test("History ring evicts the oldest event when capacity is exceeded")
     func historyEviction() async {
         let limit = 5

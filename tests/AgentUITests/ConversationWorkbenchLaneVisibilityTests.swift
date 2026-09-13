@@ -58,10 +58,10 @@ struct ConversationWorkbenchLaneVisibilityTests {
         #expect(!SessionScrubber.shouldShow(for: vm))
 
         await bus.publish(.sessionPhaseChanged(sessionID: "s1",
-                                               phase: SessionPhase(id: "migrating",
-                                                                   label: "Migrate",
+                                               phase: SessionPhase(id: "implementing",
+                                                                   label: "Implement",
                                                                    ordinal: 1,
-                                                                   group: .migrate)))
+                                                                   group: .implement)))
         await drain()
 
         #expect(SessionScrubber.segmentCount(for: vm) >= 2)
@@ -92,7 +92,7 @@ struct ConversationWorkbenchLaneVisibilityTests {
         defer { vm.unsubscribe() }
 
         await bus.publish(.sessionStarted(sessionID: "s1", model: nil, cwd: TestPaths.underTemporary("proj")))
-        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: UUID().uuidString), text: "migrate orders.ts"))
+        await bus.publish(.userTurn(id: AdapterTurnID(rawValue: UUID().uuidString), text: "implement orders.ts"))
         await bus.publish(.toolStart(id: "call-1", name: "edit_file", input: ToolInput(summary: "orders.ts"), startedAt: Date()))
         await drain()
 

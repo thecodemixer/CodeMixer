@@ -94,32 +94,6 @@ extension ACPEventDecoder {
         await updateSessionMetadata(.registered(sessionID: sessionID,
                                                 title: nil))
         var events: [AgentEvent] = []
-        // Background work while the user watched another session (overview) may
-        // still sit in the foreign buffer — persist it so local history below
-        // includes the latest coalesced turn.
-        if let pending = state.flushForeignBuffer(sessionID: sessionID),
-           !pending.text.isEmpty {
-            let bufferedEvents: [AgentEvent]
-            switch pending.role.stored {
-            case .user:
-                bufferedEvents = [.userTurn(id: AdapterTurnID(rawValue: random.uuid().uuidString),
-                                            text: pending.text)]
-            case .thinking:
-                let id = random.uuid()
-                bufferedEvents = [
-                    .thinkingChunk(blockID: id, delta: pending.text),
-                    .thinkingComplete(blockID: id, duration: .zero),
-                ]
-            default:
-                let id = random.uuid().uuidString
-                bufferedEvents = [.assistantText(id: id,
-                                                 blockID: id,
-                                                 text: pending.text,
-                                                 isFinal: true)]
-            }
-            await recordBackgroundSessionEvents(.init(sessionID: sessionID,
-                                                      events: bufferedEvents))
-        }
         events.insert(.sessionStarted(
             sessionID: sessionID,
             model: modelCatalog.currentModelID,
@@ -153,10 +127,9 @@ extension ACPEventDecoder {
         for session in sessions {
             guard let id = session["sessionId"]?.stringValue else { continue }
             let meta = session["_meta"]?.objectValue
-            if let isOverview = meta?["codemixer.dev/overviewSession"]?.boolValue
-                ?? meta?["overviewSession"]?.boolValue {
+            if let isOverview = meta?[CodemixerACPKeys.overviewSession]?.boolValue {
                 if isOverview {
-                    let overviewURL = meta?["codemixer.dev/dashboardUrl"]?.stringValue
+                    let overviewURL = meta?[CodemixerACPKeys.dashboardUrl]?.stringValue
                         .flatMap(URL.init(string:))
                     await updateSessionMetadata(.markAsOverview(sessionID: id,
                                                                 url: overviewURL))

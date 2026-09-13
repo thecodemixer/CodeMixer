@@ -9,7 +9,7 @@ enum SessionNavigatorFiltering {
     /// `dashboardTitle` arrives from `agentDashboard`), and archived sessions.
     ///
     /// Archived rows are dropped because archiving is how an agent retires a
-    /// session it no longer owns — a migration Restart archives every per-file
+    /// session it no longer owns — a dashboard Restart archives every per-file
     /// session so the navigator reflects the new run, not the superseded one.
     static func chatSessions(from sessions: [SessionSummary],
                              dashboardTitle: String?) -> [SessionSummary] {

@@ -241,6 +241,35 @@ struct SessionTranscriptRepositoryTests {
         try await repository.shutdown()
     }
 
+    @Test("catalog ordering is stable when activity timestamps tie")
+    func catalogOrderingBreaksTimestampTies() async throws {
+        let fileSystem = InMemoryFileSystem()
+        let clock = FakeClock(now: Date(timeIntervalSince1970: 1_700_000_000))
+        let root = TestPaths.underTemporary("transcript-repository-stable-order")
+        let repository = makeRepository(
+            fileSystem: fileSystem,
+            clock: clock,
+            ownerPID: 502
+        )
+        let activity = clock.now()
+
+        try await repository.importCatalog(
+            [
+                ImportedSession(id: "z-session", lastActivity: activity, events: []),
+                ImportedSession(id: "a-session", lastActivity: activity, events: []),
+            ],
+            namespace: AgentID.claudeCode.rawValue,
+            agentID: .claudeCode,
+            into: root
+        )
+
+        let first = try await repository.sessions(inProject: root)
+        let second = try await repository.sessions(inProject: root)
+        #expect(first.map(\.id) == ["a-session", "z-session"])
+        #expect(second == first)
+        try await repository.shutdown()
+    }
+
     @Test("touched files relativize against the agent working directory, not the project root")
     func touchedFilesRelativizeAgainstWorkingDirectory() async throws {
         let fileSystem = InMemoryFileSystem()

@@ -59,4 +59,23 @@ struct ProjectInfoSheetTests {
         let info = ProjectInfoPresentation.make(from: project)
         #expect(info.workingDirectoryPath == "/workspace/api")
     }
+
+    @Test("Custom projects expose transport and arguments in detail rows")
+    @MainActor
+    func customProjectDetailRowsOmitExecutablePath() {
+        let project = WorkspaceProjectsStore.ProjectRef(
+            path: "/workspace/convert",
+            displayName: "convert",
+            projectType: .custom(CustomAgentRef(
+                id: "id",
+                displayName: "Mixer",
+                transport: .agentClientProtocol,
+                executablePath: "/bin/custom-acp",
+                arguments: ["acp"]
+            ))
+        )
+        let info = ProjectInfoPresentation.make(from: project)
+        #expect(info.detailRows.map(\.label) == ["Arguments", "Transport"])
+        #expect(info.detailRows.first?.value == "acp")
+    }
 }

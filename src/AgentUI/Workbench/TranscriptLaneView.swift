@@ -76,6 +76,12 @@ struct TranscriptLaneView: View {
                    value: isConversationEmpty)
         .animation(Theme.motion.resolve(Theme.motion.changing, reduceMotion: reduceMotion),
                    value: autoScroll.isFollowing)
+        .transaction { transaction in
+            if model.isSwitchingSession {
+                transaction.animation = nil
+                transaction.disablesAnimations = true
+            }
+        }
         .onChange(of: model.sessionID) { _, _ in
             autoScroll.resetForNewSession()
             lastAutoScrolledTextLength = 0
@@ -102,22 +108,16 @@ struct TranscriptLaneView: View {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     let focusThinkingIndex = focusThinkingRowIndex
                     let lastUserIndex = lastUserMessageIndex
-                    ForEach(transcriptMessageIndices, id: \.self) { idx in
-                        let message = model.messages[idx]
-                        // Tool-call markers carry zero chrome here — they render
-                        // in the work lane instead, and skipping their padding
-                        // avoids a phantom gap where a card used to sit.
-                        if !isToolCall(message) {
-                            rowView(for: message,
-                                    idx: idx,
-                                    focusThinkingIndex: focusThinkingIndex,
-                                    lastUserIndex: lastUserIndex)
-                                .id(message.id)
-                                .padding(.horizontal, Theme.spacing.s16)
-                                .background(matchIndices.contains(idx) && idx == safeCurrentMatchIdx
-                                            ? Theme.signal.info.opacity(Theme.opacity.quiet) : Color.clear)
-                                .padding(.bottom, Theme.spacing.s16)
-                        }
+                    ForEach(transcriptRows) { row in
+                        rowView(for: row.message,
+                                idx: row.index,
+                                focusThinkingIndex: focusThinkingIndex,
+                                lastUserIndex: lastUserIndex)
+                            .id(row.id)
+                            .padding(.horizontal, Theme.spacing.s16)
+                            .background(matchIndices.contains(row.index) && row.index == safeCurrentMatchIdx
+                                        ? Theme.signal.info.opacity(Theme.opacity.quiet) : Color.clear)
+                            .padding(.bottom, Theme.spacing.s16)
                     }
                     Color.clear
                         .frame(height: Theme.spacing.s48)
@@ -139,7 +139,7 @@ struct TranscriptLaneView: View {
             }
             .background(Theme.surface.canvas)
             .onChange(of: model.messages.last?.id) { _, latest in
-                guard latest != nil, !searchVisible else { return }
+                guard latest != nil, !searchVisible, !model.isSwitchingSession else { return }
                 lastAutoScrolledTextLength = model.messages.last?.textContent?.count ?? 0
                 guard shouldFollowLivePhase else { return }
                 if isLastMessageFromUser {
@@ -151,6 +151,7 @@ struct TranscriptLaneView: View {
             }
             .onChange(of: model.messages.last?.textContent) { _, text in
                 guard !searchVisible,
+                      !model.isSwitchingSession,
                       model.messages.last?.id != nil,
                       autoScroll.isFollowing,
                       shouldFollowLivePhase else { return }
@@ -167,8 +168,16 @@ struct TranscriptLaneView: View {
                 scrollToCurrentMatch(proxy: proxy)
             }
             .onChange(of: autoScroll.isFollowing) { wasFollowing, isFollowing in
-                guard !wasFollowing, isFollowing, !searchVisible else { return }
+                guard !wasFollowing,
+                      isFollowing,
+                      !searchVisible,
+                      !model.isSwitchingSession else { return }
                 scrollToConversationEnd(proxy: proxy, animated: true)
+            }
+            .onChange(of: model.isSwitchingSession) { wasRestoring, isRestoring in
+                guard wasRestoring, !isRestoring, !isConversationEmpty else { return }
+                lastAutoScrolledTextLength = model.messages.last?.textContent?.count ?? 0
+                scrollToConversationEnd(proxy: proxy, animated: false)
             }
             .onChange(of: model.selectedTurnID) { _, turnID in
                 // Only scroll when pinning a turn. Clearing the pin (nil) happens
@@ -186,7 +195,8 @@ struct TranscriptLaneView: View {
                 // alone misses Jump-to-live / re-selecting the live phase, which
                 // clears the pin to nil without changing which phase is expanded.
                 selectedCodePreview = nil
-                guard let phaseID,
+                guard !model.isSwitchingSession,
+                      let phaseID,
                       let anchor = model.anchorMessageID(forPhaseID: phaseID) else { return }
                 autoScroll.beginProgrammaticScroll()
                 withAnimation(Theme.motion.gentle) {
@@ -204,6 +214,14 @@ struct TranscriptLaneView: View {
             return Array(model.messages.indices)
         }
         return model.messageIndices(forPhaseID: phaseID)
+    }
+
+    private var transcriptRows: [TranscriptRow] {
+        transcriptMessageIndices.compactMap { index in
+            let message = model.messages[index]
+            guard !isToolCall(message) else { return nil }
+            return TranscriptRow(index: index, message: message)
+        }
     }
 
     private var shouldFollowLivePhase: Bool {
@@ -466,6 +484,13 @@ private enum ConversationScrollTarget: Hashable {
 
 private enum TranscriptPerformance {
     static let streamingScrollCharacterStride = 240
+}
+
+private struct TranscriptRow: Identifiable {
+    let index: Int
+    let message: EngineViewModel.Message
+
+    var id: String { message.id }
 }
 
 /// Thin top-edge fill that advances with the active file session's phase

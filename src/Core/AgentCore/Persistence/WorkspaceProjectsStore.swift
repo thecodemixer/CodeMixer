@@ -108,6 +108,7 @@ public actor WorkspaceProjectsStore {
         /// The list may be empty, but the config (and its session-store id)
         /// must exist before the folder is created.
         case missingWebPagesConfiguration(name: String)
+        case invalidCustomAgentExecutable(detail: String)
 
         public var errorDescription: String? {
             switch self {
@@ -121,6 +122,8 @@ public actor WorkspaceProjectsStore {
                 "Project at \(path) could not be decoded: \(detail)."
             case .missingWebPagesConfiguration(let name):
                 "Web pages project \(name) needs a page configuration."
+            case .invalidCustomAgentExecutable(let detail):
+                detail
             }
         }
     }

@@ -18,26 +18,16 @@ extension EngineViewModel {
         if rejectIfModelCatalogUnavailable(forProjectPath: projectPath) { return }
         applyAdapterCapabilities(forProjectPath: projectPath)
         clearNonConversationSurfaces()
-        let sameProject = workspace.map {
-            URL(fileURLWithPath: $0.path).standardizedFileURL.path
-        } == URL(fileURLWithPath: projectPath).standardizedFileURL.path
-
-        if sameProject {
-            selectDashboardOverview(projectPath: projectPath)
-            return
-        }
-
-        bindActiveProject(path: projectPath)
-        clearConversationState()
-        sessionID = nil
-        detailPane = .dashboard
-        restoreDashboardURLIfNeeded(projectPath: projectPath)
-        send(.openProject(path: projectPath, resumeSessionID: nil))
+        selectDashboardOverview(projectPath: projectPath)
     }
 
     /// Overview is a dashboard surface, not a resumable session.
     func selectDashboardOverview(projectPath: String) {
-        let wasShowingOverview = showsOverviewDashboard
+        let targetPath = URL(fileURLWithPath: projectPath).standardizedFileURL.path
+        let previousPath = workspace?.standardizedFileURL.path
+        let alreadyOnOverview = showsOverviewDashboard
+            && previousPath == targetPath
+        let overviewSessionID = overviewSessionID(forProjectPath: targetPath)
         bindActiveProject(path: projectPath)
         sessionID = nil
         clearConversationState()
@@ -47,13 +37,27 @@ extension EngineViewModel {
         activity = .idle
         clearNonConversationSurfaces()
         detailPane = .dashboard
-        restoreDashboardURLIfNeeded(projectPath: projectPath)
-        // WKWebView is torn down while a file chat is selected; bump so the
-        // representable reloads instead of painting a dead process page.
-        // Skip when overview is already visible — remounting only flashes white.
-        if !wasShowingOverview {
-            dashboardLoadGeneration += 1
+        guard !alreadyOnOverview else { return }
+        if previousPath != targetPath {
+            dashboardURL = nil
+            dashboardTitle = nil
         }
+        restoreDashboardURLIfNeeded(projectPath: projectPath)
+        guard let overviewSessionID else {
+            loadSessions(for: targetPath)
+            return
+        }
+        send(.openProject(path: targetPath, resumeSessionID: overviewSessionID))
+    }
+
+    func overviewSessionID(forProjectPath projectPath: String?) -> String? {
+        guard let projectPath else { return nil }
+        let normalized = URL(fileURLWithPath: projectPath).standardizedFileURL.path
+        let sessions = sessionsByProject[normalized]
+            ?? sessionsByProject.first(where: {
+                URL(fileURLWithPath: $0.key).standardizedFileURL.path == normalized
+            })?.value
+        return sessions?.first(where: \.isOverview)?.id
     }
     /// Whether the project is a user-configured Custom ACP agent (not Cursor/Claude/Codex).
     public func isCustomACPProject(_ project: WorkspaceProjectsStore.ProjectRef) -> Bool {

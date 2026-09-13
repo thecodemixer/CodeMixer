@@ -215,7 +215,7 @@ struct ACPInputEncodingTests {
             agentID: "x",
             surfaceID: "review",
             sourceComponentID: "btn",
-            eventName: "migrationReviewDecision",
+            eventName: "reviewDecision",
             context: ["optionId": .string("accept_a"), "nonce": .string("n1")],
             timestamp: Date(timeIntervalSince1970: 1)
         )
@@ -223,7 +223,7 @@ struct ACPInputEncodingTests {
         #expect(text.contains("\"method\":\"session/prompt\""))
         #expect(text.contains(A2UISchemaProfile.embeddedResourceMIMEType))
         #expect(text.contains("clientAction"))
-        #expect(text.contains("migrationReviewDecision"))
+        #expect(text.contains("reviewDecision"))
         #expect(text.contains("a2ui://client-action/review/btn"))
     }
 
@@ -266,7 +266,7 @@ struct ACPInputEncodingTests {
             agentID: "x",
             surfaceID: "review",
             sourceComponentID: "btn",
-            eventName: "migrationReviewDecision",
+            eventName: "reviewDecision",
             context: [:],
             timestamp: Date(timeIntervalSince1970: 1)
         )

@@ -105,7 +105,7 @@ struct SessionExporterTests {
         let surface = try #require(A2UISurfaceReducer.apply(batch, to: [:], at: Date()).surfaces["review"])
 
         let msgs: [EngineViewModel.Message] = [
-            .user(bubbleID: UUID(), text: "migrate"),
+            .user(bubbleID: UUID(), text: "implement"),
             .a2uiSurface(surfaceID: "review"),
         ]
         let md = try #require(String(

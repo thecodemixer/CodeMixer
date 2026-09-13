@@ -326,7 +326,7 @@ Same pattern, different cardinality.
 - Wire types live in `Core/AgentProtocol/AgentEventWire.swift`.
 - Converter lives in `Core/AgentCore/Events/WireCodec.swift`.
 - Parity tests are in `tests/Remote/RemoteParityTests/` (`WireCodecParityTests`, `CommandDispatchParityTests`).
-- Wire version declared in `Core/AgentProtocol/WireVersion.swift`; frames in `WireFrames.swift`; current protocol version is `WireVersion.v5`.
+- Wire version declared in `Core/AgentProtocol/WireVersion.swift`; frames in `WireFrames.swift`; current protocol version is `WireVersion.v6`.
 
 See [docs/architecture.md §§8, 30](../../architecture.md) for the Codemixer narrative on event-sourcing and protocol evolution.
 

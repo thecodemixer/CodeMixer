@@ -91,7 +91,7 @@ struct WorkLaneView: View {
     @ViewBuilder
     private func toolsSection(_ toolCalls: [EngineViewModel.ToolCallEntry]) -> some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: Theme.spacing.s8) {
+            LazyVStack(alignment: .leading, spacing: Theme.spacing.s8) {
                 Text(toolsHeaderTitle)
                     .font(Theme.typography.label)
                     .foregroundStyle(Theme.text.secondary)

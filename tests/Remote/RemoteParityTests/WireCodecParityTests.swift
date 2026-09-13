@@ -148,8 +148,8 @@ struct WireCodecParityTests {
         let at = Date(timeIntervalSince1970: 1_700_000_000)
         let prompt = PermissionPrompt(
             id: id,
-            toolName: "Migrate",
-            summary: "Apply migration",
+            toolName: "Implement",
+            summary: "Apply change",
             argumentsSummary: "{}",
             requestedAt: at,
             options: [PermissionOption(optionId: "apply", label: "Apply")]
@@ -230,10 +230,16 @@ struct WireCodecParityTests {
             )),
             .agentDashboard(
                 url: URL(string: "http://127.0.0.1:8423/dashboard")!,
-                title: "Migration Dashboard"
+                title: "Agent Dashboard"
             ),
             .sessionAttentionChanged(sessionID: "bg-1", title: "Background", needsAttention: true),
             .sessionHistoryRestored(sessionID: "restored-1"),
+            .sessionHistoryReplayChunk(
+                sessionID: "restored-1",
+                index: 0,
+                total: 1,
+                events: [.userTurn(id: AdapterTurnID(rawValue: "replayed-user"), text: "Replay")]
+            ),
             .sessionPromptReady(sessionID: "ready-1"),
             .sessionsListed(
                 projectPath: cwd,
@@ -258,7 +264,7 @@ struct WireCodecParityTests {
             .a2uiBatch(A2UIServerBatch(
                 agentID: "custom-acp-1",
                 transcriptKey: .init(projectRootPath: cwd.path, namespace: "custom-acp-1", sessionID: "s1"),
-                resourceURI: "a2ui://migration/plan/example",
+                resourceURI: "a2ui://surface/plan/example",
                 items: [
                     .init(index: 0,
                          message: .createSurface(surfaceID: "plan", catalogID: A2UISchemaProfile.testScopedCatalogID,
@@ -310,6 +316,7 @@ extension AgentEvent {
         case .agentDashboard:           "agentDashboard"
         case .sessionAttentionChanged:  "sessionAttentionChanged"
         case .sessionHistoryRestored:   "sessionHistoryRestored"
+        case .sessionHistoryReplayChunk: "sessionHistoryReplayChunk"
         case .sessionPromptReady:       "sessionPromptReady"
         case .sessionsListed:           "sessionsListed"
         case .historyImportProgress:    "historyImportProgress"
@@ -397,6 +404,11 @@ extension AgentEvent {
         case (.sessionHistoryRestored(let s1), .sessionHistoryRestored(let s2)),
              (.sessionPromptReady(let s1), .sessionPromptReady(let s2)):
             return s1 == s2
+        case (.sessionHistoryReplayChunk(let s1, let i1, let t1, let e1),
+              .sessionHistoryReplayChunk(let s2, let i2, let t2, let e2)):
+            return s1 == s2 && i1 == i2 && t1 == t2
+                && e1.count == e2.count
+                && zip(e1, e2).allSatisfy { $0.semanticallyEquals($1) }
         case (.sessionsListed(let p1, let s1), .sessionsListed(let p2, let s2)):
             return p1.standardizedFileURL.path == p2.standardizedFileURL.path
                 && s1.count == s2.count

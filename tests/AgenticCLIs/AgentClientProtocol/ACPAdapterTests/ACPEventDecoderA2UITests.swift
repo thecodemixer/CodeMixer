@@ -33,7 +33,7 @@ struct ACPEventDecoderA2UITests {
                     "content": .object([
                         "type": .string("resource"),
                         "resource": .object([
-                            "uri": .string("a2ui://migration/review/x"),
+                            "uri": .string("a2ui://surface/review/x"),
                             "mimeType": .string(A2UISchemaProfile.embeddedResourceMIMEType),
                             "text": .string(text),
                         ]),
@@ -46,7 +46,7 @@ struct ACPEventDecoderA2UITests {
             Issue.record("expected a2uiBatch, got \(batch.events)")
             return
         }
-        #expect(a2ui.resourceURI == "a2ui://migration/review/x")
+        #expect(a2ui.resourceURI == "a2ui://surface/review/x")
         #expect(a2ui.agentID == "custom-acp")
         #expect(a2ui.items.count == 1)
         #expect(a2ui.items[0].message != nil)

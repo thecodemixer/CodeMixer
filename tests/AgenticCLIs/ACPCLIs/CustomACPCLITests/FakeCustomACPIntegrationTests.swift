@@ -68,8 +68,8 @@ struct FakeCustomACPIntegrationTests {
         #expect(cached != nil)
         #expect(ObjectIdentifier(adapter) == ObjectIdentifier(cached!))
         let modes = adapter.availableAgentModes()
-        #expect(Set(modes.map(\.id)) == Set(["migrate", "document", "agent"]))
-        #expect(modes.first?.id == "migrate")
+        #expect(Set(modes.map(\.id)) == Set(["implement", "document", "agent"]))
+        #expect(modes.first?.id == "implement")
         #expect(modes.contains { $0.id == "document" && $0.label == "Document" })
 
         try await engine.send(.runSlashCommand(target: .builtin(name: "/document"), args: []))
@@ -78,11 +78,11 @@ struct FakeCustomACPIntegrationTests {
         }
         #expect(sawDocument)
 
-        try await engine.send(.runSlashCommand(target: .builtin(name: "/migrate"), args: []))
-        let sawMigrate = await pollUntil(timeout: .seconds(5)) {
-            await sink.hasStatusPhrase(containing: "migrate")
+        try await engine.send(.runSlashCommand(target: .builtin(name: "/implement"), args: []))
+        let sawImplement = await pollUntil(timeout: .seconds(5)) {
+            await sink.hasStatusPhrase(containing: "implement")
         }
-        #expect(sawMigrate)
+        #expect(sawImplement)
 
         try await engine.send(.sendPrompt(text: "hello custom", attachments: []))
         let sawText = await pollUntil(timeout: .seconds(8)) {

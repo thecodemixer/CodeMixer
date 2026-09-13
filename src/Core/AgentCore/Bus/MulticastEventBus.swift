@@ -130,16 +130,28 @@ public actor MulticastEventBus {
     /// latest checkpoint without re-reading the history.
     @discardableResult
     public func publish(_ event: AgentEvent) -> UUID {
-        let entryID = random.uuid()
-        let entry = HistoryEntry(id: entryID, event: event)
-        history.append(entry)
+        publishTransaction([event])[0]
+    }
+
+    /// Publish an ordered group without allowing another actor message to
+    /// interleave between its entries.
+    ///
+    /// The transaction is appended to history before delivery, so reconnecting
+    /// and live subscribers observe the same contiguous order.
+    @discardableResult
+    public func publishTransaction(_ events: [AgentEvent]) -> [UUID] {
+        guard !events.isEmpty else { return [] }
+        let entries = events.map { HistoryEntry(id: random.uuid(), event: $0) }
+        history.append(contentsOf: entries)
         if history.count > historyLimit {
             history.removeFirst(history.count - historyLimit)
         }
-        for c in continuations.values {
-            c.yield(entry)
+        for continuation in continuations.values {
+            for entry in entries {
+                continuation.yield(entry)
+            }
         }
-        return entryID
+        return entries.map(\.id)
     }
 
     /// Tear down: finish every subscriber stream and clear history.

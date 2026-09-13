@@ -447,6 +447,12 @@ private actor FakeACPEventSink {
     func latestUserTurnID() -> AdapterTurnID? {
         for event in events.reversed() {
             if case .userTurn(let id, _) = event { return id }
+            // History restore publishes nested turns inside replay chunks.
+            if case .sessionHistoryReplayChunk(_, _, _, let nested) = event {
+                for inner in nested.reversed() {
+                    if case .userTurn(let id, _) = inner { return id }
+                }
+            }
         }
         return nil
     }

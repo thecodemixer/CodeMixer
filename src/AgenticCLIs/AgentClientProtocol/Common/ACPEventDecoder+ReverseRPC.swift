@@ -71,10 +71,9 @@ extension ACPEventDecoder {
         let meta = params["_meta"]?.objectValue
         await updateSessionMetadata(.registered(sessionID: sessionID,
                                                 title: title))
-        if let isOverview = meta?["codemixer.dev/overviewSession"]?.boolValue
-            ?? meta?["overviewSession"]?.boolValue {
+        if let isOverview = meta?[CodemixerACPKeys.overviewSession]?.boolValue {
             if isOverview {
-                let overviewURL = meta?["codemixer.dev/dashboardUrl"]?.stringValue
+                let overviewURL = meta?[CodemixerACPKeys.dashboardUrl]?.stringValue
                     .flatMap(URL.init(string:))
                 await updateSessionMetadata(.markAsOverview(sessionID: sessionID,
                                                             url: overviewURL))

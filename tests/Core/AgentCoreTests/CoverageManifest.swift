@@ -62,6 +62,7 @@ private func _promptWriteSettleDelay(_ adapter: some AgentAdapter) -> Duration {
 }
 private let _derivedInternalEntryID = InternalEntryID.derive(fromAdapterTurnID: AdapterTurnID(rawValue: "turn-1"))
 private let _modelCatalogProbeTimeout = ModelCatalogTiming.probeTimeout
+private let _sessionCatalogRepublishDebounce = SessionCatalogTiming.mutationRepublishDebounce
 private let _bonjourType = RemoteDefaults.bonjourServiceType
 private let _bonjourName = RemoteDefaults.bonjourServiceName
 private let _bonjourVer = RemoteDefaults.bonjourTXTVersion
@@ -257,9 +258,16 @@ private let _a2uiSupportedVersions = A2UISchemaProfile.supportedVersions
 private let _a2uiMIME = A2UISchemaProfile.embeddedResourceMIMEType
 private let _a2uiBasicCatalogID = A2UISchemaProfile.basicCatalogID
 private let _a2uiTestCatalogID = A2UISchemaProfile.testScopedCatalogID
-private let _a2uiCapMetaKey = A2UISchemaProfile.clientCapabilitiesMetaKey
-private let _a2uiCapMetaKeyAlias = A2UISchemaProfile.clientCapabilitiesMetaKeyAlias
 private let _a2uiClientDataModelMetaKey = A2UISchemaProfile.clientDataModelMetaKey
+private let _acpKeyPrefix = CodemixerACPKeys.reverseDNS
+private let _acpKeys = [
+    CodemixerACPKeys.a2ui,
+    CodemixerACPKeys.sessionNew,
+    CodemixerACPKeys.phaseUpdate,
+    CodemixerACPKeys.overviewSession,
+    CodemixerACPKeys.dashboardUrl,
+    CodemixerACPKeys.dashboardTitle,
+]
 private let _a2uiUpstreamCommit = A2UISchemaProfile.upstreamCommit
 private let _a2uiUpstreamRepo = A2UISchemaProfile.upstreamRepository
 private let _a2uiUpstreamLicense = A2UISchemaProfile.upstreamLicenseNote
@@ -702,6 +710,7 @@ private func _a2uiPropsMembers() {
 // ClientError
 // ClientFrame
 // CodeBlock
+// CodemixerACPKeys
 // CodemixerResources
 // CodexAdapter
 // CodexAgentError
@@ -896,6 +905,7 @@ private func _a2uiPropsMembers() {
 // ServerFrame
 // ServerInfo
 // SessionActivation
+// SessionCatalogTiming
 // SessionExporter
 // SessionMetadataUpdate
 // SessionPhase
@@ -988,6 +998,7 @@ private func _a2uiPropsMembers() {
 // WorkspacePickerView
 // WorkspaceProjectsStore
 // WorkspaceScene
+// a2ui
 // a2uiAction
 // a2uiClientError
 // abortOpen
@@ -1133,8 +1144,6 @@ private func _a2uiPropsMembers() {
 // clearData
 // clearPendingExport
 // clearWebSessionData
-// clientCapabilitiesMetaKey
-// clientCapabilitiesMetaKeyAlias
 // clientCount
 // clientDataModelMetaKey
 // clock
@@ -1182,6 +1191,8 @@ private func _a2uiPropsMembers() {
 // currentState
 // daemon
 // danger
+// dashboardTitle
+// dashboardUrl
 // data
 // debugTerminalMinHeight
 // debugTerminalMinWidth
@@ -1538,6 +1549,7 @@ private func _a2uiPropsMembers() {
 // move
 // movePinnedFolderPath
 // moveWebPage
+// mutationRepublishDebounce
 // muted
 // name
 // named
@@ -1574,6 +1586,7 @@ private func _a2uiPropsMembers() {
 // onNext
 // onOpen
 // onPrev
+// onSetCustomExecutable
 // onSetWorkingDirectory
 // onTap
 // onTranscript
@@ -1603,6 +1616,7 @@ private func _a2uiPropsMembers() {
 // outputBytes
 // output_tokens
 // overviewDashboard
+// overviewSession
 // overviewURL
 // owner
 // pages
@@ -1624,7 +1638,9 @@ private func _a2uiPropsMembers() {
 // permissionMode
 // permissionPrompts
 // permissionResponse
+// persistParkedSessionWork
 // phase
+// phaseUpdate
 // phrase
 // pin
 // pinFolderPath
@@ -1686,6 +1702,7 @@ private func _a2uiPropsMembers() {
 // ptySpawnEnvironment
 // ptyTUIFallback
 // publish
+// publishTransaction
 // pulse
 // pulseBase
 // pulseRange
@@ -1782,6 +1799,7 @@ private func _a2uiPropsMembers() {
 // retiredGenerations
 // returnType
 // revealInFinder
+// reverseDNS
 // review
 // reviewOff
 // revoke
@@ -1860,11 +1878,13 @@ private func _a2uiPropsMembers() {
 // setAgentLaunchPreference
 // setColumnResizeCursor
 // setConnectedRemoteClients
+// setCustomAgentExecutable
 // setLANEnabled
 // setMode
 // setModel
 // setPermissionMode
 // setPointingHandCursor
+// setProjectCustomAgentExecutable
 // setProjectType
 // setProjectWorkingDirectory
 // setWorkingDirectory
@@ -2136,5 +2156,5 @@ private func _a2uiPropsMembers() {
 // writeBytes
 // zsh
 // MANIFEST_SYMBOLS_END
-// Total: 1606 unique public symbols
+// Total: 1616 unique public symbols
 

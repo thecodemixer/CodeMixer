@@ -99,6 +99,8 @@ public actor AgentEngine: AgentEngineCommandPort {
     var sessionActivationState: SessionActivationState = .idle
     var pendingTranscriptEvents: [AgentEvent] = []
     var attentionSessionIDsByProject: [String: Set<String>] = [:]
+    var catalogPublishTasks: [String: Task<Void, Never>] = [:]
+    var catalogPublishGenerations: [String: Int] = [:]
     var transcript: [SnapshotService.SnapshotMessage] = []
     var changedFiles: [ChangedFile] = []
     var permissionTimeouts: [PermissionPromptID: Task<Void, Never>] = [:]
@@ -480,7 +482,9 @@ public actor AgentEngine: AgentEngineCommandPort {
         // Parked runtimes keep recording durable events, while only attention
         // and permission state reach the foreground bus.
         if !isActive {
-            if let runtime = runtimes[key], let sessionID = runtime.boundSessionID {
+            if let runtime = runtimes[key],
+               let sessionID = transcriptOwnerSessionID(for: event)
+               ?? runtime.boundSessionID {
                 await recordBackgroundSessionEvents(
                     .init(sessionID: sessionID, events: [event]),
                     adapter: runtime.adapter,
@@ -568,7 +572,7 @@ public actor AgentEngine: AgentEngineCommandPort {
             pendingPermissions[prompt.id] = pending
             startPermissionTimeout(for: prompt.id)
         case .permissionAlreadyResolved(let id, _):
-            // Adapter-side resolve (e.g. migration Restart archived the session).
+            // Adapter-side resolve (e.g. dashboard Restart archived the session).
             // Cancel the auto-deny timer without delivering a second response.
             permissionTimeouts.removeValue(forKey: id)?.cancel()
             pendingPermissions.removeValue(forKey: id)
@@ -610,6 +614,12 @@ public actor AgentEngine: AgentEngineCommandPort {
                 await bus.publish(.statusPhraseChanged(source: winnerSource, phrase: winnerPhrase))
             }
             return
+        case .agentDashboard(let url, let title):
+            if var runtime = runtimes[key] {
+                runtime.advertisedDashboardURL = url
+                runtime.advertisedDashboardTitle = title
+                runtimes[key] = runtime
+            }
         default:
             break
         }
@@ -620,6 +630,17 @@ public actor AgentEngine: AgentEngineCommandPort {
         }
         if publishIdleAfterEvent {
             await bus.publish(.activityStateChanged(.idle))
+        }
+    }
+
+    private func transcriptOwnerSessionID(for event: AgentEvent) -> String? {
+        switch event {
+        case .a2uiBatch(let batch):
+            return batch.transcriptKey.sessionID
+        case .sessionPhaseChanged(let sessionID, _):
+            return sessionID
+        default:
+            return nil
         }
     }
 

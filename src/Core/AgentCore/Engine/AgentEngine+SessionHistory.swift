@@ -3,6 +3,8 @@
 import Foundation
 
 extension AgentEngine {
+    static let historyReplayChunkSize = 64
+
     func activeTranscriptKey(sessionID: String? = nil) -> SessionTranscriptKey? {
         guard let workspace, let adapter else { return nil }
         let id = sessionID ?? currentSessionID
@@ -14,7 +16,13 @@ extension AgentEngine {
 
     func persistTranscriptEvent(_ event: AgentEvent) async {
         let key: SessionTranscriptKey?
-        if case .sessionPhaseChanged(let sessionID, _) = event {
+        if case .a2uiBatch(let batch) = event {
+            key = SessionTranscriptKey(
+                projectRoot: URL(fileURLWithPath: batch.transcriptKey.projectRootPath),
+                namespace: batch.transcriptKey.namespace,
+                sessionID: batch.transcriptKey.sessionID
+            )
+        } else if case .sessionPhaseChanged(let sessionID, _) = event {
             key = activeTranscriptKey(sessionID: sessionID)
         } else {
             key = activeTranscriptKey()
@@ -79,7 +87,7 @@ extension AgentEngine {
             try await transcriptRepository.record(batch.events,
                                                   for: key,
                                                   changedFileRoot: workingDirectory)
-            try await publishStoredSessions(in: key.projectRoot)
+            scheduleStoredSessionsPublish(in: key.projectRoot)
         } catch {
             await publishHistoryError(error, key: key, operation: "write")
         }
@@ -131,12 +139,47 @@ extension AgentEngine {
 
     func publishStoredSessions(in projectRoot: URL) async throws {
         let path = projectRoot.standardizedFileURL.path
+        catalogPublishTasks.removeValue(forKey: path)?.cancel()
+        catalogPublishGenerations[path, default: 0] += 1
+        try await publishStoredSessionsNow(in: projectRoot)
+    }
+
+    private func publishStoredSessionsNow(in projectRoot: URL) async throws {
+        let path = projectRoot.standardizedFileURL.path
         let sessions = try await transcriptRepository.sessions(
             inProject: projectRoot,
             attentionSessionIDs: attentionSessionIDsByProject[path] ?? []
         )
         await bus.publish(.sessionsListed(projectPath: projectRoot,
                                           sessions: sessions))
+    }
+
+    func scheduleStoredSessionsPublish(in projectRoot: URL) {
+        let root = projectRoot.standardizedFileURL
+        let path = root.path
+        catalogPublishTasks[path]?.cancel()
+        catalogPublishGenerations[path, default: 0] += 1
+        let generation = catalogPublishGenerations[path, default: 0]
+        catalogPublishTasks[path] = Task { [weak self, clock = seams.clock] in
+            do {
+                try await clock.sleep(for: SessionCatalogTiming.mutationRepublishDebounce)
+                try Task.checkCancellation()
+                try await self?.publishScheduledStoredSessions(
+                    in: root,
+                    generation: generation
+                )
+            } catch {
+                // Cancellation means a newer mutation replaced this debounce.
+            }
+        }
+    }
+
+    private func publishScheduledStoredSessions(in projectRoot: URL,
+                                                generation: Int) async throws {
+        let path = projectRoot.path
+        guard catalogPublishGenerations[path] == generation else { return }
+        catalogPublishTasks.removeValue(forKey: path)
+        try await publishStoredSessionsNow(in: projectRoot)
     }
 
     func noteSessionAttention(_ sessionID: String,
@@ -163,10 +206,24 @@ extension AgentEngine {
             // so the stale-edit guard has to adopt the journal's last user turn —
             // that is the id every replaying client now derives its entry id from.
             lastUserAdapterTurnID = restored.lastUserAdapterTurnID
-            for event in restored.replayEvents() {
-                await bus.publish(event)
-            }
-            await bus.publish(.sessionHistoryRestored(sessionID: key.sessionID))
+            let replay = restored.replayEvents()
+            let chunks = stride(from: 0, to: replay.count, by: Self.historyReplayChunkSize)
+                .enumerated()
+                .map { index, start in
+                    AgentEvent.sessionHistoryReplayChunk(
+                        sessionID: key.sessionID,
+                        index: index,
+                        total: (replay.count + Self.historyReplayChunkSize - 1)
+                            / Self.historyReplayChunkSize,
+                        events: Array(replay[start ..< min(
+                            start + Self.historyReplayChunkSize,
+                            replay.count
+                        )])
+                    )
+                }
+            await bus.publishTransaction(
+                chunks + [.sessionHistoryRestored(sessionID: key.sessionID)]
+            )
             sessionActivationState = .awaitingAdapter(key, historyPublished: true)
         } catch {
             await bus.publish(.sessionHistoryRestored(sessionID: key.sessionID))

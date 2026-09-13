@@ -66,10 +66,10 @@ public struct SlashCommand: Sendable, Hashable, Identifiable {
 /// tool. Always scoped to the file session that owns it — run/
 /// overall status is not modeled here; it stays in the ACP overview
 /// dashboard. `group` buckets the vendor's finer-grained status into the
-/// rail's ordered headers (Plan / Migrate / Review / Fix / Verify).
+/// rail's ordered headers (Plan / Implement / Review / Fix / Verify).
 public struct SessionPhase: Sendable, Codable, Hashable {
     public enum Group: String, Sendable, Codable, Hashable, CaseIterable {
-        case plan, migrate, review, fix, verify
+        case plan, implement, review, fix, verify
     }
 
     public let id: String

@@ -29,7 +29,7 @@ struct MarkdownBlockParsingTests {
     @Test("headings and bullets in a reasoning trace parse as structure, not prose")
     func headingsAndBullets() {
         let blocks = MarkdownBlock.parse("""
-        Context: # fixer migration template
+        Context: # fixer pipeline template
 
         ## Scope
 
@@ -47,7 +47,7 @@ struct MarkdownBlockParsingTests {
         #expect(items.map(\.text) == ["Preserve externally observable API behavior.",
                                       "Do not invent schema or authorization rules."])
         // A `#` that is not at the start of a line stays inside the paragraph.
-        #expect(blocks.contains { $0 == .paragraph("Context: # fixer migration template") })
+        #expect(blocks.contains { $0 == .paragraph("Context: # fixer pipeline template") })
     }
 
     @Test("nested items keep one depth per indent step, whether 2- or 4-space")

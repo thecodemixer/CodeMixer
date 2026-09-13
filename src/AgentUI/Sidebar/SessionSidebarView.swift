@@ -88,6 +88,12 @@ public struct SessionSidebarView: View {
                 onClose: { infoTarget = nil },
                 onSetWorkingDirectory: { url in
                     await model.setProjectWorkingDirectory(path: project.path, to: url)
+                },
+                onSetCustomExecutable: { executablePath in
+                    await model.setProjectCustomAgentExecutable(
+                        path: project.path,
+                        executablePath: executablePath
+                    )
                 }
             )
         }

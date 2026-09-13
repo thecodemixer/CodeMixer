@@ -74,6 +74,15 @@ struct WireFrameRoundTripTests {
                                       requestedAt: Date(timeIntervalSince1970: 1_700_000_000))
         let cases: [ServerFrame] = [
             .event(id: UUID(), event: .userTurn(id: AdapterTurnID(rawValue: "u1"), text: "hi")),
+            .event(
+                id: UUID(),
+                event: .sessionHistoryReplayChunk(
+                    sessionID: "history-1",
+                    index: 0,
+                    total: 1,
+                    events: [.userTurn(id: AdapterTurnID(rawValue: "history-u1"), text: "prior")]
+                )
+            ),
             .event(id: UUID(), event: .permissionRequest(prompt: prompt)),
             .event(id: UUID(), event: .bell),
             .commandSucceeded(for: UUID()),
@@ -156,7 +165,7 @@ struct WireFrameRoundTripTests {
         #expect(WireVersion.v3.rawValue == 3)
         #expect(WireVersion.v4.rawValue == 4)
         #expect(WireVersion.v5.rawValue == 5)
-        #expect(WireVersion.current == .v5)
+        #expect(WireVersion.current == .v6)
     }
 
     /// Round-trip via re-encoding: encode → decode → encode, compare bytes.

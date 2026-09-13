@@ -2,7 +2,7 @@ import Foundation
 
 /// Well-known ACP `modeId` values shared by Cursor and many Custom ACP agents.
 ///
-/// Agent-specific modes (for example `migrate`, `document`) stay dynamic on
+/// Agent-specific modes (for example `implement`, `document`) stay dynamic on
 /// ``ACPSessionMode``; only cross-agent defaults live here.
 public enum ACPStandardModeID: String, Sendable, CaseIterable, Hashable {
     case agent
