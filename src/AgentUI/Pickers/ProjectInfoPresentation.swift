@@ -18,7 +18,8 @@ struct ProjectInfoPresentation: Equatable, Sendable {
     let workingDirectoryPath: String?
     let categoryLabel: String
     let detailRows: [Row]
-    /// `nil` for folder projects — Advanced options are not shown there.
+    /// `nil` for folder / web-pages / custom ACP — Advanced launch options are
+    /// not shown there. Coding CLIs expose the New-Chat-only prefer-fresh flag.
     let preferFreshAgentProcess: Bool?
 
     static func make(from project: WorkspaceProjectsStore.ProjectRef) -> ProjectInfoPresentation {
@@ -58,7 +59,9 @@ struct ProjectInfoPresentation: Equatable, Sendable {
             workingDirectoryPath: projectType.isAgentBacked ? (workingDirectoryPath ?? path) : nil,
             categoryLabel: kind.category.label,
             detailRows: detailRows(for: projectType),
-            preferFreshAgentProcess: projectType.isAgentBacked ? preferFreshAgentProcess : nil
+            preferFreshAgentProcess: projectType.supportsPreferFreshAgentProcess
+                ? preferFreshAgentProcess
+                : nil
         )
     }
 

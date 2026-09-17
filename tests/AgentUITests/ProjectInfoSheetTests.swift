@@ -77,5 +77,6 @@ struct ProjectInfoSheetTests {
         let info = ProjectInfoPresentation.make(from: project)
         #expect(info.detailRows.map(\.label) == ["Arguments", "Transport"])
         #expect(info.detailRows.first?.value == "acp")
+        #expect(info.preferFreshAgentProcess == nil)
     }
 }

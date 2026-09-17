@@ -329,12 +329,14 @@ struct AgentRuntimePoolTests {
         await engine.shutdown(reason: .naturalExit)
     }
 
-    @Test("preferFresh replaces the project slot on every open")
-    func preferFreshRespawns() async throws {
+    @Test("preferFresh respawns on New Chat but reuses the live slot on session switch")
+    func preferFreshRespawnsOnlyOnNewChat() async throws {
         let project = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("pool-fresh-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
-        let factory = ScriptedTransportFactory([ScriptedTransport(), ScriptedTransport(), ScriptedTransport()])
+        let factory = ScriptedTransportFactory([
+            ScriptedTransport(), ScriptedTransport(), ScriptedTransport(), ScriptedTransport(),
+        ])
         let fs = InMemoryFileSystem()
         let env = FakeEnvironment(home: project)
         let seams = Seams.fake(environment: env, fileSystem: fs)
@@ -350,10 +352,15 @@ struct AgentRuntimePoolTests {
             preferFreshAgentProcess: true,
             in: root
         )
-        await AdapterRegistry.shared.register(id: .claudeCode) { RecordingMockAdapter() }
+        await AdapterRegistry.shared.register(id: .claudeCode) { ClaudePoolWarmAdapter() }
 
         try await engine.send(.openProject(path: project.path, resumeSessionID: "a"))
-        try await engine.send(.openProject(path: project.path, resumeSessionID: "a"))
+        #expect(factory.spawnCount == 1)
+        // Switching chats must keep the live process.
+        try await engine.send(.openProject(path: project.path, resumeSessionID: "b"))
+        #expect(factory.spawnCount == 1)
+        // New Chat may replace the slot when prefer-fresh is on.
+        try await engine.send(.openProject(path: project.path, resumeSessionID: nil))
         #expect(factory.spawnCount == 2)
 
         await engine.shutdown(reason: .naturalExit)

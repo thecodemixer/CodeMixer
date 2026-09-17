@@ -4,7 +4,8 @@ import Foundation
 public enum AgentInstanceIdentity: Hashable, Sendable, Codable {
     /// Default slot identity for this project and agent.
     case shared
-    /// Dedicated slot minted when Advanced → Launch new agent instance is on.
+    /// Dedicated slot minted when Advanced → Launch new agent instance is on
+    /// (coding-CLI New Chat only).
     case dedicated(UUID)
 }
 

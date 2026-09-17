@@ -63,6 +63,20 @@ public enum ProjectType: Sendable, Codable, Hashable {
         }
     }
 
+    /// Whether Advanced → Launch new agent instance (`preferFreshAgentProcess`)
+    /// applies to this project type.
+    ///
+    /// Coding CLIs (Claude / Codex / Cursor / mixed) own user-driven chat
+    /// sessions, so New Chat may optionally cold-spawn a fresh process.
+    /// Custom ACP servers own their session lifecycle; Codemixer must keep one
+    /// shared process so agent-created sessions survive sidebar switches.
+    public var supportsPreferFreshAgentProcess: Bool {
+        switch self {
+        case .claudeCode, .codex, .cursorCLI, .mixed: return true
+        case .custom, .folder, .webPages: return false
+        }
+    }
+
     /// True for projects that open a folder browser instead of a chat session.
     public var isFolderBacked: Bool {
         if case .folder = self { return true }

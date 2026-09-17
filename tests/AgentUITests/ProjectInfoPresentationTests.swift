@@ -93,15 +93,15 @@ struct ProjectInfoPresentationTests {
             displayName: "MongoMixer",
             path: "/workspace/MongoMixer",
             projectType: .custom(ref),
-            preferFreshAgentProcess: false
+            preferFreshAgentProcess: true
         )
         #expect(info.categoryLabel == "Custom")
+        // Executable path is edited elsewhere; Advanced prefer-fresh does not apply.
         #expect(info.detailRows == [
-            .init(label: "Executable path", value: "/opt/custom-acp"),
             .init(label: "Arguments", value: "acp --cwd \"/My Projects/api\""),
             .init(label: "Transport", value: "Agent Client Protocol"),
         ])
-        #expect(info.preferFreshAgentProcess == false)
+        #expect(info.preferFreshAgentProcess == nil)
     }
 
     @Test("Empty custom arguments render as an em dash")

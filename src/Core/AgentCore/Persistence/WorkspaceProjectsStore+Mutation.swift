@@ -50,14 +50,18 @@ extension WorkspaceProjectsStore {
             throw StoreError.projectFolderExists(path: folder.path)
         }
 
+        let launchPref = Self.normalizedPreferFresh(
+            preferFreshAgentProcess,
+            for: projectType
+        )
         try fileSystem.createDirectory(at: folder, withIntermediates: true)
-        let identity: AgentInstanceIdentity = preferFreshAgentProcess
+        let identity: AgentInstanceIdentity = launchPref
             ? .dedicated(UUID())
             : .shared
         let ref = ProjectRef(path: folder.path,
                              displayName: trimmed,
                              projectType: projectType,
-                             preferFreshAgentProcess: preferFreshAgentProcess,
+                             preferFreshAgentProcess: launchPref,
                              agentInstanceIdentity: identity,
                              workingDirectoryPath: cwdPath)
         try await register(ref, in: workspace, rootProjectType: projectType)
@@ -90,7 +94,11 @@ extension WorkspaceProjectsStore {
             return ProjectLocalStateStore.load(from: projectURL, fileSystem: fileSystem)?.displayName
                 ?? projectURL.lastPathComponent
         }()
-        let identity: AgentInstanceIdentity = preferFreshAgentProcess
+        let launchPref = Self.normalizedPreferFresh(
+            preferFreshAgentProcess,
+            for: projectType
+        )
+        let identity: AgentInstanceIdentity = launchPref
             ? .dedicated(UUID())
             : .shared
         // Preserve on-disk session store when re-adding a web-pages project.
@@ -122,7 +130,7 @@ extension WorkspaceProjectsStore {
             let updated = ProjectRef(path: existing.path,
                                      displayName: resolvedName,
                                      projectType: projectType,
-                                     preferFreshAgentProcess: preferFreshAgentProcess,
+                                     preferFreshAgentProcess: launchPref,
                                      agentInstanceIdentity: identity,
                                      workingDirectoryPath: cwdPath)
             try await register(updated, in: workspace, rootProjectType: projectType)
@@ -141,7 +149,7 @@ extension WorkspaceProjectsStore {
         let ref = ProjectRef(path: projectURL.path,
                              displayName: resolvedName,
                              projectType: projectType,
-                             preferFreshAgentProcess: preferFreshAgentProcess,
+                             preferFreshAgentProcess: launchPref,
                              agentInstanceIdentity: identity,
                              workingDirectoryPath: cwdPath)
         try await register(ref, in: workspace, rootProjectType: projectType)
@@ -203,24 +211,28 @@ extension WorkspaceProjectsStore {
         guard let idx = list.firstIndex(where: { $0.path == path }) else {
             throw StoreError.undecodableProject(path: path, detail: "project not in workspace index")
         }
+        let previous = list[idx]
+        let launchPref = Self.normalizedPreferFresh(
+            preferFreshAgentProcess,
+            for: previous.projectType
+        )
         let identity: AgentInstanceIdentity
-        if preferFreshAgentProcess {
+        if launchPref {
             if case .dedicated = agentInstanceIdentity {
                 identity = agentInstanceIdentity
-            } else if case .dedicated = list[idx].agentInstanceIdentity {
-                identity = list[idx].agentInstanceIdentity
+            } else if case .dedicated = previous.agentInstanceIdentity {
+                identity = previous.agentInstanceIdentity
             } else {
                 identity = .dedicated(UUID())
             }
         } else {
             identity = .shared
         }
-        let previous = list[idx]
         list[idx] = ProjectRef(
             path: previous.path,
             displayName: previous.displayName,
             projectType: previous.projectType,
-            preferFreshAgentProcess: preferFreshAgentProcess,
+            preferFreshAgentProcess: launchPref,
             agentInstanceIdentity: identity,
             workingDirectoryPath: previous.workingDirectoryPath
         )
@@ -426,6 +438,12 @@ extension WorkspaceProjectsStore {
         workspaces[key] = list
         try await persist()
         try await persistWorkspaceLocal(projects: list, for: workspace)
+    }
+
+    /// Prefer-fresh only applies to coding CLIs that host user-created chats.
+    private static func normalizedPreferFresh(_ preferFresh: Bool,
+                                              for projectType: ProjectType) -> Bool {
+        projectType.supportsPreferFreshAgentProcess && preferFresh
     }
 
     private static func isValidProjectName(_ name: String) -> Bool {

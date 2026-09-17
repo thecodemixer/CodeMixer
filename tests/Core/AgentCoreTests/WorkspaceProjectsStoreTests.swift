@@ -265,6 +265,34 @@ struct WorkspaceProjectsStoreTests {
         #expect(loaded?.agentInstanceIdentity == ref.agentInstanceIdentity)
     }
 
+    @Test("createProject ignores preferFreshAgentProcess for Custom ACP")
+    func customACPIgnoresPreferFresh() async throws {
+        let fs = InMemoryFileSystem()
+        let store = makeStore(fs: fs)
+        let ref = try await store.createProject(
+            name: "mixer",
+            projectType: .custom(CustomAgentRef(
+                id: "ZEROTRUST",
+                displayName: "Mixer",
+                transport: .agentClientProtocol,
+                executablePath: "/bin/code-conversion-acp",
+                arguments: ["acp"]
+            )),
+            preferFreshAgentProcess: true,
+            in: workspace
+        )
+        #expect(!ref.preferFreshAgentProcess)
+        #expect(ref.agentInstanceIdentity == .shared)
+        #expect(!ProjectType.custom(CustomAgentRef(
+            id: "x",
+            displayName: "x",
+            transport: .agentClientProtocol,
+            executablePath: "/bin/x",
+            arguments: []
+        )).supportsPreferFreshAgentProcess)
+        #expect(ProjectType.claudeCode.supportsPreferFreshAgentProcess)
+    }
+
     @Test("resolveProjectType prefers project-local state over the workspace index")
     func resolvePrefersLocalFile() async throws {
         let fs = InMemoryFileSystem()

@@ -295,10 +295,15 @@ extension AgentEngine {
     }
 
     /// Resolve pool key for a project open, applying prefer-fresh identity.
+    ///
+    /// Custom ACP always uses `.shared` — the flag does not apply there.
+    /// Coding CLIs with prefer-fresh mint/reuse a dedicated identity so New
+    /// Chat can replace that slot without colliding with a shared peer.
     func runtimeKey(for project: WorkspaceProjectsStore.ProjectRef,
                     agentID: AgentID) -> AgentRuntimeKey {
         let instance: AgentInstanceIdentity
-        if project.preferFreshAgentProcess {
+        if project.projectType.supportsPreferFreshAgentProcess,
+           project.preferFreshAgentProcess {
             if case .dedicated(let id) = project.agentInstanceIdentity {
                 instance = .dedicated(id)
             } else {

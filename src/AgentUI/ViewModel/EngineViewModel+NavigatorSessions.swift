@@ -148,10 +148,11 @@ extension EngineViewModel {
 
     /// Start a fresh chat in `projectPath`.
     ///
-    /// Cold-starts only when this project has no live pooled agent. When the
-    /// agent is already pooled, the engine keeps the process and runs
-    /// `.newSession` in-process (Cursor `session/new`, Codex thread start,
-    /// Claude `/clear`).
+    /// Cold-starts only when this project has no live pooled agent, or when a
+    /// coding CLI has Advanced → Launch new agent instance enabled. When the
+    /// agent is already pooled and prefer-fresh is off, the engine keeps the
+    /// process and runs `.newSession` in-process (Cursor `session/new`, Codex
+    /// thread start, Claude `/clear`). Custom ACP always reuses the live process.
     public func newChat(in projectPath: String) {
         guard !projectPath.isEmpty else { return }
         if rejectIfModelCatalogUnavailable(forProjectPath: projectPath) { return }

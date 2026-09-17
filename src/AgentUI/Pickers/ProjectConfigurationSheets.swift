@@ -627,7 +627,7 @@ public struct NewProjectSheet: View {
                 }
             }
 
-            if category != .folder, category != .webPages {
+            if category != .folder, category != .webPages, category != .custom {
                 ProjectAdvancedOptions(preferFreshAgentProcess: $preferFreshAgentProcess)
                     .disabled(isCreating)
             }
@@ -665,7 +665,7 @@ public struct NewProjectSheet: View {
                 let createdError = await onCreate(ProjectDraft(
                     name: trimmedName,
                     projectType: projectType,
-                    preferFreshAgentProcess: preferFreshAgentProcess,
+                    preferFreshAgentProcess: category == .custom ? false : preferFreshAgentProcess,
                     existingFolderURL: folderURL,
                     secondaryFolderURL: folderKind.usesDualTreeNavigation ? secondaryFolderURL : nil,
                     workingDirectoryURL: (category == .folder || category == .webPages)
@@ -830,7 +830,7 @@ public struct ConfigureProjectSheet: View {
                 }
             }
 
-            if category != .folder, category != .webPages {
+            if category != .folder, category != .webPages, category != .custom {
                 ProjectAdvancedOptions(preferFreshAgentProcess: $preferFreshAgentProcess)
             }
 
@@ -862,7 +862,7 @@ public struct ConfigureProjectSheet: View {
                 onConfirm(ProjectDraft(
                     name: projectURL.lastPathComponent,
                     projectType: projectType,
-                    preferFreshAgentProcess: preferFreshAgentProcess,
+                    preferFreshAgentProcess: category == .custom ? false : preferFreshAgentProcess,
                     existingFolderURL: projectURL,
                     secondaryFolderURL: folderKind.usesDualTreeNavigation ? secondaryFolderURL : nil,
                     workingDirectoryURL: (category == .folder || category == .webPages)
@@ -881,6 +881,9 @@ public struct ConfigureProjectSheet: View {
 }
 
 /// Collapsible Advanced options shared by New / Configure Project sheets.
+///
+/// Shown only for coding CLIs (Claude / Codex / Cursor / mixed). Custom ACP
+/// owns its session lifecycle, so prefer-fresh does not apply there.
 struct ProjectAdvancedOptions: View {
     @Binding var preferFreshAgentProcess: Bool
 
@@ -889,7 +892,7 @@ struct ProjectAdvancedOptions: View {
             VStack(alignment: .leading, spacing: Theme.spacing.s8) {
                 Toggle("Launch new agent instance", isOn: $preferFreshAgentProcess)
                     .accessibilityLabel("Launch new agent instance")
-                Text("When off, Codemixer keeps one agent CLI running per project and reuses it when you return — including New Chat and session switches in that project. When on, opening this project always starts a fresh CLI.")
+                Text("When off, Codemixer keeps one agent CLI running per project and reuses it for New Chat and session switches. When on, New Chat starts a fresh CLI; switching between existing chats still reuses the live process.")
                     .font(Theme.typography.caption)
                     .foregroundStyle(Theme.text.secondary)
                     .fixedSize(horizontal: false, vertical: true)

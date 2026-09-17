@@ -356,8 +356,14 @@ extension AgentEngine {
         }
 
         var key = runtimeKey(for: project, agentID: nextAdapter.id)
-        if project.preferFreshAgentProcess {
-            // Always replace slots for this project+agent. Mint + persist a
+        // Prefer-fresh is coding-CLI + New Chat only. Custom ACP owns its
+        // sessions, so killing the process on open would orphan in-flight work.
+        // Session switches (`resumeSessionID != nil`) always reuse the live slot.
+        let preferFreshNewChat = project.projectType.supportsPreferFreshAgentProcess
+            && project.preferFreshAgentProcess
+            && resumeSessionID == nil
+        if preferFreshNewChat {
+            // Replace slots for this project+agent on New Chat. Mint + persist a
             // dedicated identity when the stored ref still says `.shared`.
             if case .dedicated = key.instance {
                 // Keep persisted dedicated id so reopen stays stable until toggled again.
@@ -378,7 +384,7 @@ extension AgentEngine {
             }
             try await start(adapter: nextAdapter,
                             workspace: projectURL,
-                            resumeSessionID: resumeSessionID,
+                            resumeSessionID: nil,
                             permissionMode: .default,
                             runtimeKey: key,
                             workingDirectory: agentWorkingDirectory)
